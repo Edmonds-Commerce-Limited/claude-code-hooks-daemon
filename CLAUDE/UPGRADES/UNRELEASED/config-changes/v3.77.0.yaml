@@ -1,4 +1,4 @@
-# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth) and Plan 00631 (team_seat).
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth), Plan 00631 (team_seat) and Plan 00636 (owner_wait_stop_guard).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -215,6 +215,73 @@ config_changes:
         team_seat:
           detection: auto
           resolve_ttl_seconds: 60
+    - key: handlers.stop.owner_wait_stop_guard
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00636). Refuses a coordinator seat's stop that waits on a
+        human until every open owner-facing thread the seat asked or owns got
+        a notifying bus post from it, with a real body, within window_minutes.
+        Applies only per team where the role probe says this seat is
+        coordinator; a worker, an unknown role or no team is untouched. A
+        re-entered stop is always allowed. Never terminal.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              enabled: true
+              priority: 3
+      migration_note: >-
+        Keep it at priority 3, before auto_continue_stop (the terminal Stop
+        handler) so it is not shadowed.
+    - key: handlers.stop.owner_wait_stop_guard.options.window_minutes
+      recommended: false
+      dormant: false
+      description: >-
+        window_minutes (30, integer 1 to 1440): a notifying post older than
+        this does not count. An invalid value falls back to 30 with a WARNING.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              options:
+                window_minutes: 30
+    - key: handlers.stop.owner_wait_stop_guard.options.on_unreadable_bus
+      recommended: false
+      dormant: false
+      description: >-
+        on_unreadable_bus (auto | refuse | allow, default auto): what a
+        waiting coordinator stop gets when the bus cannot confirm the
+        notifying posts. auto refuses once (saying why) where the adapter
+        reports the notify flag and thread relation readable, and otherwise
+        allows with an advisory naming the team and the unchecked thread
+        classes. On pingbus v1 the adapter cannot read the notify flag, so
+        auto allows with the advisory, which costs one extra continue turn
+        per waiting coordinator stop. refuse always refuses an unconfirmed
+        wait once (on v1, every waiting coordinator stop); allow fails open
+        with a WARNING. An invalid value fails closed to refuse (not to the
+        default auto), with a WARNING.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              options:
+                on_unreadable_bus: auto
+    - key: handlers.stop.owner_wait_stop_guard.options.owner_names
+      recommended: false
+      dormant: false
+      description: >-
+        owner_names (list of names, default empty): the team humans a stop
+        may name as what it waits on ("waiting on Joseph", "need Joseph to
+        pick"). Without it only an owner, human, user or operator noun, or an
+        @handle, is a waiting target; a bare capitalised word is never one.
+        An invalid value names nobody, with a WARNING.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              options:
+                owner_names: [Joseph]
     - key: handlers.pre_tool_use.human_approval_check
       recommended: true
       dormant: false

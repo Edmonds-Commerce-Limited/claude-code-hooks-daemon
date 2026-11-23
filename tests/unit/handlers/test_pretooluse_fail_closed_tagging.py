@@ -178,6 +178,14 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "issue to the cron. Fails open by design -- on a daemon fault a Stop must never trap "
         "the session, and the cron is the backstop. Not a dangerous-action guard."
     ),
+    "owner_wait_stop_guard": (
+        "Conduct Stop gate (Plan 00636 Task 2.1a): a coordinator's waiting stop must have "
+        "reached the owner on the team bus. Its unreadable-bus policy is its own option "
+        "(on_unreadable_bus, default auto), and it fails closed IN-HANDLER: any fault while "
+        "checking an armed coordinator's stop denies once (F5), so chain-level SAFETY "
+        "tagging adds nothing. The re-stop after its own deny is allowed, so it never traps "
+        "a session. Not a dangerous-action guard."
+    ),
     "gh_issue_comments": "Workflow completeness gate: forces --comments on gh issue view.",
     "branch_creation_guard": (
         "Plan 00558: a work-in-progress governance gate (finish a branch before "

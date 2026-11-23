@@ -1445,6 +1445,10 @@ handlers:
       enabled: true
       priority: 9
 
+    owner_wait_stop_guard:  # Refuses a coordinator seat's waiting stop until each open owner thread got a notifying bus post (Plan 00636 Task 2.1a)
+      enabled: true  # Inert unless the session holds a team where this seat probes as coordinator; never terminal
+      priority: 3
+
     idle_workable_issue_stop_gate:  # Refuses an idle stop while a workable issue is cached and nothing is in flight (Plan 00470 Phase 7)
       enabled: true  # Inert unless the project declares an `issue-sdlc` persistent cron job; never terminal
       priority: 4

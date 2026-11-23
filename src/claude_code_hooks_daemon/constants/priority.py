@@ -160,6 +160,10 @@ class Priority:
     # non-terminal so auto_continue_stop still runs behind it.
     IDLE_WORKABLE_ISSUE_STOP_GATE = 4
 
+    # Plan 00636 Task 2.1a: ahead of the idle gate (4) and the terminal
+    # auto_continue_stop (10); non-terminal, so both still run behind it.
+    OWNER_WAIT_STOP_GUARD = 3
+
     # Plan 00501 Phase 6: an observer that must see every main-thread stop, so
     # it runs ahead of the terminal auto_continue_stop (10); non-terminal.
     GOAL_LOOP_DETECTOR = 5

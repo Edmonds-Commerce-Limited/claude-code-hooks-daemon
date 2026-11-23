@@ -202,10 +202,11 @@
 |----------|---------|----------|-------------|
 | 50 | quota_resume_recorder | ADVISORY | Record each ``quota_auto_resume_*`` notification, silently |
 
-### Stop (8 handlers)
+### Stop (9 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
+| 3 | owner_wait_stop_guard | BLOCKING | Refuse a coordinator's waiting stop until the owner was told, notifying, on the bus |
 | 4 | idle_workable_issue_stop_gate | BLOCKING | Refuse a main-thread idle stop while a workable issue is cached and nothing runs |
 | 5 | goal_loop_detector | NON-TERMINAL | Log a session's goal-loop cycles to the transition log; always allow |
 | 6 | usage_pause_stop_gate | BLOCKING | Allow a paused session's stop only when its crons are exactly the resume cron |

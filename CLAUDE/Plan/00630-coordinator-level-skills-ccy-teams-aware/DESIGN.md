@@ -532,6 +532,9 @@ adapter), takes outbound entries stamped after this turn's start, and matches
 them to the named threads. No secrets are read and no bus file is opened. An
 unreadable bus (CLI absent, error, timeout) fails OPEN and logs the failure
 to the daemon log; it never blocks a stop on the handler's own fault.
+(Corrected by the coordinator for 00636 Task 2.1a: the unreadable-bus
+default is now `refuse`, fail closed; `allow` restores fail-open. See the
+last bullet of 20.1.)
 
 The remedy is the multi-thread bump, fedora-desktop request 00209 R11
 (coordinator, lts-infra bus id
@@ -552,7 +555,8 @@ as "the owner was told". Rule 2 and "posted this turn" are read with that
 filter. A `teamchat bump` notifies by default, so the remedy always produces
 a notifying post. Fail closed on the filter: a post whose notify status cannot
 be read from the history counts as non-notifying, and the deny says so. (This
-is distinct from the unreadable-bus case above, which fails open.)
+is distinct from the unreadable-bus case above, now `refuse` by default;
+see 20.1.)
 
 Open question Q18, narrowed by R11: which threads does a stop name? With
 `teamchat bump --waiting` covering every open thread the seat asked, option
@@ -585,7 +589,8 @@ Test-first acceptance criteria (each red before the handler exists):
 
 - A stop with terminal-only status (no post anywhere) counts as unsent.
 
-- An unreadable bus passes and writes a log line.
+- An unreadable bus writes a log line and is governed by
+  `on_unreadable_bus` (default `auto`; see 20.1).
 
 - A stop that does not wait on the owner is untouched.
 
@@ -623,8 +628,22 @@ Reconciliation with the rest of section 20:
   not readable from history while a timestamp is.
 - Rule 3 (stop message is an echo) is tightened by item 5: it is a pointer.
 - The notifying-only filter and its fail-closed rule stand unchanged.
-- The unreadable-bus fail-open stands, but is logged loudly and is distinct
-  from an unreadable notify flag, which fails closed.
+- Unreadable bus (corrected by the coordinator, superseding "fail-open
+  stands"): `owner_wait_stop_guard.options.on_unreadable_bus` decides. Its
+  default is `auto` (the coordinator's choice, settling the former open
+  point): where the adapter reports the notify flag and `m.thread` readable,
+  an unconfirmed wait is refused once, naming the notifying-reply commands and
+  saying why nothing could be confirmed; where it cannot (pingbus v1), the stop
+  is allowed with an advisory naming the team and the unchecked thread
+  classes. That is fail-open by design on v1, where a refusal could never be
+  satisfied, and the advisory costs one extra continue turn. `refuse` always
+  refuses an unconfirmed wait once; `allow` fails open. Either way a WARNING is
+  logged.
+- Armed when unsure (PR 226 review): an unknown role, an unresolved seat
+  probe or an unreadable stop message counts as an unconfirmed wait under
+  `on_unreadable_bus`; any fault while checking an armed coordinator's stop
+  refuses it once, whatever the policy. Only a stop re-entering after this
+  guard's own refusal passes. `goal-blocked` alone is not a wait on a human.
 
 Open item (Q18 second half, recorded 2026-11-23): whether pingbus v1 `history`
 can supply the notify flag. `pingbus history --help` (read-only) lists only
@@ -651,7 +670,9 @@ Additional test-first criteria (each red first):
 - The deny text names thread ids only and does not restate the awaited
   content; a stop text that restates the waits is not required to be rejected.
 - N is read from config; an invalid N falls back to the default and logs.
-- Unreadable bus: stop passes, loud log line.
+- Unreadable bus: loud log line; refused once under `refuse` (and under the
+  default `auto` when the adapter reads the flags), allowed with an advisory
+  under `auto` on v1, passes under `allow` (corrected, see above).
 
 Owner-started threads (peer note relayed from the coordinator, who answered
 three such messages in other threads and the owner saw no response): a

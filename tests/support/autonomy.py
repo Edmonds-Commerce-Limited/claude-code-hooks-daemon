@@ -116,6 +116,19 @@ def awaiting_human_entry(session_id: str) -> SessionModeEntry:
     )
 
 
+def goal_blocked_entry(session_id: str) -> SessionModeEntry:
+    """A live goal-blocked mode (the goal loop's own block) for ``session_id``."""
+    now = time.time()
+    return SessionModeEntry(
+        mode=SessionMode.BLOCKED,
+        session_id=session_id,
+        entered_at=now,
+        expires_at=now + 3600.0,
+        source=ModeSource.DAEMON,
+        reason=BlockReason.GOAL_LOOP,
+    )
+
+
 def pin_desktop_containers_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """A desktop session of a project that allows autonomy in containers only."""
     pin_autonomy(monkeypatch, runtime=None, autonomy_config=CONTAINERS_ONLY)

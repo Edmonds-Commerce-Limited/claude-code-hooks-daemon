@@ -25,7 +25,10 @@ import math
 import time
 from typing import Any, Final, cast
 
+from claude_code_hooks_daemon.config.models import Config, handler_options
+from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.result_types import BlockingResult
+from claude_code_hooks_daemon.utils.autonomy import autonomy_verdict
 from claude_code_hooks_daemon.utils.cron_enforcement import SessionCron, parse_session_crons
 from claude_code_hooks_daemon.utils.cron_tick import (
     TickKind,
@@ -42,6 +45,8 @@ DEFAULT_STAND_IN_DELAY_HOURS: Final[float] = 3.0
 #: would fire at or after that would find no live marker and do nothing.
 MAX_STAND_IN_DELAY_HOURS: Final[float] = 24.0
 STAND_IN_SENTINEL: Final[str] = tick_sentinel(TickKind.STAND_IN)
+#: ``auto_continue_stop``'s option holding the stand-in delay in hours.
+STAND_IN_DELAY_OPTION: Final[str] = "stand_in_delay_hours"
 _SECONDS_PER_HOUR: Final[int] = 3600
 
 _PROMPT_BODY: Final[str] = (
@@ -145,3 +150,35 @@ def stand_in_verdict(
         return None
     when = time.time() if now is None else now
     return BlockingResult.deny(_render_reason(one_off_schedule(when, delay_hours), delay_hours))
+
+
+def configured_delay_hours(config: Config) -> float:
+    """``auto_continue_stop``'s ``stand_in_delay_hours`` from ``config``; the default when invalid.
+
+    An invalid value is reported at session start by the handler's
+    ``validate_options``, so here it simply falls back like the handler does.
+    """
+    options = handler_options(config.handlers.stop.get(HandlerID.AUTO_CONTINUE_STOP.config_key))
+    value = options.get(STAND_IN_DELAY_OPTION, DEFAULT_STAND_IN_DELAY_HOURS)
+    if delay_hours_problem(value) is not None:
+        return DEFAULT_STAND_IN_DELAY_HOURS
+    return float(value)
+
+
+def stand_in_requirement(
+    hook_input: dict[str, Any], *, config: Config, delay_hours: float, now: float | None = None
+) -> BlockingResult | None:
+    """The stand-in deny an ``[awaiting-human]`` stop owes, or ``None`` when none is owed.
+
+    The ONE gate both ``auto_continue_stop`` and ``owner_wait_stop_guard`` use, so the
+    guard's earlier deny can carry the requirement the chain would otherwise hide
+    (Plan 00636 F1). Silent where autonomy is off for this environment or session
+    is focused (Plan 00498), and unless ``persistent_crons.enabled``; a BLOCKED mode
+    does not silence it, because this stop enters awaiting-human (Plan 00501).
+    """
+    autonomy = autonomy_verdict(hook_input)
+    if not autonomy.environment_allowed or autonomy.session.focus_task is not None:
+        return None
+    if not config.persistent_crons.enabled:
+        return None
+    return stand_in_verdict(hook_input, delay_hours=delay_hours, now=now)

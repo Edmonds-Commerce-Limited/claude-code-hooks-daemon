@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.utils.cron_enforcement import SessionCron
 from claude_code_hooks_daemon.utils.cron_tick import (
@@ -17,6 +18,7 @@ from claude_code_hooks_daemon.utils.cron_tick import (
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
     STAND_IN_SENTINEL,
+    configured_delay_hours,
     delay_hours_problem,
     has_stand_in_cron,
     one_off_schedule,
@@ -37,6 +39,26 @@ def _stop(crons: list[dict[str, Any]] | None, **extra: Any) -> dict[str, Any]:
 
 def _cron(prompt: str, cron_id: str = "c1") -> dict[str, Any]:
     return {"id": cron_id, "schedule": "0 12 6 10 *", "prompt": prompt, "recurring": False}
+
+
+def _config_with_delay(value: object) -> Config:
+    return Config.model_validate(
+        {"handlers": {"stop": {"auto_continue_stop": {"options": {"stand_in_delay_hours": value}}}}}
+    )
+
+
+class TestConfiguredDelayHours:
+    """The guard reads auto_continue_stop's option, so both ask for the same cron (Plan 00636 F1)."""
+
+    def test_reads_the_configured_value(self) -> None:
+        assert configured_delay_hours(_config_with_delay(5)) == 5.0
+
+    def test_absent_is_the_default(self) -> None:
+        assert configured_delay_hours(Config()) == DEFAULT_STAND_IN_DELAY_HOURS
+
+    @pytest.mark.parametrize("bad", [0, 24, "3", True])
+    def test_invalid_falls_back_to_the_default(self, bad: object) -> None:
+        assert configured_delay_hours(_config_with_delay(bad)) == DEFAULT_STAND_IN_DELAY_HOURS
 
 
 class TestSentinel:

@@ -1,6 +1,6 @@
 # Plan 00636: coordinator conduct advisories and board
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: Medium
@@ -79,7 +79,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 - [ ] ⬜ **Task 2.1**: s4 (Stop mirror check, `AskUserQuestion` deny, and the
   owner-directive Stop handler). Tests first: a coordinator stop with an
   unposted thread is denied; a worker or unknown role is untouched; a posted
-  thread passes; an unreadable bus fails open with a log line. "Posted this
+  thread passes; an unreadable bus is governed by `on_unreadable_bus`
+  (default `auto`; see Task 2.1a and the settled design point below).
+  Partly done: the
+  owner-directive Stop handler shipped as Task 2.1a; the
+  `AskUserQuestion` deny on coordinator seats is out of 2.1a's scope and
+  still open. "Posted this
   turn" is read from the read-only teamchat CLI history, no secrets. Only a
   NOTIFYING post counts: a plain post to the named thread leaves the stop
   denied (the owner missed bumps that landed silently), and a post whose
@@ -87,7 +92,7 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   remedy is ONE call: a refused stop prints the exact
   `teamchat bump <ids>` command naming every unposted thread (R11). Depends
   on R11 landing in teamchat.
-- [ ] ⬜ **Task 2.1a** (MUST, owner HARD requirement, test-first; extends
+- [x] ✅ **Task 2.1a** (MUST, owner HARD requirement, test-first; extends
   2.1 and supersedes its "posted this turn" rule): the waiting-on-human Stop
   check of DESIGN.md 20.1. Red tests first: detect a waiting stop by reason
   text or awaiting-human mode; for every open question the seat asked or
@@ -95,7 +100,13 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   non-boilerplate body; otherwise deny and print the one bump command for the
   stale threads; deny text names ids only and never restates the waits;
   unreadable notify flag counts as non-notifying; worker and unknown role
-  untouched; unreadable bus fails open with a loud log. Deterministic: ids,
+  untouched (a declared worker; an unknown role stays armed after the PR 226
+  review); an unreadable bus (or a raising adapter) is decided by
+  `options.on_unreadable_bus`: `auto` (default) refuses once where the adapter
+  reads the flags and otherwise allows with an advisory; `refuse` denies once,
+  names the notifying-reply commands and says why nothing could be confirmed;
+  `allow` fails open with a WARNING. Shipped as `owner_wait_stop_guard` (Stop,
+  priority 3, rule `R-STOP-OWNER-WAIT-UNBUMPED`). Deterministic: ids,
   timestamps, notify flag; no LLM judgement. Acceptance tests are the
   20.1 list. Also (peer note from the coordinator): an owner-started thread
   (top-level HUMAN message in the questions room) is OPEN until a notifying
@@ -106,6 +117,39 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   reply; unverified here whether v1 history exposes m.thread; fail closed). Conduct advisory for a human-message reply
   posted outside its thread: only if the bus data exposes thread id and author
   kind (open, confirm with fedora-desktop.1 in Task 1.2).
+- **Settled design point** (Task 2.1a): on pingbus v1 the adapter cannot read
+  the notify flag or `m.thread`, so `refuse` would refuse EVERY waiting stop
+  on a coordinator seat once. The coordinator chose `auto` as the default:
+  refuse where the adapter reports the flags readable, allow with an advisory
+  on v1 (fail-open by design there; the advisory is its only effect and costs
+  one extra continue turn). An INVALID value is not the default: it fails
+  closed to `refuse`, as the first independent review asked.
+- [x] ✅ **Task 2.1b**: fix the PR 226 independent review
+  (`subagent-reports/261123-opus-independent-review-pr226.md`), each finding
+  test-first: F1 stand-in requirement carried on the deny, F2 wider waiting
+  wordings, F3 only this guard's own refusal earns the re-entry pass, F4 an
+  unknown role or unresolved probe stays armed, F5 a fault fails closed, F6
+  the bump command names `--team`, F7 thread ids and stopwords are not a
+  body, F8 `started_at` required and in seconds, F9 `goal-blocked` is not a
+  wait on a human; docs default `auto`.
+- [x] ✅ **Task 2.1c**: fix the PR 226 delta review
+  (`subagent-reports/261123-opus-delta-review-pr226.md`) test-first: N2 a
+  waiting target must be an owner/human/user/operator noun, an `@handle` or a
+  name in the new `options.owner_names` (a bare capitalised word no longer
+  counts, so "waiting on Joseph" needs `owner_names: [Joseph]`); N1 the fault
+  deny carries the stand-in, and auto_continue_stop judges the re-stop after
+  this guard's deny afresh; N3 a raising `flags_readable()` under `auto`
+  refuses.
+- [ ] ⬜ **Task 2.1d (OPEN follow-ups from the delta review, not fixed)**:
+  - N4: the guard's stand-in gate is looser than auto_continue_stop's (reads a
+    possibly stale last assistant text, needs neither the `STOPPING BECAUSE:`
+    prefix nor the marker write), so a stray one-off stand-in can be asked for.
+  - N5: the 200-line own-refusal lookback can see this guard's deny from an
+    EARLIER stop chain and pass a later chain another handler denied first.
+    Fix direction: require the guard's marker to be the latest block, or after
+    the last real user prompt.
+  - N6: an unreadable transcript makes every team-session stop "waiting", so a
+    coordinator under v1 `auto` gets the advisory on every such stop.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
@@ -136,7 +180,9 @@ land here. Not gated on a seat. Each task starts with a failing test.
 
 - [ ] Each item has an absent-team fixture that passes and a coordinator
   fixture that failed first.
-- [ ] Release-bound items recorded in the pending-release holding area.
+- [ ] Release-bound items recorded in the pending-release holding area
+  (Task 2.1a: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-*.md` and
+  `config-changes/v3.77.0.yaml`).
 
 ## Delivery & Milestones
 

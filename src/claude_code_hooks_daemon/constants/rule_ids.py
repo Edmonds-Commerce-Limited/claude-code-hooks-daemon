@@ -274,6 +274,9 @@ class RuleID:
     #: A main-thread stop that leaves workable issues for the next cron tick.
     STOP_IDLE_WITH_WORKABLE_ISSUE: str = "R-STOP-IDLE-WITH-WORKABLE-ISSUE"
 
+    #: A coordinator's waiting stop with an owner-facing thread not recently bumped, notifying.
+    STOP_OWNER_WAIT_UNBUMPED: str = "R-STOP-OWNER-WAIT-UNBUMPED"
+
     #: Stop attempted right after a QA tool's own output indicated failure.
     STOP_QA_FAILURE: str = "R-STOP-QA-FAILURE"
 

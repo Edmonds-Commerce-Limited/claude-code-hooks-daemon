@@ -72,22 +72,42 @@ from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.session_modes import declared_blocked_entry
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
+    STAND_IN_DELAY_OPTION,
     delay_hours_problem,
-    stand_in_verdict,
+    stand_in_requirement,
     validate_delay_hours,
 )
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
     is_stop_hook_active,
+    recent_stop_hook_block_texts,
     transcript_is_readable,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
-# The handler option whose setter validates the stand-in delay.
-_STAND_IN_DELAY_OPTION = "stand_in_delay_hours"
+
+def _last_block_is_owner_wait_guard(transcript_path: str | None) -> bool:
+    """Whether the LATEST Stop-hook block was owner_wait_stop_guard's (Plan 00636 N1).
+
+    That guard runs first and the chain shows only the first deny, so a re-stop
+    after it has not yet met this handler's refusals. Any read fault answers
+    False: an unverifiable re-entry stands down, as before.
+    """
+    try:
+        texts = recent_stop_hook_block_texts(transcript_path)
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable block marker cannot be attributed, so the re-entry stands down",
+            level=logging.DEBUG,
+        )
+        return False
+    return bool(texts) and RuleID.STOP_OWNER_WAIT_UNBUMPED in texts[-1]
+
 
 # Plan 00181: stop-events.jsonl is append-only and was never bounded (644 KB
 # observed). Cap it after each write; on breach keep the newest half so a busy
@@ -704,10 +724,10 @@ class AutoContinueStopHandler(StopHandlerBase):
         the whole handler.
         """
         problems: dict[str, str] = {}
-        if _STAND_IN_DELAY_OPTION in options:
-            problem = delay_hours_problem(options[_STAND_IN_DELAY_OPTION])
+        if STAND_IN_DELAY_OPTION in options:
+            problem = delay_hours_problem(options[STAND_IN_DELAY_OPTION])
             if problem is not None:
-                problems[_STAND_IN_DELAY_OPTION] = problem
+                problems[STAND_IN_DELAY_OPTION] = problem
         return problems
 
     def _default_config_loader(self) -> Config:
@@ -730,12 +750,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         and under focus. A BLOCKED mode does not silence it: this very stop
         enters awaiting-human, and the stand-in is what answers it (Plan 00501).
         """
-        autonomy = autonomy_verdict(hook_input)
-        if not autonomy.environment_allowed or autonomy.session.focus_task is not None:
-            return None
-        if not self._config_loader().persistent_crons.enabled:
-            return None
-        verdict = stand_in_verdict(hook_input, delay_hours=self._stand_in_delay_hours)
+        verdict = stand_in_requirement(
+            hook_input, config=self._config_loader(), delay_hours=self._stand_in_delay_hours
+        )
         if verdict is None:
             return None
         return verdict.under_rule(self._rules_by_id[RuleID.STOP_STAND_IN_MISSING])
@@ -783,8 +800,18 @@ class AutoContinueStopHandler(StopHandlerBase):
                 )
                 return False
             if has_recent_stop_hook_block(transcript_path):
-                logger.debug("Stop hook re-entry confirmed by transcript block marker - skipping")
-                return False
+                if not _last_block_is_owner_wait_guard(transcript_path):
+                    logger.debug(
+                        "Stop hook re-entry confirmed by transcript block marker - skipping"
+                    )
+                    return False
+                # Plan 00636 N1: the chain showed only owner_wait_stop_guard's
+                # deny, so this handler's own refusal was never seen. Judge the
+                # re-stop afresh; its own deny is the next marker, so it never loops.
+                logger.info(
+                    "stop_hook_active=true after owner_wait_stop_guard's deny - "
+                    "treating as fresh Stop event"
+                )
             logger.info(
                 "stop_hook_active=true but no prior block marker — silent-stop bug,"
                 " treating as fresh Stop event"

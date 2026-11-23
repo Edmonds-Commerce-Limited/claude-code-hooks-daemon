@@ -237,8 +237,52 @@ def has_recent_stop_hook_block(
     return False
 
 
-def _entry_has_block_marker(entry: dict[str, Any]) -> bool:
-    """Return True if a single transcript entry is a Stop-hook block marker."""
+def recent_stop_hook_block_texts(
+    transcript_path: str | None,
+    lookback: int = _DEFAULT_BLOCK_LOOKBACK,
+) -> tuple[str, ...]:
+    """The text of every Stop-hook block marker in the recent tail, oldest first.
+
+    Same markers and window as :func:`has_recent_stop_hook_block`, but returns
+    what each block SAID, so a handler can tell its own refusal (by rule id)
+    from another handler's (Plan 00636 F3). An attachment whose blocking error
+    carries no readable text yields ``""``.
+
+    Returns:
+        The texts, or ``()`` on a missing path or file. Other read errors raise
+        ``OSError``: a caller that must stand down on an unverifiable re-entry
+        checks :func:`transcript_is_readable` first and treats a raise the same.
+    """
+    if not transcript_path:
+        return ()
+    try:
+        tail = _read_tail_lines(transcript_path, lookback)
+    except (FileNotFoundError, IsADirectoryError):
+        return ()
+    texts: list[str] = []
+    for raw in tail:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a transcript line that is not JSON (a torn tail write) carries no block marker, so it is skipped",
+                level=logging.DEBUG,
+            )
+            continue
+        if isinstance(entry, dict):
+            text = _entry_block_text(entry)
+            if text is not None:
+                texts.append(text)
+    return tuple(texts)
+
+
+def _entry_block_text(entry: dict[str, Any]) -> str | None:
+    """The text of a Stop-hook block marker entry, or None when it is not one."""
     entry_type = entry.get("type")
 
     if entry_type == "user":
@@ -246,15 +290,23 @@ def _entry_has_block_marker(entry: dict[str, Any]) -> bool:
         if isinstance(message, dict) and message.get("role") == "user":
             content = message.get("content")
             if isinstance(content, str) and content.startswith(_STOP_FEEDBACK_PREFIX):
-                return True
+                return content
 
     if entry_type == "attachment":
         attachment = entry.get("attachment")
-        if isinstance(attachment, dict):
-            if (
-                attachment.get("type") == _HOOK_BLOCKING_ERROR_TYPE
-                and attachment.get("hookEvent") == _STOP_EVENT
-            ):
-                return True
+        if (
+            isinstance(attachment, dict)
+            and attachment.get("type") == _HOOK_BLOCKING_ERROR_TYPE
+            and attachment.get("hookEvent") == _STOP_EVENT
+        ):
+            error = attachment.get("blockingError")
+            if isinstance(error, dict):
+                error = error.get("blockingError")
+            return error if isinstance(error, str) else ""
 
-    return False
+    return None
+
+
+def _entry_has_block_marker(entry: dict[str, Any]) -> bool:
+    """Return True if a single transcript entry is a Stop-hook block marker."""
+    return _entry_block_text(entry) is not None
