@@ -494,8 +494,17 @@ when the pointer has stayed on the target row for two ticks with the same
 rendering. It also needs an idle session, an empty box, confirmed main focus
 and 3 s of quiet output. Keys are capped per occurrence and per reset window. A
 reset window is answered once. If the human presses any key except a terminal
-focus or mouse report, the window is left to them. While the dialog is on the
-screen it decides the whole tick, so nothing else is typed into it.
+focus or mouse report, the window is left to them. That includes keys pressed
+before the supervisor first sees the dialog: the host sends a dump only after
+2 s of quiet, so a latch (`_RATE_LIMIT_KEYS_SINCE_DUMP`) remembers keys since
+the last dialog-free dump. A dialog first seen with keys pending opens as
+`abandoned`. While the dialog is on the screen it decides the whole tick, so
+nothing else is typed into it.
+
+**The host re-checks at apply time** (`_rate_limit_apply_veto`). Pending
+stdin vetoes every rate-limit send. An Enter is also vetoed while child output
+is pending, or unless the dump the host shipped shows the pointer on the
+target row. A vetoed key is not retried, so the veto fails closed.
 
 **The resume.** Once the dialog is answered, Claude Code leaves `continue`
 pre-filled in the box. After `reset + 120 s` the supervisor clears it with
@@ -516,8 +525,10 @@ session moving on. Once the screen settles:
 - an empty box is ambiguous, because the human may already have continued. The
   supervisor waits, and abandons the window at the deadline.
 
-Other text in the box abandons the window. That rule is a guess about live
-screens that nobody has checked.
+Claude Code's dim suggestion in an empty box (`Try "…"`, straight or curly
+quotes, and nothing else on the row) counts as an empty box in the resume step
+only. Any other text in the box abandons the window. Both rules are guesses
+about live screens that nobody has checked.
 
 The resume needs the same gates as every other prompt. It does not run under a
 usage pause, while the session is BLOCKED, or while the supervisor's own line
@@ -533,9 +544,13 @@ closing, and even when no screen is sent. In a later phase (`done` or
 `abandoned`) it blocks only while the screen still shows the pre-fill. A model
 restore therefore waits until after the continue.
 
-**State.** The state file is `supervise-rate-limit-dialog.<child_pid>.json` in
-the status directory. There is one file per Claude child, and it is ignored
-once a day has passed since its window.
+**State.** The state file is
+`supervise-rate-limit-dialog.<child_pid>-<start_ticks>.json` in the status
+directory. The start ticks are field 22 of `/proc/<pid>/stat`, so a reused pid
+does not inherit another session's state. An unreadable start time turns the
+feature off for the tick. A state older than the child is ignored. One left a
+day past its window is ignored too, unless its dialog is still open. Any state
+file left untouched for 48 h is swept.
 
 **Building the binary and relaunching.** The worker hot-reloads the decision
 code. The screen read is HOST code, however, so it takes effect only on the
@@ -553,8 +568,11 @@ nice -n 19 bash screen/build.sh
   sent no dump, so the dialog is not answered then.
 - The screen fixtures in `tests/unit/supervise/test_rate_limit_dialog.py` were
   reconstructed from Claude Code 2.1.330 strings, not captured live. Nothing
-  has been verified against a real dialog. The near-miss file exists so that a
-  real capture can replace the fixtures.
+  has been verified against a real dialog. A near miss is logged only by its
+  hash, so a real capture (Plan 00523 Task 1.1) must be taken by hand.
+- The sweep deletes by mtime, and an abandoned dialog left on screen does not
+  re-save its state. A dialog left open for more than 48 h could therefore lose
+  its state and be answered when another child's window opens.
 - Claude Code has its own auto-continue. Whether choosing Stop leaves it armed
   is unknown. If it does, the supervisor's `continue` could duplicate Claude
   Code's own.
