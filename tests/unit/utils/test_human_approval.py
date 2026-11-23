@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.utils import human_approval
 from claude_code_hooks_daemon.utils.human_approval import (
     ActClass,
@@ -241,12 +242,12 @@ class TestContractUnconfirmedDefault:
 class TestTeamchatVerifyCli:
     def test_argv_and_env(self) -> None:
         runner = answering(fx.verify_answer())
-        TeamchatVerifyCli(runner=runner, timeout=3.0)(SIGNALS, CITE)
+        TeamchatVerifyCli(runner=runner, timeout=Timeout.TEAMCHAT_WHOAMI)(SIGNALS, CITE)
         assert runner.calls == [
             (
                 (f"{KIT}/bin/teamchat", "verify", "--json", "--team", "alpha", fx.HUMAN_ID),
                 {RUNTIME_ENV_VAR: RUNTIME},
-                3.0,
+                Timeout.TEAMCHAT_WHOAMI,
             )
         ]
 

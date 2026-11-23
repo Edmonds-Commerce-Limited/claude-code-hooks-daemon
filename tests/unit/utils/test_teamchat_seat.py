@@ -883,17 +883,23 @@ class TestRunKitCommand:
     def test_runs_the_kit_binary_with_only_the_runtime_overlay(self) -> None:
         runner = ok("{}")
         outcome = teamchat_seat.run_kit_command(
-            SIGNALS, ("verify", "x"), runner=runner, timeout=1.0
+            SIGNALS, ("verify", "x"), runner=runner, timeout=Timeout.TEAMCHAT_WHOAMI
         )
         assert isinstance(outcome, CommandOutcome)
         assert runner.calls == [
-            ((f"{KIT}/bin/teamchat", "verify", "x"), {RUNTIME_ENV_VAR: RUNTIME}, 1.0)
+            (
+                (f"{KIT}/bin/teamchat", "verify", "x"),
+                {RUNTIME_ENV_VAR: RUNTIME},
+                Timeout.TEAMCHAT_WHOAMI,
+            )
         ]
 
     def test_kit_missing_runs_nothing(self) -> None:
         runner = ok("{}")
         signals = SessionSignals(runtime=RUNTIME, kit="")
-        outcome = teamchat_seat.run_kit_command(signals, ("verify",), runner=runner, timeout=1.0)
+        outcome = teamchat_seat.run_kit_command(
+            signals, ("verify",), runner=runner, timeout=Timeout.TEAMCHAT_WHOAMI
+        )
         assert outcome is ProbeReason.KIT_MISSING
         assert runner.calls == []
 
@@ -906,6 +912,8 @@ class TestRunKitCommand:
     )
     def test_signal_not_a_plain_path_runs_nothing(self, signals: SessionSignals) -> None:
         runner = ok("{}")
-        outcome = teamchat_seat.run_kit_command(signals, ("verify",), runner=runner, timeout=1.0)
+        outcome = teamchat_seat.run_kit_command(
+            signals, ("verify",), runner=runner, timeout=Timeout.TEAMCHAT_WHOAMI
+        )
         assert outcome is ProbeReason.SIGNAL_NOT_A_PATH
         assert runner.calls == []
