@@ -832,13 +832,31 @@ class TestResumeGates:
         assert outcome.decision_value != _CONTINUE
         assert outcome.payload is None or "continue" not in outcome.payload.split()[-1:]
 
-    def test_no_continue_under_blocked(self, sidecar_dir: Path, machine: Any) -> None:
+    def test_no_continue_while_awaiting_human(self, sidecar_dir: Path, machine: Any) -> None:
+        # The entry an agent's `[awaiting-human]` stop writes (the stop writer
+        # builds it with declared_blocked_entry).
         from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
-        from claude_code_hooks_daemon.utils.session_modes import declared_blocked_entry
+        from claude_code_hooks_daemon.utils.session_modes import ModeLabel, declared_blocked_entry
+
+        _answer_and_close(sidecar_dir, machine)
+        entry = declared_blocked_entry(_GATE_SESSION, entered_at=_AFTER - 60.0)
+        assert entry.label is ModeLabel.AWAITING_HUMAN
+        SessionModeRegistry(sidecar_dir, clock=lambda: _AFTER).enter(entry)
+        modes = _mod.load_session_modes(sidecar_dir, now=_AFTER, own_sessions=None)
+        assert modes.gate_closed
+        assert "awaiting-human" in modes.blocked_labels
+        outcome = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert outcome.decision_value != _CONTINUE
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "answered"
+
+    def test_no_continue_while_goal_blocked(self, sidecar_dir: Path, machine: Any) -> None:
+        from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
+        from claude_code_hooks_daemon.utils.session_modes import goal_loop_blocked_entry
 
         _answer_and_close(sidecar_dir, machine)
         SessionModeRegistry(sidecar_dir, clock=lambda: _AFTER).enter(
-            declared_blocked_entry(_GATE_SESSION, entered_at=_AFTER - 60.0)
+            goal_loop_blocked_entry(_GATE_SESSION, entered_at=_AFTER - 60.0, ttl_seconds=3600.0)
         )
         assert _mod.load_session_modes(sidecar_dir, now=_AFTER, own_sessions=None).gate_closed
         outcome = _resume(sidecar_dir, machine, _resume_facts(""))
