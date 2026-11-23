@@ -620,6 +620,65 @@ class TestUnreadableBusRefuse:
         assert any("on_unreadable_bus" in rec.getMessage() for rec in caplog.records)
 
 
+class _ResolveRaises(_Handler):
+    def _resolve_seats(self, signals: SessionSignals) -> SeatContext:
+        raise ValueError("SECRET-PROBE-DETAIL")
+
+
+class _WaitingRaises(_Handler):
+    def _waiting(self, hook_input: dict[str, Any]) -> Any:
+        raise KeyError("SECRET-TRANSCRIPT-DETAIL")
+
+
+class _BumpRaises(_FakeBus):
+    def bump_command(self, team: str, thread_ids: Sequence[str]) -> str:
+        raise RuntimeError("render boom")
+
+
+class TestFailClosed:
+    """F5: any fault while checking an ARMED coordinator's waiting stop denies, once."""
+
+    def _assert_fail_closed(self, result: Any) -> None:
+        assert result.decision is Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.STOP_OWNER_WAIT_UNBUMPED}]")
+        assert "SECRET" not in result.reason
+        assert "stop again" in result.reason
+
+    def test_a_raising_seat_probe_denies_even_under_auto(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()), flags=False)
+        handler = _ResolveRaises(_seats(), bus, on_unreadable_bus="auto")
+        self._assert_fail_closed(_run(handler, _stop(tmp_path)))
+
+    def test_a_raising_stale_check_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+            raise TypeError("SECRET-SNAPSHOT")
+
+        monkeypatch.setattr(guard_module, "stale_threads", _boom)
+        bus = _FakeBus(_snapshot(_question()))
+        self._assert_fail_closed(_run(_Handler(_seats(), bus), _stop(tmp_path)))
+
+    def test_a_raising_render_denies_with_static_text(self, tmp_path: Path) -> None:
+        bus = _BumpRaises(_snapshot(_question()))
+        self._assert_fail_closed(_run(_Handler(_seats(), bus), _stop(tmp_path)))
+
+    def test_a_raising_wait_detection_for_a_coordinator_denies(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question(), posts=(_bump(),)))
+        self._assert_fail_closed(_run(_WaitingRaises(_seats(), bus), _stop(tmp_path)))
+
+    def test_a_raising_wait_detection_for_a_worker_is_untouched(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        result = _run(_WaitingRaises(_seats("worker"), bus), _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+
+    def test_the_fail_closed_deny_is_not_repeated_on_reentry(self, tmp_path: Path) -> None:
+        bus = _BumpRaises(_snapshot(_question()))
+        first = _run(_Handler(_seats(), bus), _stop(tmp_path))
+        hook_input = _stop(tmp_path, before=[_feedback(first.reason)], stop_hook_active=True)
+        assert _run(_Handler(_seats(), bus), hook_input) is None
+
+
 class TestWindowOption:
     def test_window_is_read_from_config(self, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question(), posts=(_bump(at=NOW - 5 * 60),)))

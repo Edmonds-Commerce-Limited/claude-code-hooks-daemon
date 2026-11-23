@@ -36,6 +36,12 @@ ever be confirmed) fails open by design with an ADVISORY in the stop's context
 naming the team and the thread classes left unchecked. The WARNING is always
 written.
 
+**A fault fails closed.** Any exception while checking (seat probe, wait
+detection, stale check, rendering) denies an armed coordinator's stop once,
+whatever ``on_unreadable_bus`` says, with static text; a seat provably not
+armed (a declared worker) is allowed. Faults in ``matches()`` are passed to
+``handle()`` for that decision; only the re-entry check stands down on a fault.
+
 **Never a trap.** A stop that re-enters after THIS guard's deny (its rule id in
 a recent Stop-hook block) is allowed: one refusal per stop chain. Another
 handler's deny, or a spurious ``stop_hook_active`` with no block marker, is
@@ -86,6 +92,7 @@ from claude_code_hooks_daemon.utils.autonomy import session_policy
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.owner_wait_bus import (
+    NOTIFY_PROGRAM,
     TEAM_PLACEHOLDER,
     BusUnreadable,
     OwnerWaitBus,
@@ -219,6 +226,15 @@ _UNKNOWN_ROLE_REASON: Final[str] = (
 )
 _UNRESOLVED_PROBE_REASON: Final[str] = (
     "the team seat probe gave no answer, so neither the team nor this seat's role is known"
+)
+#: The F5 deny, static so nothing that may itself be faulting renders it.
+_FAIL_CLOSED_REASON: Final[str] = (
+    "You may be stopping to wait on a human, as a team coordinator, and the owner-wait check "
+    "failed before it could confirm the owner was told on the team chat, so the stop fails "
+    "closed. Post a notifying reply in each owner-started thread "
+    f"(`{NOTIFY_PROGRAM} --team {TEAM_PLACEHOLDER} --re <event id> --ask`) and on each open "
+    f"question this seat asked (`{NOTIFY_PROGRAM} --team {TEAM_PLACEHOLDER} Q<n> --ask`), "
+    "naming what is awaited. Then stop again; this refusal is not repeated."
 )
 #: Unconfirmed reasons that are not about the bus history, so the deny omits the bus note.
 _NOT_BUS_REASONS: Final[frozenset[str]] = frozenset(
@@ -439,7 +455,15 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             return False
         if is_stop_hook_active(hook_input) and self._reenters_own_refusal(hook_input):
             return False
-        return self._waiting(hook_input) is not _Waiting.NO
+        try:
+            return self._waiting(hook_input) is not _Waiting.NO
+        except Exception as exc:  # handle() decides: it fails closed for an armed seat (F5)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a fault detecting the wait is passed to handle(), which fails closed for an armed seat",
+            )
+            return True
 
     # -- handling ----------------------------------------------------------------
 
@@ -481,7 +505,42 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         return armed
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Deny on stale threads or a refused unreadable bus; ``auto`` on v1 adds an advisory."""
+        """Run the check; any fault for an armed seat FAILS CLOSED, whatever the policy (F5).
+
+        ``on_unreadable_bus`` governs a bus (or stop message, or role) the guard
+        could not read; a fault in the guard itself is not a reading it could
+        weigh, so an armed coordinator's stop is denied once with static text
+        (the re-stop is this rule's own re-entry, so it never loops). A seat
+        that is provably not armed (a declared worker) is allowed.
+        """
+        try:
+            return self._check(hook_input)
+        except Exception as exc:  # fail closed for an armed seat; the reason carries no fault text
+            log_and_continue(
+                logger,
+                exc,
+                reason="a fault while checking a waiting stop fails closed for an armed coordinator seat",
+                level=logging.WARNING,
+            )
+            if not self._armed_or_unknown(hook_input):
+                return BlockingResult(decision=Decision.ALLOW)
+            return BlockingResult.deny(_FAIL_CLOSED_REASON).under_rule(_RULE)
+
+    def _armed_or_unknown(self, hook_input: dict[str, Any]) -> bool:
+        """Whether any team arms this guard; a fault deciding that counts as armed."""
+        try:
+            context = self._resolve_seats(SessionSignals.from_hook_input(hook_input))
+            return bool(self._armed_teams(hook_input, context))
+        except Exception as exc:  # an unreadable seat state never disarms (00631 guards_armed)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the seat state could not be read after a fault, so the seat counts as armed",
+            )
+            return True
+
+    def _check(self, hook_input: dict[str, Any]) -> BlockingResult:
+        """Deny on stale threads or a refused unconfirmed team; ``auto`` on v1 adds an advisory."""
         waiting = self._waiting(hook_input)
         if waiting is _Waiting.NO:
             return BlockingResult(decision=Decision.ALLOW)
