@@ -76,6 +76,19 @@ UNKNOWN: Final[str] = "unknown"
 MAX_OUTPUT_BYTES: Final[int] = 64 * 1024
 #: Deepest container nesting decoded. The contract needs 3; extra keys get slack.
 MAX_JSON_DEPTH: Final[int] = 32
+#: The only daemon environment variables the probe subprocess inherits (review
+#: F3): enough to locate an interpreter, a home and the per-user runtime dir.
+PROBE_ENV_ALLOWLIST: Final[tuple[str, ...]] = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "XDG_RUNTIME_DIR",
+)
 ROLE_COORDINATOR: Final[str] = "coordinator"
 DUTY_HOST: Final[str] = "host"
 
@@ -435,11 +448,25 @@ def parse_whoami(text: str) -> SeatContext:
 # --- default runner --------------------------------------------------------------
 
 
+def probe_environment(env_overlay: Mapping[str, str]) -> dict[str, str]:
+    """The probe subprocess's environment: an allowlist, then ``env_overlay``.
+
+    Only :data:`PROBE_ENV_ALLOWLIST` is copied from the daemon's own
+    environment. The daemon may have been started inside a teamchat session,
+    so any ``TEAMCHAT_*`` it inherited belongs to some OTHER seat; the only
+    teamchat variable the probe sees is the one the resolver deliberately sets
+    in ``env_overlay`` (``TEAMCHAT_RUNTIME``).
+    """
+    env = {name: os.environ[name] for name in PROBE_ENV_ALLOWLIST if name in os.environ}
+    env.update(env_overlay)
+    return env
+
+
 def default_command_runner(
     args: Sequence[str], env_overlay: Mapping[str, str], timeout: float
 ) -> CommandOutcome:
-    """Run ``args`` (no shell) with ``env_overlay`` over the daemon's environment."""
-    env = {**os.environ, **env_overlay}
+    """Run ``args`` (no shell) in :func:`probe_environment` of ``env_overlay``."""
+    env = probe_environment(env_overlay)
     try:
         completed = subprocess.run(  # nosec B603 - fixed argv, no shell
             list(args),
