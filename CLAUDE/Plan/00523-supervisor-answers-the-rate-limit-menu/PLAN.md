@@ -110,7 +110,12 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   answered, the session waits, and work resumes at the reset.
 - [x] ✅ **Task 3.2**: Add a release note for the new supervisor behaviour
   (`025-supervisor-answers-the-rate-limit-dialog.md`).
-- [ ] ⬜ **Task 3.3**: Independent review and the full QA gate, then merge.
+- [ ] 🔄 **Task 3.3**: Independent review and the full QA gate, then merge.
+  The review is done
+  (`untracked/agent-reports/261123-00523-independent-review.md`, not tracked),
+  and every finding I1-I5 and L1-L4 is fixed test-first. L5 (one `--dump`
+  per output burst) is accepted. A pull request is open. The full gate runs in
+  GitHub CI. The merge is left to the owner.
 
 ## Success Criteria
 
@@ -140,5 +145,18 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   - re-check window: `1dc68225e`
   - docs: `76cab97bf`
 
-  The host part takes effect on the next ccy relaunch. Phase 1 (live capture)
-  and Phase 2b are still open.
+- Review fixes:
+
+  - I1, state keyed on pid and start ticks: `dff3b0e25`
+  - the stored window holds while the dialog is open: `c0fd7f7f4`
+  - I2, keys before the first dump: `36013aba6`
+  - I3/L4, host apply veto: `27f53c86a`
+  - I4, the limit row is required: `67942b4fd`
+  - I5, the placeholder counts as empty: `49051a467`
+  - L1, near miss logged by hash only: `3579f3571`
+  - L2, reset clamped to 300 s past and 8 days ahead: `0edb3bff3`
+  - L3, awaiting-human test: `2aabccc73`
+  - docs: `a3118578e`
+
+  The host part (the screen dump and the apply veto) takes effect on the next
+  ccy relaunch. Phase 1 (live capture), Phase 2b and Task 2.4 are still open.
