@@ -8825,9 +8825,9 @@ def _rate_limit_session_start(child_pid: int) -> float:
 
 
 def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, object]:
-    """The stored state, or ``{}`` when absent, unreadable, a day past its window,
-    or opened before this child started (a pid and start ticks repeated by a
-    fresh pid namespace)."""
+    """The stored state, or ``{}`` when absent, unreadable, a day past its window
+    (unless the dialog is still on screen), or opened before this child started
+    (a pid and start ticks repeated by a fresh pid namespace)."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -8845,7 +8845,7 @@ def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, 
     anchor = data.get("window_reset")
     if not isinstance(anchor, (int, float)):
         anchor = opened
-    if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS:
+    if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS and not data.get("occurrence_open"):
         return {}
     return data
 
@@ -8977,7 +8977,14 @@ def _rate_limit_dialog_step(
     now = facts.now_wall
     reset = parse_rate_limit_reset(dump, now)
     state = _load_rate_limit_state(path, now, child_pid)
-    if not state or (reset is not None and reset != state.get("window_reset")):
+    # While the dialog stays on screen its stored window holds: past "resets
+    # 3pm" a re-read means tomorrow, and a dialog the human took over (or that
+    # hit the key cap) must not be answered afresh as a new window.
+    if not state or (
+        not state.get("occurrence_open")
+        and reset is not None
+        and reset != state.get("window_reset")
+    ):
         _sweep_rate_limit_states(status_dir, now)
         state = _new_rate_limit_window(reset, now)
     phase = state.get("phase")

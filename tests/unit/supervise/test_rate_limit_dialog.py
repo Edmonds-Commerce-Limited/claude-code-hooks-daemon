@@ -1044,3 +1044,37 @@ class TestReadChildStart:
         start = _mod._read_child_start(os.getpid())
         assert start is not None
         assert 0 < start[1] <= time.time() + 1
+
+
+# ── Review I2: a dialog the human took over stays theirs ─────────────────────
+
+
+class TestTakenOverDialogStaysTaken:
+    """Past "resets 3pm" a re-read means tomorrow; the stored window must hold."""
+
+    def _abandon(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        typed = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1, raw=b"\x1b[B"))
+        assert typed.payload is None
+        assert _phase(sidecar_dir) == "abandoned"
+
+    @pytest.mark.parametrize("late", [_RESET + 3600.0, _RESET + 25 * 3600.0])
+    def test_abandoned_dialog_left_on_screen_past_the_reset(
+        self, sidecar_dir: Path, machine: Any, late: float
+    ) -> None:
+        self._abandon(sidecar_dir, machine)
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=late + offset))
+            for offset in range(3)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+
+    def test_key_cap_holds_past_the_reset(self, sidecar_dir: Path, machine: Any) -> None:
+        stuck = _dialog(["Upgrade your plan", _TARGET], pointer=0)
+        for offset in range(8):
+            _tick(sidecar_dir, machine, _dialog_facts(stuck, now=_NOW + offset))
+        late = [
+            _tick(sidecar_dir, machine, _dialog_facts(stuck, now=_RESET + 3600.0 + offset))
+            for offset in range(3)
+        ]
+        assert all(outcome.payload is None for outcome in late)
