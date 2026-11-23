@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 from claude_code_hooks_daemon.utils.command_position import (
     blank_printed_substitutions,
     command_position_argument_segments,
+    command_position_segments,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
@@ -864,6 +865,66 @@ def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
     if not positional:
         raise _Unverifiable("it names no remote")
     return positional[0], refs
+
+
+_TAG: Final[str] = "tag"
+_TAG_DELETE_LONG: Final[str] = "--delete"
+#: `gh api` asked to DELETE a git ref (`-X DELETE`, `-XDELETE`, `--method DELETE`).
+_GH_API_REF_DELETE: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"\bgh\b.*\bapi\b"),
+    re.compile(r"(?:-X\s*|--method[=\s]\s*)DELETE\b", re.IGNORECASE),
+    re.compile(r"\bgit/refs/"),
+)
+#: `rm` naming a ref file or the packed-refs file of a repository.
+_RM_REF_FILE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s/])rm\s.*(?:^|[\s/])\.git/(?:refs(?:/|\s|$)|packed-refs\b)"
+)
+
+
+def _deletes_a_tag(command: str) -> bool:
+    for run in git_invocations(command):
+        if run.subcommand != _TAG:
+            continue
+        for word in run.arguments:
+            if word == _TAG_DELETE_LONG:
+                return True
+            if word.startswith("-") and not word.startswith("--") and _DELETE_LETTER in word:
+                return True
+    return False
+
+
+def _deletes_a_ref_outside_git(command: str) -> bool:
+    """A ref deleted through the GitHub API, or by removing its file."""
+    for segment in command_position_segments(command):
+        if all(pattern.search(segment) for pattern in _GH_API_REF_DELETE):
+            return True
+        if _RM_REF_FILE.search(segment):
+            return True
+    return False
+
+
+def names_a_deletion(command: str) -> bool:
+    """Whether ``command`` names a branch, tag, remote-ref or worktree deletion.
+
+    Covers forced branch deletes (``branch -D``, ``update-ref -d``), tag
+    deletes (``tag -d``), any push that deletes a remote ref, any
+    ``git worktree remove``, a ``gh api`` DELETE of a ``git/refs/`` path, and
+    an ``rm`` of a ``.git/refs`` path or ``.git/packed-refs``. A shape this
+    reading cannot establish counts as a deletion: fail closed. Public so
+    another handler can reuse it without importing this handler class.
+    """
+    try:
+        if _deleted_branches(command) or _worktree_removals(command):
+            return True
+        if _deletes_a_tag(command) or _deletes_a_ref_outside_git(command):
+            return True
+        return any(
+            _remote_delete_targets(run) is not None
+            for run in git_invocations(command)
+            if run.subcommand == _PUSH
+        )
+    except _Unverifiable:
+        return True
 
 
 def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> str | None:

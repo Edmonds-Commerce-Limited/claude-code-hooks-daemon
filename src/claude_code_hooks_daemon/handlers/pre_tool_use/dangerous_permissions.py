@@ -42,19 +42,48 @@ _DANGEROUS_PERMISSIONS_VERBOSE_CONTENT = (
 
 # World-writable OCTAL modes: any mode whose "other" (last) digit has the write bit
 # (octal 2) set — digits 2, 3, 6, 7. Covers 666, 777, 757, 002, etc. An optional
-# leading special-bits digit (setuid/setgid/sticky) is allowed (e.g. 1777, 2666).
-_WORLD_WRITABLE_OCTAL = r"[0-7]?[0-7][0-7][2367]"
+# leading special-bits digit (setuid/setgid/sticky) is allowed (e.g. 1777, 2666),
+# and any run of leading zeros (00777).
+_WORLD_WRITABLE_OCTAL = r"0*[0-7]?[0-7][0-7][2367]"
 
-# World-writable SYMBOLIC modes: granting write to "others" (o+...) or "all" (a+...).
-# Requires '+' so that removals like "go-w" are NOT matched. Matches a+w, o+w, a+rwx,
-# o+rw, etc. (any '+' grant for the o/a class that includes 'w').
-_WORLD_WRITABLE_SYMBOLIC = r"[ao]\+[rwx]*w[rwx]*"
+# World-writable SYMBOLIC modes: a '+' or '=' grant including 'w' to a who-list
+# naming "others" or "all" (o+w, a=rwx, ugo+w, and one clause of u+x,o+w).
+# Removals like "go-w" are NOT matched.
+_WORLD_WRITABLE_SYMBOLIC = r"[ugoa]*[ao][ugoa]*[+=][rwxXst]*w[rwxXst]*"
 
-# Combined dangerous-permission pattern, anchored on chmod. Each alternative is
-# wrapped in word boundaries so it matches whole tokens, not substrings of paths.
-_DANGEROUS_PERMISSIONS_PATTERN = (
-    r"\bchmod\b.*\b(?:" + _WORLD_WRITABLE_OCTAL + r"|" + _WORLD_WRITABLE_SYMBOLIC + r")\b"
+_MODE = r"\b(?:" + _WORLD_WRITABLE_OCTAL + r"|" + _WORLD_WRITABLE_SYMBOLIC + r")\b"
+
+# Each pattern is anchored on the command that sets the mode, and matched one
+# command-position segment at a time.
+_DANGEROUS_PERMISSIONS_PATTERNS = (
+    re.compile(r"\bchmod\b.*" + _MODE),
+    # `install -m 777` / `install --mode=a+w`.
+    re.compile(r"(?:^|[\s/])install\s.*(?:-m\s*|--mode[=\s]\s*)" + _MODE),
+    # An ACL entry granting write to other: `o::rwx`, `other::rw-`, `d:o::rwx`.
+    re.compile(r"\bsetfacl\b.*(?:^|[\s,=])(?:d(?:efault)?:)?o(?:ther)?::?[r-]?w"),
+    # A umask leaving others' write bit unmasked (last digit 0, 1, 4 or 5),
+    # or a symbolic umask granting it.
+    re.compile(
+        r"\bumask\s+(?:-S\s+)?(?:0*[0-7]{0,3}[0145](?:\s|$)|" + _WORLD_WRITABLE_SYMBOLIC + ")"
+    ),
 )
+
+
+def sets_world_writable(command: str) -> bool:
+    """Whether ``command`` grants write to others/all: chmod, install, setfacl, umask.
+
+    One command at a time, in command position only: the pattern's `.*`
+    otherwise read a mode-shaped number from a LATER command
+    (`chmod 755 f; echo 1246`), and text an `echo`/`grep` merely prints is not
+    a chmod at all (ledger 00466 N58). Public so another handler can reuse the
+    detection without importing this handler class (discovery would register it
+    twice).
+    """
+    return any(
+        pattern.search(segment)
+        for segment in command_position_segments(command)
+        for pattern in _DANGEROUS_PERMISSIONS_PATTERNS
+    )
 
 
 class DangerousPermissionsHandler(PreToolUseHandlerBase):
@@ -122,15 +151,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return False
-
-        # One command at a time, in command position only: the pattern's `.*`
-        # otherwise read a mode-shaped number from a LATER command
-        # (`chmod 755 f; echo 1246`), and text an `echo`/`grep` merely prints
-        # is not a chmod at all (ledger 00466 N58).
-        return any(
-            re.search(_DANGEROUS_PERMISSIONS_PATTERN, segment)
-            for segment in command_position_segments(command)
-        )
+        return sets_world_writable(command)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

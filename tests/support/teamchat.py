@@ -94,3 +94,40 @@ BARE_LIST: Final[str] = _dump([seat("alpha", "worker")])
 ROW_WITHOUT_TEAM: Final[str] = _dump({"v": 1, "teams": [{"role": "coordinator"}]})
 ROLE_NOT_A_STRING: Final[str] = whoami(seat("alpha", ["coordinator"]))
 ROLE_WITH_CONTROL_CHARACTERS: Final[str] = whoami(seat("alpha", "coord\ninator"))
+
+
+# --- ``teamchat verify --team <T> <id>`` (Plan 00634) ---------------------------
+#
+# UNVERIFIED HERE: the questions-room ``verify`` answer is fedora-desktop issue
+# 369, which this repository has not seen. The shape below is PROVISIONAL, built
+# from the vet's reading of today's record (kind, sender, team, room, text; a
+# human line has ``kind == "human"``) plus the ``Q<n>`` the issue promises. The
+# verifier that reads it is not the production default until 369 is confirmed.
+
+#: A synthetic questions-room event id (Matrix ids start with ``$``).
+HUMAN_ID: Final[str] = "$synthetic-human-approval-0001"
+
+
+def verify_answer(
+    *,
+    event_id: str = HUMAN_ID,
+    team: str = "alpha",
+    room: Any = "questions",
+    kind: Any = "human",
+    question: Any = "Q7",
+    version: Any = 1,
+    **extra: Any,
+) -> str:
+    """A provisional ``verify --json`` answer for one line."""
+    document: dict[str, Any] = {
+        "v": version,
+        "id": event_id,
+        "team": team,
+        "room": room,
+        "kind": kind,
+        "sender": "@owner.synthetic:example.test",
+        "q": question,
+        "text": "yes, go ahead",
+        **extra,
+    }
+    return _dump(document)

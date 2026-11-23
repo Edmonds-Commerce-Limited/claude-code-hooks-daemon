@@ -776,6 +776,16 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
         "by its own dedicated unit suite with monkeypatched module functions: "
         "tests/unit/handlers/pre_tool_use/test_merge_to_main_approval.py"
     ),
+    "HumanApprovalCheckHandler": (
+        "matches only once a live teamchat seat resolves as coordinator (a runtime "
+        "signal in the payload plus a seat probe), and its merge-into-main reading "
+        "needs real cwd/git-repo state, none of which this harness's bare command "
+        "payload supplies. Its act classification parses commands with "
+        "git_invocations and the shared deletion/chmod detectors, and its own suite "
+        "pins `git -C`, `--no-pager`, `/usr/bin/git`, `sudo`, `\\git` and `cd &&` "
+        "respellings: tests/unit/handlers/pre_tool_use/test_human_approval_check.py "
+        "(TestClassifyActs.test_respelled_command_still_classifies)"
+    ),
 }
 
 # Per-handler setup for anything that needs configuration to match at all.
