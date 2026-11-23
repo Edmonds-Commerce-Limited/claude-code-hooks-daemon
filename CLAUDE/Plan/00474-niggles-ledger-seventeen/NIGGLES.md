@@ -8242,7 +8242,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Source**: fedora-desktop.1 dogfood report (peer account; the refusal itself is unverified here, the code reading below is verified read-only).
 
-**Evidence**: reported: linting a PLAN.md in a linked git worktree is refused unless `--project-root` is given; expected the worktree's own root (`git rev-parse --show-toplevel` from the file's directory). Reading `daemon/cli.py`: the plan-qa handler (`:10083`; `--lint` branch `:10146-10152`) calls `resolve_tree_root(args)` (`:357`) BEFORE it looks at the lint path. With no `--project-root` that is `get_project_path(None)` (`:273`), which walks up from the process CWD (`:295-322`), never from the lint file's directory, and needs a `.claude` dir plus a passing `_validate_installation`. So the root is the caller's CWD tree: run from the main checkout, a worktree file classifies OUTSIDE (exit 2, `Lint target is not a plan document`); run outside any install, it exits. No `git rev-parse` is on this path. The exact message the reporter saw is unverified.
+**Evidence**: reported: linting a PLAN.md in a linked git worktree is refused unless `--project-root` is given; expected the worktree's own root (`git rev-parse --show-toplevel` from the file's directory). Reading `daemon/cli.py`: the plan-qa handler (`cmd_plan_qa`; its `--lint` branch) calls `resolve_tree_root(args)` (`:357`) BEFORE it looks at the lint path. With no `--project-root` that is `get_project_path(None)` (`:273`), which walks up from the process CWD (`:295-322`), never from the lint file's directory, and needs a `.claude` dir plus a passing `_validate_installation`. So the root is the caller's CWD tree: run from the main checkout, a worktree file classifies OUTSIDE (exit 2, `Lint target is not a plan document`); run outside any install, it exits. No `git rev-parse` is on this path. The exact message the reporter saw is unverified.
 
 **Severity**: Low (workaround: pass `--project-root <worktree>`).
 
@@ -8320,7 +8320,7 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Source**: independent Opus review of PR 228 (`subagent-reports/261123-opus-independent-review-pr228.md`, finding 1). The reviewer's claim, UNVERIFIED here. Pre-existing; NOT caused by PR 228.
 
-**Evidence (reviewer's)**: from the project root with no `cd`, `cat kit/*/late` and `cat b?n/late` are allowed, while the literal `cat kit/bin/late` (where `late` links to a protected dummy file) is denied. The guard only handles a glob in the first path part (`secret_file_matching.py` around lines 4455 and 4468), so a glob in a later part skips the link/realpath check.
+**Evidence (reviewer's)**: from the project root with no `cd`, `cat kit/*/late` and `cat b?n/late` are allowed, while the literal `cat kit/bin/late` (where `late` links to a protected dummy file) is denied. The guard only handles a glob in the first path part (`secret_file_matching.py`, the `could_be_link` function), so a glob in a later part skips the link/realpath check.
 
 **Severity**: HIGH (security): a protected file's contents can be read through a link by a glob the guard does not expand.
 
