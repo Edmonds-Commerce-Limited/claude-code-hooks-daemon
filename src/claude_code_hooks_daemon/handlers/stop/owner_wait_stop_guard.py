@@ -29,7 +29,8 @@ is allowed: one refusal per stop chain, the convention of every one-shot Stop
 block. It also stands aside while the session is usage-paused.
 
 **Ordering.** Priority 3, ahead of ``idle_workable_issue_stop_gate`` (4) and the
-terminal ``auto_continue_stop`` (10); non-terminal, so those still run. Because
+terminal ``auto_continue_stop`` (15 by default, 10 in this project's config);
+non-terminal, so those still run. Because
 it runs before ``auto_continue_stop`` enters the awaiting-human mode, it reads
 the current message for the declaration as well as the mode.
 """

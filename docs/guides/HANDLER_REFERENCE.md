@@ -4876,6 +4876,8 @@ handlers:
         on_unreadable_bus: refuse
 ```
 
+---
+
 #### goal_loop_detector
 
 | Property       | Value                |

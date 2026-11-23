@@ -657,7 +657,8 @@ Additional test-first criteria (each red first):
 - The deny text names thread ids only and does not restate the awaited
   content; a stop text that restates the waits is not required to be rejected.
 - N is read from config; an invalid N falls back to the default and logs.
-- Unreadable bus: stop passes, loud log line.
+- Unreadable bus: loud log line; refused once under the default
+  `on_unreadable_bus: refuse`, passes under `allow` (corrected, see above).
 
 Owner-started threads (peer note relayed from the coordinator, who answered
 three such messages in other threads and the owner saw no response): a
