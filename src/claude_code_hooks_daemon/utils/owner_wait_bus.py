@@ -12,7 +12,8 @@ Status of the contract (unverified here, Plan 00636 Task 1.2):
   R11) are relayed text only; no teamchat binary is in this checkout.
 
 So :meth:`TeamchatOwnerWaitBus.read` runs nothing and reports the history
-unreadable, which the guard treats as fail-open with a loud log line. It
+unreadable; the guard's ``on_unreadable_bus`` option decides what that means
+(default ``refuse``: the wait cannot be confirmed, so it fails closed). It
 never opens teamchat's seat store, state root or run directory, and never
 reads a password file. Replace :meth:`read` once teamchat documents a JSON
 history carrying the notify flag and the thread relation.

@@ -23,11 +23,22 @@ class TestBumpCommand:
         assert bus.bump_command("alpha", ("Q61", "$x; rm -rf ~")) == "teamchat bump --waiting"
 
 
+class TestNotifyCommands:
+    def test_the_v1_notifying_reply_forms_for_a_question_and_an_owner_message(self) -> None:
+        question, owner_message = TeamchatOwnerWaitBus().notify_commands("alpha")
+        assert question == "pingbus thread --team alpha Q<n> --ask"
+        assert owner_message == "pingbus thread --team alpha --re <event id> --ask"
+
+    def test_an_unsafe_team_name_is_shell_quoted(self) -> None:
+        question, _ = TeamchatOwnerWaitBus().notify_commands("a b")
+        assert question == "pingbus thread --team 'a b' Q<n> --ask"
+
+
 class TestRead:
     def test_history_is_unreadable_until_teamchat_documents_the_fields(self) -> None:
         # No teamchat history contract exposing the notify flag and the m.thread
-        # relation is verified, so the adapter reports unreadable (fail open
-        # upstream) rather than parsing an invented format.
+        # relation is verified, so the adapter reports unreadable rather than
+        # parsing an invented format; the guard's on_unreadable_bus decides.
         result = TeamchatOwnerWaitBus().read("alpha", SessionSignals("/run/x", "/opt/kit"))
         assert isinstance(result, BusUnreadable)
         assert "unverified" in result.reason

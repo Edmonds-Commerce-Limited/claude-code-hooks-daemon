@@ -65,10 +65,19 @@ class _FakeBus:
     def bump_command(self, team: str, thread_ids: Sequence[str]) -> str:
         return "teamchat bump " + " ".join(thread_ids)
 
+    def notify_commands(self, team: str) -> tuple[str, str]:
+        return (
+            f"pingbus thread --team {team} Q<n> --ask",
+            f"pingbus thread --team {team} --re <event id> --ask",
+        )
+
 
 class _Handler(OwnerWaitStopGuardHandler):
-    def __init__(self, context: SeatContext | None, bus: _FakeBus) -> None:
+    def __init__(
+        self, context: SeatContext | None, bus: _FakeBus, *, on_unreadable_bus: object = "refuse"
+    ) -> None:
         super().__init__()
+        self._on_unreadable_bus = on_unreadable_bus
         self._context = context
         self._bus = bus
         self._clock = lambda: NOW
@@ -245,23 +254,134 @@ class TestAllow:
         assert _run(handler, hook_input) is None
         assert handler.resolved == 0
 
+
+
+class _Broken(_FakeBus):
+    def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
+        raise OSError("boom")
+
+
+def _multi_seats() -> SeatContext:
+    seats = (
+        TeamSeat(team="alpha", role_kind=RoleKind.DECLARED, role="coordinator", duty="lead"),
+        TeamSeat(team="beta", role_kind=RoleKind.DECLARED, role="worker", duty="lead"),
+    )
+    return SeatContext(SeatState.RESOLVED, ProbeReason.RESOLVED, seats)
+
+
+class TestUnreadableBusAllow:
+    """``on_unreadable_bus: allow`` -- the escape hatch: fail open, loudly."""
+
     def test_unreadable_bus_passes_with_a_loud_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         bus = _FakeBus(BusUnreadable("history timed out"))
         with caplog.at_level(logging.WARNING):
-            result = _run(_Handler(_seats(), bus), _stop(tmp_path))
+            result = _run(_Handler(_seats(), bus, on_unreadable_bus="allow"), _stop(tmp_path))
         assert result.decision is Decision.ALLOW
         assert any("history timed out" in rec.getMessage() for rec in caplog.records)
         assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
 
-    def test_a_raising_bus_fails_open(self, tmp_path: Path) -> None:
-        class _Broken(_FakeBus):
-            def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
-                raise OSError("boom")
+    def test_a_raising_bus_passes(self, tmp_path: Path) -> None:
+        handler = _Handler(_seats(), _Broken(BusSnapshot()), on_unreadable_bus="allow")
+        assert _run(handler, _stop(tmp_path)).decision is Decision.ALLOW
 
+
+class TestUnreadableBusRefuse:
+    """``on_unreadable_bus: refuse`` (the default) -- an unverifiable wait fails closed."""
+
+    def test_default_is_refuse(self) -> None:
+        assert OwnerWaitStopGuardHandler()._on_unreadable_bus == "refuse"
+
+    def test_unreadable_bus_is_refused_with_a_loud_log(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        with caplog.at_level(logging.WARNING):
+            result = _run(_Handler(_seats(), bus), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert any("history timed out" in rec.getMessage() for rec in caplog.records)
+        assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
+
+    def test_refusal_text_names_the_notifying_reply_and_the_restop(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        reason = _run(_Handler(_seats(), bus), _stop(tmp_path)).reason
+        assert "pingbus thread --team alpha Q<n> --ask" in reason
+        assert "pingbus thread --team alpha --re <event id> --ask" in reason
+        assert "stop again" in reason
+
+    def test_refusal_text_says_why_it_could_not_be_confirmed(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        reason = _run(_Handler(_seats(), bus), _stop(tmp_path)).reason
+        assert "history timed out" in reason
+        assert "notify flag" in reason
+        assert "m.thread" in reason
+        assert "unverified" in reason
+
+    def test_refusal_text_does_not_restate_the_waits(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        reason = _run(_Handler(_seats(), bus), _stop(tmp_path)).reason
+        assert "Q61" not in reason
+        assert "Q64" not in reason
+        assert "owner's answers" not in reason
+        assert "teamchat bump" not in reason
+
+    def test_a_raising_bus_is_refused(self, tmp_path: Path) -> None:
         result = _run(_Handler(_seats(), _Broken(BusSnapshot())), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert "boom" not in result.reason
+
+    def test_only_a_coordinator_team_can_refuse(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        result = _run(_Handler(_multi_seats(), bus), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert bus.reads == ["alpha"]
+        assert "--team beta" not in result.reason
+
+    def test_worker_seat_is_untouched(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        result = _run(_Handler(_seats("worker"), bus), _stop(tmp_path))
         assert result.decision is Decision.ALLOW
+        assert bus.reads == []
+
+    def test_no_team_seat_is_untouched(self, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(BusUnreadable("history timed out")))
+        hook_input = _stop(tmp_path)
+        del hook_input["teamchat_runtime"]
+        assert _run(handler, hook_input) is None
+
+    def test_reentry_is_never_trapped(self, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(BusUnreadable("history timed out")))
+        assert _run(handler, _stop(tmp_path, stop_hook_active=True)) is None
+
+    def test_stale_threads_and_an_unreadable_team_are_both_reported(
+        self, tmp_path: Path
+    ) -> None:
+        class _PerTeam(_FakeBus):
+            def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
+                self.reads.append(team)
+                if team == "alpha":
+                    return _snapshot(_question("Q61"))
+                return BusUnreadable("history timed out")
+
+        seats = (
+            TeamSeat(team="alpha", role_kind=RoleKind.DECLARED, role="coordinator"),
+            TeamSeat(team="gamma", role_kind=RoleKind.DECLARED, role="coordinator"),
+        )
+        context = SeatContext(SeatState.RESOLVED, ProbeReason.RESOLVED, seats)
+        reason = _run(_Handler(context, _PerTeam(BusSnapshot())), _stop(tmp_path)).reason
+        assert "teamchat bump Q61" in reason
+        assert "--team gamma" in reason
+
+    @pytest.mark.parametrize("bad", ["deny", "", None, 1, True])
+    def test_invalid_value_falls_back_to_refuse_and_logs(
+        self, bad: object, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        with caplog.at_level(logging.WARNING):
+            result = _run(_Handler(_seats(), bus, on_unreadable_bus=bad), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert any("on_unreadable_bus" in rec.getMessage() for rec in caplog.records)
 
 
 class TestWindowOption:
