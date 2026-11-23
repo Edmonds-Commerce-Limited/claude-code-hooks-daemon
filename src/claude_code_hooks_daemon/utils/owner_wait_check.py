@@ -29,15 +29,75 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-#: Words a bump command or a mention adds on its own; removing them must leave content.
+#: Words a bump, a chase or a mention adds on its own; removing them must leave content.
 BOILERPLATE_WORDS: Final[frozenset[str]] = frozenset(
-    {"still", "waiting", "bump", "bumped", "ping", "re"}
+    {
+        "still",
+        "waiting",
+        "wait",
+        "bump",
+        "bumped",
+        "bumping",
+        "ping",
+        "pinging",
+        "nudge",
+        "reminder",
+        "chasing",
+        "follow",
+        "up",
+        "update",
+        "news",
+        "please",
+        "thanks",
+        "re",
+    }
+)
+#: Function words that name nothing on their own; a body of only these is boilerplate.
+STOPWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "on",
+        "for",
+        "to",
+        "of",
+        "in",
+        "at",
+        "by",
+        "with",
+        "from",
+        "about",
+        "this",
+        "that",
+        "it",
+        "any",
+        "and",
+        "or",
+        "is",
+        "are",
+        "i",
+        "am",
+        "you",
+        "me",
+        "your",
+        "my",
+        "we",
+        "us",
+        "there",
+        "here",
+        "yet",
+    }
 )
 _MENTION: Final[re.Pattern[str]] = re.compile(r"@\S+")
 _WORD: Final[re.Pattern[str]] = re.compile(r"[^\W_]+")
 #: The two thread-id shapes the bump command may name: a question, or a Matrix event id.
 _QUESTION_ID: Final[re.Pattern[str]] = re.compile(r"Q[0-9]{1,6}")
 _EVENT_ID: Final[re.Pattern[str]] = re.compile(r"\$[A-Za-z0-9._~+/=:-]{1,255}")
+#: A thread id inside free text, which names the thread rather than what is awaited.
+_THREAD_ID_IN_TEXT: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w$])(?:[Qq][0-9]{1,6}\b|\$[A-Za-z0-9._~+/=:-]{1,255})"
+)
 
 
 class ThreadKind(StrEnum):
@@ -90,9 +150,14 @@ class BusSnapshot:
 
 
 def has_meaningful_body(body: str) -> bool:
-    """Whether ``body`` names something beyond mentions and bump boilerplate."""
-    words = _WORD.findall(_MENTION.sub(" ", body).casefold())
-    return any(word not in BOILERPLATE_WORDS for word in words)
+    """Whether ``body`` names something beyond mentions, thread ids and bump boilerplate.
+
+    Mentions and thread ids are removed first; what is left must hold at least
+    one word that is neither bump/chase boilerplate nor a stopword.
+    """
+    stripped = _THREAD_ID_IN_TEXT.sub(" ", _MENTION.sub(" ", body))
+    words = _WORD.findall(stripped.casefold())
+    return any(word not in BOILERPLATE_WORDS and word not in STOPWORDS for word in words)
 
 
 def printable_thread_id(thread_id: str) -> str | None:

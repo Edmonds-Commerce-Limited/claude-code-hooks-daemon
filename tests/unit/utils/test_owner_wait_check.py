@@ -158,6 +158,25 @@ class TestBody:
     def test_empty_is_boilerplate(self) -> None:
         assert not has_meaningful_body("")
 
+    # F7 (PR 226 review): a thread id, a stopword or a politeness word is not content.
+    def test_bump_with_a_question_id_is_boilerplate(self) -> None:
+        assert not has_meaningful_body("bump Q61")
+
+    def test_bump_with_an_event_id_is_boilerplate(self) -> None:
+        assert not has_meaningful_body("bump $abc123:example.org")
+
+    def test_still_waiting_on_a_mention_is_boilerplate(self) -> None:
+        assert not has_meaningful_body("still waiting on @owner")
+
+    def test_ping_please_is_boilerplate(self) -> None:
+        assert not has_meaningful_body("ping please")
+
+    def test_stopwords_only_is_boilerplate(self) -> None:
+        assert not has_meaningful_body("re Q61: any news on this, please?")
+
+    def test_one_content_word_beside_an_id_counts(self) -> None:
+        assert has_meaningful_body("bump Q61: merge?")
+
 
 class TestPrintableId:
     def test_question_id_is_printable(self) -> None:
