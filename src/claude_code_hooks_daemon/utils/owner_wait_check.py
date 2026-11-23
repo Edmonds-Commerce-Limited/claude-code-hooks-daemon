@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
@@ -114,13 +114,18 @@ class OwnerThread:
     message's event id); ``root_event_id`` is what an ``m.thread`` relation
     points at. ``is_open`` is read for seat questions; an owner-started
     thread's openness is decided here from the replies.
+
+    ``started_at`` is required: it is when the thread's root was posted, in
+    Unix seconds (the unit of ``time.time()``). Matrix ``origin_server_ts`` is
+    in milliseconds and must be divided by 1000 by the adapter. A defaulted
+    zero would let any past self-reply close an owner-started thread.
     """
 
     thread_id: str
     root_event_id: str
     kind: ThreadKind
     is_open: bool = True
-    started_at: float = 0.0
+    started_at: float = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -130,7 +135,9 @@ class BusPost:
     ``thread_root`` is the ``m.thread`` relation's target (``None``: no
     relation); ``relation_readable`` is False when the entry's relations
     could not be read at all. ``in_reply_to`` is carried only so it can be
-    shown NOT to count.
+    shown NOT to count. ``timestamp`` is in Unix seconds, compared against
+    ``time.time()``; a Matrix ``origin_server_ts`` (milliseconds) must be
+    divided by 1000 by the adapter, or no post would ever qualify.
     """
 
     event_id: str

@@ -96,7 +96,9 @@ class _Handler(OwnerWaitStopGuardHandler):
 
 
 def _question(thread_id: str = "Q61", *, open_: bool = True) -> OwnerThread:
-    return OwnerThread(thread_id, f"${thread_id}root", ThreadKind.SEAT_QUESTION, is_open=open_)
+    return OwnerThread(
+        thread_id, f"${thread_id}root", ThreadKind.SEAT_QUESTION, is_open=open_, started_at=0.0
+    )
 
 
 def _bump(

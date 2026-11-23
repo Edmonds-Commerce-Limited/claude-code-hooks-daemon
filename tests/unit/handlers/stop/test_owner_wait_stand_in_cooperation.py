@@ -80,7 +80,9 @@ class _Guard(OwnerWaitStopGuardHandler):
 
 
 def _stale() -> BusSnapshot:
-    return BusSnapshot(threads=(OwnerThread("Q61", "$Q61root", ThreadKind.SEAT_QUESTION),))
+    return BusSnapshot(
+        threads=(OwnerThread("Q61", "$Q61root", ThreadKind.SEAT_QUESTION, started_at=0.0),)
+    )
 
 
 def _bumped() -> BusSnapshot:

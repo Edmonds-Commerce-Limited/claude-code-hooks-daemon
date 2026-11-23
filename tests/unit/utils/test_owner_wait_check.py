@@ -7,6 +7,8 @@ has a test here.
 
 from __future__ import annotations
 
+import dataclasses
+
 from claude_code_hooks_daemon.utils.owner_wait_check import (
     BusPost,
     BusSnapshot,
@@ -25,7 +27,11 @@ OWNER_ROOT = "$ownerMsg1"
 
 def _question(thread_id: str = "Q61", root: str = Q61_ROOT, *, open_: bool = True) -> OwnerThread:
     return OwnerThread(
-        thread_id=thread_id, root_event_id=root, kind=ThreadKind.SEAT_QUESTION, is_open=open_
+        thread_id=thread_id,
+        root_event_id=root,
+        kind=ThreadKind.SEAT_QUESTION,
+        is_open=open_,
+        started_at=NOW - 7200,
     )
 
 
@@ -101,7 +107,11 @@ class TestSeatQuestions:
 
     def test_foreign_question_is_ignored(self) -> None:
         foreign = OwnerThread(
-            thread_id="Q9", root_event_id="$q9", kind=ThreadKind.FOREIGN, is_open=True
+            thread_id="Q9",
+            root_event_id="$q9",
+            kind=ThreadKind.FOREIGN,
+            is_open=True,
+            started_at=NOW - 7200,
         )
         assert _stale(foreign) == ()
 
@@ -176,6 +186,21 @@ class TestBody:
 
     def test_one_content_word_beside_an_id_counts(self) -> None:
         assert has_meaningful_body("bump Q61: merge?")
+
+
+class TestAdapterContract:
+    # F8 (PR 226 review): a defaulted started_at of 0.0 let any past self-reply
+    # close an owner-started thread, so an adapter must always supply it.
+    def test_started_at_has_no_default(self) -> None:
+        started_at = {field.name: field for field in dataclasses.fields(OwnerThread)}["started_at"]
+        assert started_at.default is dataclasses.MISSING
+        assert started_at.default_factory is dataclasses.MISSING
+
+    def test_the_contract_states_timestamps_are_in_seconds(self) -> None:
+        for documented in (OwnerThread.__doc__, BusPost.__doc__):
+            assert documented is not None
+            assert "seconds" in documented
+            assert "millisecond" in documented
 
 
 class TestPrintableId:
