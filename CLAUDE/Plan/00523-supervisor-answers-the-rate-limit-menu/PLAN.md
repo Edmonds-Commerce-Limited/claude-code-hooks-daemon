@@ -1,6 +1,6 @@
 # Plan 00523: supervisor answers the rate limit menu
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-14
 **Owner**: dev
 **Priority**: Medium
@@ -38,9 +38,6 @@ writing the keystroke.
 
 - Choosing any option other than waiting (extra usage, switching model).
 - Changing the daemon's usage pause (Plan 00479) or its `/compact`.
-- Editing the live supervisor in place. The change ships through the
-  installer-managed template and reaches `.claude/ccy/` like any other
-  supervisor change.
 
 ## Tasks
 
@@ -57,10 +54,16 @@ writing the keystroke.
 
 ### Phase 2: Recogniser (TDD)
 
-- [ ] ⬜ **Task 2.1**: RED: tests on the captured bytes. The menu is
+- [x] ✅ **Task 2.1**: RED: tests on the captured bytes. The menu is
   recognised. Ordinary output that quotes the menu's wording is not
-  recognised. Output split across chunks is handled.
-- [ ] ⬜ **Task 2.2**: GREEN: a bounded tail of child output, kept as a ring
+  recognised. Output split across chunks is handled. Done on RECONSTRUCTED
+  screen fixtures (no live capture yet, Task 1.1); the rendered screen makes
+  chunk splitting moot.
+- [x] ✅ **Task 2.2**: GREEN. As built, the host sends the bottom 40 rows of
+  `hooks-screen --dump` (`TickFacts.screen_dump`, only after 2 s of quiet
+  output), and the worker's `_rate_limit_dialog_step` matches them. This is
+  in the supervisor itself, not a plugin: the step must decide the whole tick
+  ahead of the usage pause. Original wording: a bounded tail of child output, kept as a ring
   buffer like `RawInputTap`, plus the recogniser. The tail is inspected only
   when a closer look is triggered (owner's suggestion): output has been quiet
   past a threshold, as the existing `OutputActivity` settle logic measures it,
@@ -68,9 +71,15 @@ writing the keystroke.
   (Claude Code redraws menus with cursor movement) before matching, never
   matched as raw bytes. Put it in a plugin if Plan 00487's API fits;
   otherwise say why it does not.
-- [ ] ⬜ **Task 2.3**: The keystroke is sent once per menu occurrence. A latch
+- [x] ✅ **Task 2.3**: The keystroke is sent once per menu occurrence. A latch
   clears only when the menu leaves the screen. Each press is logged to the
-  decision log, and dry-run mode logs it without sending.
+  decision log, and dry-run mode logs it without sending. As built, the latch
+  is per reset window, and the keys are capped per occurrence and per window.
+- [x] ✅ **Task 2.4** (added): after the reset, clear the pre-filled box and
+  send one `continue`. Two guards go with it:
+  - every other family is held while the pre-fill may be in the box;
+  - output after the reset opens a bounded re-check rather than abandoning the
+    window outright.
 
 ### Phase 2b: Hold every injection until a hard limit resets (owner report)
 
@@ -95,14 +104,18 @@ weekly limit · resets <time>", and the supervisor retried regardless.
 
 - [ ] ⬜ **Task 3.1**: Verify on a real session that hits a limit. The menu is
   answered, the session waits, and work resumes at the reset.
-- [ ] ⬜ **Task 3.2**: Add a release note for the new supervisor behaviour.
+- [x] ✅ **Task 3.2**: Add a release note for the new supervisor behaviour
+  (`025-supervisor-answers-the-rate-limit-dialog.md`).
+- [ ] ⬜ **Task 3.3**: Independent review and the full QA gate, then merge.
 
 ## Success Criteria
 
 - [ ] On a real limit hit, the menu is answered once and the session waits for
   the reset, proven by tests that failed first and by one live observation.
-- [ ] Release-bound consequences are recorded in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Release-bound consequences are recorded in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`025-supervisor-answers-the-rate-limit-dialog.md`; no truth or config
+  changes).
 
 ## Delivery & Milestones
 
@@ -112,3 +125,16 @@ weekly limit · resets <time>", and the supervisor retried regardless.
 
 - Filed at the owner's request; the dedupe scout found no overlapping plan
   (55 live plans checked).
+
+- Branch `plan-00523-rate-limit-dialog`. The commits so far:
+
+  - recogniser and parsers: `1c1e27190`
+  - dialog answer: `56a74347d`
+  - resume: `997ceae6c`
+  - host screen dump: `ad6f29fa1`
+  - pre-fill hold: `d4e5b2f02`
+  - re-check window: `1dc68225e`
+  - docs: `76cab97bf`
+
+  The host part takes effect on the next ccy relaunch. Phase 1 (live capture)
+  and Phase 2b are still open.
