@@ -8749,6 +8749,8 @@ _RATE_LIMIT_SETTLE_SECONDS = 3.0
 _RATE_LIMIT_OCCURRENCE_KEY_CAP = 6
 _RATE_LIMIT_WINDOW_KEY_CAP = 30
 _RATE_LIMIT_STATE_TTL_SECONDS = 86400.0
+# ``btime`` is whole seconds, so the derived start can sit a little late.
+_RATE_LIMIT_START_SLACK_SECONDS = 5.0
 _RATE_LIMIT_RESUME_GRACE_SECONDS = 120.0
 _RATE_LIMIT_RECHECK_SECONDS = 600.0
 _RATE_LIMIT_CLEAR_ATTEMPTS = 2
@@ -8779,13 +8781,53 @@ def _rate_limit_dialog_enabled() -> bool:
     return raw.strip().lower() not in _RATE_LIMIT_OFF_VALUES
 
 
-def _rate_limit_state_path(status_dir: Path, child_pid: int) -> Path:
-    """The per-instance state file: the sidecar directory is shared by every terminal."""
-    return status_dir / f"{_RATE_LIMIT_STATE_PREFIX}.{child_pid}.json"
+def _read_child_start(child_pid: int, proc_root: Path = Path("/proc")) -> tuple[int, float] | None:
+    """The child's start as ``(clock ticks since boot, wall-clock seconds)``, or None.
+
+    Field 22 of ``/proc/<pid>/stat``, counted after the closing ``)`` of the
+    command name (which may hold spaces and parentheses); the wall time adds
+    it to ``btime`` from ``/proc/stat``.
+    """
+    try:
+        stat = (proc_root / str(child_pid) / "stat").read_text(encoding="utf-8")
+        boot = (proc_root / "stat").read_text(encoding="utf-8")
+        ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        btime = next(
+            int(line.split()[1]) for line in boot.splitlines() if line.startswith("btime ")
+        )
+        return ticks, btime + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
 
 
-def _load_rate_limit_state(path: Path, now: float) -> dict[str, object]:
-    """The stored state, or ``{}`` when absent, unreadable or a day past its window."""
+def _rate_limit_child_start(child_pid: int) -> tuple[int, float] | None:
+    """The running child's start, read from the real ``/proc``."""
+    return _read_child_start(child_pid)
+
+
+def _rate_limit_state_path(status_dir: Path, child_pid: int) -> Path | None:
+    """The state file of THIS Claude child, or None when its start time is unreadable.
+
+    Keyed on the pid and its start ticks: the status directory is shared by
+    every terminal, and a pid is reused after a restart or in another pid
+    namespace. None turns the feature off for the tick (nothing is typed).
+    """
+    start = _rate_limit_child_start(child_pid)
+    if start is None:
+        return None
+    return status_dir / f"{_RATE_LIMIT_STATE_PREFIX}.{child_pid}-{start[0]}.json"
+
+
+def _rate_limit_session_start(child_pid: int) -> float:
+    """The child's wall-clock start, ``inf`` when unreadable (no stored state is trusted)."""
+    start = _rate_limit_child_start(child_pid)
+    return float("inf") if start is None else start[1]
+
+
+def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, object]:
+    """The stored state, or ``{}`` when absent, unreadable, a day past its window,
+    or opened before this child started (a pid and start ticks repeated by a
+    fresh pid namespace)."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -8795,12 +8837,27 @@ def _load_rate_limit_state(path: Path, now: float) -> dict[str, object]:
         return {}
     if not isinstance(data, dict):
         return {}
+    opened = data.get("window_opened")
+    if not isinstance(opened, (int, float)) or opened < (
+        _rate_limit_session_start(child_pid) - _RATE_LIMIT_START_SLACK_SECONDS
+    ):
+        return {}
     anchor = data.get("window_reset")
     if not isinstance(anchor, (int, float)):
-        anchor = data.get("window_opened")
-    if not isinstance(anchor, (int, float)) or now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS:
+        anchor = opened
+    if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS:
         return {}
     return data
+
+
+def _sweep_rate_limit_states(status_dir: Path, now: float) -> None:
+    """Delete state files of any child untouched for longer than the state TTL."""
+    for stale in status_dir.glob(f"{_RATE_LIMIT_STATE_PREFIX}.*.json"):
+        try:
+            if now - stale.stat().st_mtime > 2 * _RATE_LIMIT_STATE_TTL_SECONDS:
+                stale.unlink()
+        except OSError as exc:
+            append_worker_error(f"could not sweep {stale.name}: {exc}")
 
 
 def _save_rate_limit_state(path: Path, state: dict[str, object]) -> None:
@@ -8872,10 +8929,13 @@ def _rate_limit_dialog_step(
     """
     if facts.child_pid is None or not _rate_limit_dialog_enabled():
         return None, None
-    path = _rate_limit_state_path(status_dir, facts.child_pid)
+    child_pid = facts.child_pid
+    path = _rate_limit_state_path(status_dir, child_pid)
+    if path is None:
+        return None, None
     note: str | None = None
     if _human_typed(facts.human_raw_input) and path.exists():
-        state = _load_rate_limit_state(path, facts.now_wall)
+        state = _load_rate_limit_state(path, facts.now_wall, child_pid)
         phase = state.get("phase")
         if phase in (_PHASE_ANSWERED, _PHASE_CLEARED) or (
             phase == "" and state.get("occurrence_open")
@@ -8889,7 +8949,7 @@ def _rate_limit_dialog_step(
     dialog = recognise_rate_limit_dialog(dump)
     if dialog is None:
         if path.exists():
-            state = _load_rate_limit_state(path, facts.now_wall)
+            state = _load_rate_limit_state(path, facts.now_wall, child_pid)
             if state.get("occurrence_open"):
                 state["occurrence_open"] = False
                 state["occurrence_keys"] = 0
@@ -8916,8 +8976,9 @@ def _rate_limit_dialog_step(
 
     now = facts.now_wall
     reset = parse_rate_limit_reset(dump, now)
-    state = _load_rate_limit_state(path, now)
+    state = _load_rate_limit_state(path, now, child_pid)
     if not state or (reset is not None and reset != state.get("window_reset")):
+        _sweep_rate_limit_states(status_dir, now)
         state = _new_rate_limit_window(reset, now)
     phase = state.get("phase")
     if not state.get("occurrence_open"):
@@ -8988,9 +9049,9 @@ def _rate_limit_prefill_blocks(facts: TickFacts, status_dir: Path) -> bool:
     if facts.child_pid is None or not _rate_limit_dialog_enabled():
         return False
     path = _rate_limit_state_path(status_dir, facts.child_pid)
-    if not path.exists():
+    if path is None or not path.exists():
         return False
-    state = _load_rate_limit_state(path, facts.now_wall)
+    state = _load_rate_limit_state(path, facts.now_wall, facts.child_pid)
     phase = state.get("phase")
     if phase in (_PHASE_ANSWERED, _PHASE_CLEARED):
         # Also while the occurrence is still open: the Enter sets `answered`
@@ -9030,10 +9091,10 @@ def _rate_limit_resume_step(
     if facts.child_pid is None or not facts.screen_dump or not _rate_limit_dialog_enabled():
         return None, None
     path = _rate_limit_state_path(status_dir, facts.child_pid)
-    if not path.exists():
+    if path is None or not path.exists():
         return None, None
     now = facts.now_wall
-    state = _load_rate_limit_state(path, now)
+    state = _load_rate_limit_state(path, now, facts.child_pid)
     phase = state.get("phase")
     if phase not in (_PHASE_ANSWERED, _PHASE_CLEARED) or state.get("occurrence_open"):
         return None, None

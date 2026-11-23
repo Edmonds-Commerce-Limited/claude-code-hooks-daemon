@@ -302,7 +302,18 @@ def _write_red_sidecar(sidecar_dir: Path, *, now: float = _NOW) -> None:
 
 
 def _state_path(sidecar_dir: Path, child_pid: int = _CHILD) -> Path:
-    return sidecar_dir.parent / f"supervise-rate-limit-dialog.{child_pid}.json"
+    path = _mod._rate_limit_state_path(sidecar_dir.parent, child_pid)
+    assert path is not None
+    return Path(path)
+
+
+# Every fake child "started" at the epoch with start ticks derived from its pid,
+# unless a test says otherwise; a missing entry reads as an unreadable /proc.
+@pytest.fixture(autouse=True)
+def _child_starts(monkeypatch: pytest.MonkeyPatch) -> dict[int, tuple[int, float]]:
+    starts: dict[int, tuple[int, float]] = {_CHILD: (_CHILD * 100, 0.0), 7: (700, 0.0)}
+    monkeypatch.setattr(_mod, "_rate_limit_child_start", lambda pid: starts.get(pid), raising=False)
+    return starts
 
 
 @pytest.fixture
@@ -889,9 +900,7 @@ class TestPrefillHold:
         outcome = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("continue")))
         assert outcome.payload is None
 
-    def test_restore_held_while_the_answered_dialog_is_still_closing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_restore_held_while_the_answered_dialog_is_still_closing(self, tmp_path: Path) -> None:
         # The Enter sets `answered` with the occurrence still open; the closing
         # redraw sends an empty dump, and the pre-fill is already there.
         sidecar_dir, machine, later = self._ready(tmp_path)
@@ -944,3 +953,94 @@ class TestPrefillHold:
         _prefill_state(tmp_path, phase="answered", reset=later + 3600.0)
         held = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("continue")))
         assert held.payload is None
+
+
+# ── Review I1: the state belongs to one Claude child, not to a reused pid ─────
+
+
+class TestStateScopedToTheChild:
+    def test_reused_pid_with_another_start_time_does_not_inherit_the_state(
+        self, sidecar_dir: Path, machine: Any, _child_starts: dict[int, tuple[int, float]]
+    ) -> None:
+        # Session A answers at 10:00; the container restarts and session B's
+        # Claude child gets the same pid with a different start time.
+        _answer_and_close(sidecar_dir, machine)
+        _child_starts[_CHILD] = (999_999, _NOW + 60.0)
+        facts = _resume_facts("continue", now=_NOW + 600.0)
+        assert not _mod._rate_limit_prefill_blocks(facts, sidecar_dir.parent)
+        resumed = _resume(sidecar_dir, machine, _resume_facts("continue"))
+        assert resumed.decision_value not in (_KEY, _CONTINUE)
+
+    def test_same_pid_and_ticks_but_state_older_than_the_session_is_ignored(
+        self, sidecar_dir: Path, machine: Any, _child_starts: dict[int, tuple[int, float]]
+    ) -> None:
+        # A fresh pid namespace after a host reboot can repeat both the pid and
+        # the start ticks; the state's own time then predates the session.
+        _answer_and_close(sidecar_dir, machine)
+        ticks, _ = _child_starts[_CHILD]
+        _child_starts[_CHILD] = (ticks, _NOW + 60.0)
+        facts = _resume_facts("continue", now=_NOW + 600.0)
+        assert not _mod._rate_limit_prefill_blocks(facts, sidecar_dir.parent)
+        resumed = _resume(sidecar_dir, machine, _resume_facts("continue"))
+        assert resumed.decision_value not in (_KEY, _CONTINUE)
+
+    def test_unreadable_start_time_types_nothing(
+        self, sidecar_dir: Path, machine: Any, _child_starts: dict[int, tuple[int, float]]
+    ) -> None:
+        del _child_starts[_CHILD]
+        for offset in range(3):
+            outcome = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            assert outcome.decision_value != _KEY
+        assert list(sidecar_dir.parent.glob("supervise-rate-limit-dialog.*")) == []
+
+    def test_state_file_name_carries_the_start_ticks(self, sidecar_dir: Path) -> None:
+        assert _state_path(sidecar_dir).name == f"supervise-rate-limit-dialog.{_CHILD}-424200.json"
+
+    def test_expired_state_files_of_other_children_are_swept(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        import os
+
+        stale = sidecar_dir.parent / "supervise-rate-limit-dialog.17-1700.json"
+        stale.write_text("{}", encoding="utf-8")
+        old = _NOW - 3 * 86400.0
+        os.utime(stale, (old, old))
+        fresh = sidecar_dir.parent / "supervise-rate-limit-dialog.18-1800.json"
+        fresh.write_text("{}", encoding="utf-8")
+        os.utime(fresh, (_NOW - 60.0, _NOW - 60.0))
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        assert not stale.exists()
+        assert fresh.exists()
+
+
+class TestReadChildStart:
+    def _proc(self, tmp_path: Path, stat_line: str, btime: int = 1_700_000_000) -> Path:
+        proc = tmp_path / "proc"
+        (proc / "4242").mkdir(parents=True)
+        (proc / "4242" / "stat").write_text(stat_line, encoding="utf-8")
+        (proc / "stat").write_text(f"cpu  1 2 3\nbtime {btime}\nprocesses 9\n", encoding="utf-8")
+        return proc
+
+    def test_field_22_after_a_comm_with_spaces_and_parens(self, tmp_path: Path) -> None:
+        import os
+
+        fields = ["S"] + [str(n) for n in range(4, 22)] + ["5000"] + ["0"] * 10
+        proc = self._proc(tmp_path, "4242 (cla (u) de) " + " ".join(fields) + "\n")
+        start = _mod._read_child_start(4242, proc)
+        assert start is not None
+        ticks, wall = start
+        assert ticks == 5000
+        assert wall == pytest.approx(1_700_000_000 + 5000 / os.sysconf("SC_CLK_TCK"))
+
+    def test_missing_process_is_none(self, tmp_path: Path) -> None:
+        proc = self._proc(tmp_path, "garbage")
+        assert _mod._read_child_start(4242, proc) is None
+        assert _mod._read_child_start(1, proc) is None
+
+    def test_this_process_reads_from_the_real_proc(self) -> None:
+        import os
+        import time
+
+        start = _mod._read_child_start(os.getpid())
+        assert start is not None
+        assert 0 < start[1] <= time.time() + 1
