@@ -30,6 +30,52 @@ class TestSetsWorldWritable:
     def test_not_world_writable(self, command: str) -> None:
         assert sets_world_writable(command) is False
 
+    # Review finding 3: shapes the seam missed (shared with dangerous_permissions).
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "chmod a=rwx f",
+            "chmod o=rwx f",
+            "chmod ugo+w f",
+            "chmod u+x,o+w f",
+            "chmod 00777 f",
+            "install -m 777 a b",
+            "sudo install -m 0666 a b",
+            "install --mode=a+w a b",
+            "setfacl -m o::rwx f",
+            "setfacl -m other::rw- f",
+            "setfacl -R -m d:o::rwx d",
+            "umask 000",
+            "umask 0",
+            "umask a=rwx",
+        ],
+    )
+    def test_world_writable_beyond_chmod_octal(self, command: str) -> None:
+        assert sets_world_writable(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "chmod u=rwx f",
+            "chmod go=rx f",
+            "chmod 0755 f",
+            "chmod 00755 f",
+            "install -m 755 a b",
+            "install -d dir",
+            "umask 022",
+            "umask 077",
+            "umask 002",
+            "umask",
+            "umask -S",
+            "setfacl -m u:bob:rwx f",
+            "setfacl -m o::r-x f",
+            "echo umask 000",
+            "pip install requests",
+        ],
+    )
+    def test_safe_modes_stay_allowed(self, command: str) -> None:
+        assert sets_world_writable(command) is False
+
 
 class TestMergeLandsOnMain:
     def _patch(
@@ -71,6 +117,14 @@ class TestIsPrMerge:
         assert is_pr_merge(command) is True
 
     @pytest.mark.parametrize(
+        "command",
+        ["gh -R o/r pr merge 5", "gh --repo=o/r pr merge 5", "gh pr -R o/r merge 5"],
+    )
+    def test_pr_merge_with_repo_flag(self, command: str) -> None:
+        """Review finding 3: the repo flag before `pr` hid the merge (shared seam)."""
+        assert is_pr_merge(command) is True
+
+    @pytest.mark.parametrize(
         "command", ["gh pr view 12", "git commit -m 'gh pr merge 12'", "git merge feature"]
     )
     def test_not_pr_merge(self, command: str) -> None:
@@ -101,4 +155,36 @@ class TestNamesADeletion:
         ["git push origin feature", "git branch feature", "git commit -m 'git branch -D x'"],
     )
     def test_not_deletion(self, command: str) -> None:
+        assert names_a_deletion(command) is False
+
+    # Review finding 3: tag deletes, API ref deletes and removing ref files.
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git tag -d v1",
+            "git tag --delete v1",
+            "gh api -X DELETE repos/o/r/git/refs/heads/foo",
+            "gh api --method DELETE repos/o/r/git/refs/tags/v1",
+            "gh api repos/o/r/git/refs/heads/foo -XDELETE",
+            "rm -rf .git/refs/heads/foo",
+            "sudo rm ../repo/.git/refs/tags/v1",
+            "rm -f .git/packed-refs",
+        ],
+    )
+    def test_other_ref_deletions(self, command: str) -> None:
+        assert names_a_deletion(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git tag v1",
+            "git tag -l",
+            "gh api repos/o/r/git/refs/heads/foo",
+            "gh api -X DELETE repos/o/r/issues/comments/1",
+            "echo rm -rf .git/refs/heads/foo",
+            "rm -rf build/",
+            "git commit -m 'git tag -d v1'",
+        ],
+    )
+    def test_not_a_ref_deletion(self, command: str) -> None:
         assert names_a_deletion(command) is False

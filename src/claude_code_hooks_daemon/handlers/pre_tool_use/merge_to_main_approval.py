@@ -66,8 +66,10 @@ _GIT_MERGE_RE: Final[re.Pattern[str]] = re.compile(
     rf"{GIT_INVOCATION}merge(?=\s|$)({_SEGMENT})",
     re.IGNORECASE,
 )
+#: `-R o/r` / `--repo o/r` / `--repo=o/r`, which may sit before `pr` or `merge`.
+_GH_REPO_FLAG: Final[str] = r"(?:\s+(?:-R|--repo)(?:=|\s+)\S+)?"
 _GH_PR_MERGE_RE: Final[re.Pattern[str]] = re.compile(
-    rf"\bgh\s+pr\s+merge(?=\s|$)({_SEGMENT})",
+    rf"\bgh{_GH_REPO_FLAG}\s+pr{_GH_REPO_FLAG}\s+merge(?=\s|$)({_SEGMENT})",
     re.IGNORECASE,
 )
 # `git pull <repository> <refspec>` merges that refspec into the checked-out
