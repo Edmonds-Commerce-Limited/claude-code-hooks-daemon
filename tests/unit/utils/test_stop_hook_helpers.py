@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
     is_stop_hook_active,
+    recent_stop_hook_block_texts,
     transcript_is_readable,
 )
 
@@ -407,6 +408,61 @@ class TestHasRecentStopHookBlock:
             f.write(json.dumps("plain string") + "\n")
             f.write(json.dumps(42) + "\n")
         assert has_recent_stop_hook_block(str(path)) is False
+
+
+class TestRecentStopHookBlockTexts:
+    """The TEXT of each recent Stop-hook block, oldest first (Plan 00636 F3)."""
+
+    @staticmethod
+    def _write(path: Path, entries: list[Any]) -> str:
+        path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+        return str(path)
+
+    def test_feedback_and_attachment_texts_in_order(self, tmp_path: Path) -> None:
+        feedback = {
+            "type": "user",
+            "message": {"role": "user", "content": "Stop hook feedback:\nBLOCKED [R-A]: one"},
+        }
+        attachment = {
+            "type": "attachment",
+            "attachment": {
+                "type": "hook_blocking_error",
+                "hookEvent": "Stop",
+                "blockingError": {"blockingError": "BLOCKED [R-B]: two"},
+            },
+        }
+        noise = {"type": "assistant", "message": {"role": "assistant", "content": "x"}}
+        path = self._write(tmp_path / "t.jsonl", [feedback, noise, attachment])
+        texts = recent_stop_hook_block_texts(path)
+        assert len(texts) == 2
+        assert "R-A" in texts[0]
+        assert "R-B" in texts[1]
+
+    def test_string_blocking_error_is_read(self, tmp_path: Path) -> None:
+        attachment = {
+            "type": "attachment",
+            "attachment": {
+                "type": "hook_blocking_error",
+                "hookEvent": "Stop",
+                "blockingError": "BLOCKED [R-C]",
+            },
+        }
+        path = self._write(tmp_path / "t.jsonl", [attachment])
+        assert recent_stop_hook_block_texts(path) == ("BLOCKED [R-C]",)
+
+    def test_missing_or_absent_path_is_empty(self, tmp_path: Path) -> None:
+        assert recent_stop_hook_block_texts(None) == ()
+        assert recent_stop_hook_block_texts(str(tmp_path / "nope.jsonl")) == ()
+
+    def test_lookback_bounds_the_window(self, tmp_path: Path) -> None:
+        feedback = {
+            "type": "user",
+            "message": {"role": "user", "content": "Stop hook feedback:\nold"},
+        }
+        noise = {"type": "assistant", "message": {"role": "assistant", "content": "x"}}
+        path = self._write(tmp_path / "t.jsonl", [feedback, *([noise] * 5)])
+        assert recent_stop_hook_block_texts(path, lookback=3) == ()
+        assert len(recent_stop_hook_block_texts(path, lookback=10)) == 1
 
 
 class _CountingHandle:

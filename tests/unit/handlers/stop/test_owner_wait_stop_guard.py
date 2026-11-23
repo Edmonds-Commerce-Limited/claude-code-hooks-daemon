@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from tests.support.autonomy import awaiting_human_entry, pin_session_modes
@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.stop import owner_wait_stop_guard as guard_module
 from claude_code_hooks_daemon.handlers.stop.owner_wait_stop_guard import (
     DEFAULT_WINDOW_MINUTES,
     OwnerWaitStopGuardHandler,
@@ -115,22 +116,44 @@ def _snapshot(*threads: OwnerThread, posts: tuple[BusPost, ...] = ()) -> BusSnap
     return BusSnapshot(threads=threads, posts=posts)
 
 
-def _transcript(tmp_path: Path, text: str) -> str:
-    path = tmp_path / "transcript.jsonl"
-    message = {
+def _assistant(text: str) -> dict[str, Any]:
+    return {
         "type": "message",
         "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
     }
-    path.write_text(json.dumps(message) + "\n", encoding="utf-8")
+
+
+def _feedback(reason: str) -> dict[str, Any]:
+    """The transcript entry Claude Code writes after a Stop-hook deny."""
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": f"Stop hook feedback:\n{reason}"},
+    }
+
+
+OWN_BLOCK: Final[str] = f"BLOCKED [{RuleID.STOP_OWNER_WAIT_UNBUMPED}]: post a notifying reply"
+OTHER_BLOCK: Final[str] = "BLOCKED [R-STOP-NO-REASON]: explain why you are stopping"
+
+
+def _transcript(tmp_path: Path, text: str, before: Sequence[dict[str, Any]] = ()) -> str:
+    path = tmp_path / "transcript.jsonl"
+    entries = [*before, _assistant(text)]
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
     return str(path)
 
 
-def _stop(tmp_path: Path, text: str = WAITING, **extra: Any) -> dict[str, Any]:
+def _stop(
+    tmp_path: Path,
+    text: str = WAITING,
+    *,
+    before: Sequence[dict[str, Any]] = (),
+    **extra: Any,
+) -> dict[str, Any]:
     return {
         "hook_event_name": "Stop",
         "session_id": SESSION,
         "stop_hook_active": False,
-        "transcript_path": _transcript(tmp_path, text),
+        "transcript_path": _transcript(tmp_path, text, before),
         "teamchat_runtime": "/run/user/1000/teamchat/s1",
         "teamchat_kit": "/opt/teamchat",
         **extra,
@@ -252,11 +275,59 @@ class TestAllow:
         assert result is None or result.decision is Decision.ALLOW
         assert bus.reads == []
 
-    def test_reentry_after_a_deny_passes(self, tmp_path: Path) -> None:
+    def test_reentry_after_own_deny_passes(self, tmp_path: Path) -> None:
         handler = _Handler(None, _FakeBus(_snapshot(_question())))
-        hook_input = _stop(tmp_path, stop_hook_active=True)
+        hook_input = _stop(tmp_path, before=[_feedback(OWN_BLOCK)], stop_hook_active=True)
         assert _run(handler, hook_input) is None
         assert handler.resolved == 0
+
+
+class TestReentry:
+    """F3: only THIS guard's own refusal earns the one-shot pass on a re-entered stop."""
+
+    def test_another_handlers_deny_does_not_skip_the_check(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        hook_input = _stop(tmp_path, before=[_feedback(OTHER_BLOCK)], stop_hook_active=True)
+        result = _run(_Handler(_seats(), bus), hook_input)
+        assert result.decision is Decision.DENY
+
+    def test_spurious_stop_hook_active_is_evaluated(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        result = _run(_Handler(_seats(), bus), _stop(tmp_path, stop_hook_active=True))
+        assert result.decision is Decision.DENY
+
+    def test_own_deny_then_another_deny_still_passes(self, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        before = [_feedback(OWN_BLOCK), _assistant("ok"), _feedback(OTHER_BLOCK)]
+        assert _run(handler, _stop(tmp_path, before=before, stop_hook_active=True)) is None
+
+    def test_own_deny_followed_by_a_long_bump_turn_still_passes(self, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        before = [_feedback(OWN_BLOCK), *([_assistant("posting bumps")] * 60)]
+        assert _run(handler, _stop(tmp_path, before=before, stop_hook_active=True)) is None
+
+    def test_unreadable_transcript_on_reentry_stands_down(self, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        hook_input = _stop(tmp_path, stop_hook_active=True)
+        hook_input["transcript_path"] = str(tmp_path / "missing.jsonl")
+        assert _run(handler, hook_input) is None
+
+    def test_a_raising_reentry_check_stands_down(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+            raise OSError("disk")
+
+        monkeypatch.setattr(guard_module, "recent_stop_hook_block_texts", _boom)
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        assert _run(handler, _stop(tmp_path, stop_hook_active=True)) is None
+
+    def test_reentered_v1_stop_carries_no_repeat_advisory(self, tmp_path: Path) -> None:
+        """The auto advisory continues one turn; re-emitting it on that re-stop would loop."""
+        bus = _FakeBus(BusUnreadable("history timed out"), flags=False)
+        handler = _Handler(_seats(), bus, on_unreadable_bus="auto")
+        result = _run(handler, _stop(tmp_path, stop_hook_active=True))
+        assert result is None or (result.decision is Decision.ALLOW and result.context == [])
 
 
 class _Broken(_FakeBus):
@@ -473,7 +544,16 @@ class TestUnreadableBusRefuse:
 
     def test_reentry_is_never_trapped(self, tmp_path: Path) -> None:
         handler = _Handler(None, _FakeBus(BusUnreadable("history timed out")))
-        assert _run(handler, _stop(tmp_path, stop_hook_active=True)) is None
+        hook_input = _stop(tmp_path, before=[_feedback(OWN_BLOCK)], stop_hook_active=True)
+        assert _run(handler, hook_input) is None
+
+    def test_the_real_deny_text_is_recognised_on_reentry(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"))
+        first = _run(_Handler(_seats(), bus), _stop(tmp_path))
+        assert first.decision is Decision.DENY
+        handler = _Handler(None, bus)
+        hook_input = _stop(tmp_path, before=[_feedback(first.reason)], stop_hook_active=True)
+        assert _run(handler, hook_input) is None
 
     def test_stale_threads_and_an_unreadable_team_are_both_reported(self, tmp_path: Path) -> None:
         class _PerTeam(_FakeBus):

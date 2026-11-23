@@ -28,9 +28,13 @@ ever be confirmed) fails open by design with an ADVISORY in the stop's context
 naming the team and the thread classes left unchecked. The WARNING is always
 written.
 
-**Never a trap.** A stop that re-enters after the deny (``stop_hook_active``)
-is allowed: one refusal per stop chain, the convention of every one-shot Stop
-block. It also stands aside while the session is usage-paused.
+**Never a trap.** A stop that re-enters after THIS guard's deny (its rule id in
+a recent Stop-hook block) is allowed: one refusal per stop chain. Another
+handler's deny, or a spurious ``stop_hook_active`` with no block marker, is
+evaluated like a fresh stop, as auto_continue_stop does; a re-entry whose
+transcript cannot be read stands down (N411), and a re-entered stop never
+repeats the ``auto`` advisory. It also stands aside while the session is
+usage-paused.
 
 **Ordering.** Priority 3, ahead of ``idle_workable_issue_stop_gate`` (4) and the
 terminal ``auto_continue_stop`` (15 by default, 10 in this project's config);
@@ -55,7 +59,7 @@ from typing import Any, Final
 from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import Config, TeamSeatConfig
-from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -88,6 +92,8 @@ from claude_code_hooks_daemon.utils.stand_in_cron import (
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     is_stop_hook_active,
+    recent_stop_hook_block_texts,
+    transcript_is_readable,
 )
 from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, role_gate
 from claude_code_hooks_daemon.utils.teamchat_seat import (
@@ -112,6 +118,9 @@ _ON_UNREADABLE_VALUES: Final[frozenset[str]] = frozenset(
 )
 _SECONDS_PER_MINUTE: Final[int] = 60
 _STOP_PREFIX: Final[str] = "STOPPING BECAUSE:"
+#: How far back a re-entered stop looks for this guard's own refusal: wide enough
+#: for the bump turn between the deny and the re-stop (the helper's own default is 20).
+_REENTRY_LOOKBACK_LINES: Final[int] = 200
 #: A waiting declaration on the same line as the prefix: "waiting on/for ... the owner",
 #: "awaiting the owner's decision". ``[awaiting-human]`` is matched by auto_continue_stop's own test.
 _WAITING_RE: Final[re.Pattern[str]] = re.compile(
@@ -144,7 +153,8 @@ _RULE: Final[Rule] = Rule(
         "the adapter reads notify flags and otherwise allows with an advisory; 'refuse'\n"
         "always refuses; 'allow' fails open with a log line. The deny names thread ids\n"
         "only, never the waits.\n"
-        "One deny per stop chain: a re-entered stop is allowed."
+        "One deny per stop chain: the re-stop after this rule's own deny is allowed;\n"
+        "a re-stop after another handler's deny is checked again."
     ),
 )
 
@@ -311,11 +321,39 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         text = reader.get_last_assistant_text() if reader is not None else ""
         return bool(text) and self._text_declares_waiting(text)
 
+    @staticmethod
+    def _reenters_own_refusal(hook_input: dict[str, Any]) -> bool:
+        """Whether a ``stop_hook_active`` stop is the re-stop after THIS guard's refusal.
+
+        Mirrors auto_continue_stop's discrimination (Plan 00636 F3): another
+        handler's deny, or Claude Code's spurious flag with no marker at all, is
+        evaluated like a fresh stop. Only this guard's rule id in a recent block
+        earns the pass, anywhere in the window, so a later deny by another
+        handler or a long bump turn does not cost a second refusal. A transcript
+        that cannot be read, or a raising read, stands down (N411): a
+        re-entry nothing can verify must never be refused again.
+        """
+        path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        if not transcript_is_readable(path):
+            return True
+        try:
+            texts = recent_stop_hook_block_texts(path, lookback=_REENTRY_LOOKBACK_LINES)
+        except Exception as exc:  # an unverifiable re-entry stands down, whatever the fault
+            log_and_continue(
+                logger,
+                exc,
+                reason="a re-entry this guard cannot verify stands down rather than refuse again (N411)",
+            )
+            return True
+        return any(RuleID.STOP_OWNER_WAIT_UNBUMPED in text for text in texts)
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """A waiting, non-re-entered, unpaused stop in a session that carries a team runtime."""
-        if is_stop_hook_active(hook_input) or hook_is_usage_paused(hook_input):
+        """A waiting, unpaused stop in a team session that is not the re-stop after our deny."""
+        if hook_is_usage_paused(hook_input):
             return False
         if not SessionSignals.from_hook_input(hook_input).runtime:
+            return False
+        if is_stop_hook_active(hook_input) and self._reenters_own_refusal(hook_input):
             return False
         return self._waits_on_a_human(hook_input)
 
@@ -364,7 +402,13 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             ids = stale_threads(snapshot, now=self._clock(), window_seconds=window)
             if ids:
                 stale.append(_Stale(gate.team, ids))
-        advisory = [self._render_unchecked(gap) for gap in unchecked]
+        # A re-entered stop never repeats the advisory: an ALLOW with context
+        # continues the session one turn, and re-emitting it would loop.
+        advisory = (
+            []
+            if is_stop_hook_active(hook_input)
+            else [self._render_unchecked(gap) for gap in unchecked]
+        )
         if not stale and not unconfirmed:
             return BlockingResult(decision=Decision.ALLOW, context=advisory)
         reason = "\n\n".join([self._render(stale, unconfirmed, window), *advisory])
@@ -440,7 +484,8 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             "owner-started message). `refuse` always refuses it once; `allow` lets it through "
             "with a log line only.\n\n"
             "**Stands aside** for a worker or unknown role, no team, a sub-agent, a usage pause "
-            "and a stop that re-enters after the deny. The stop text should point at thread "
+            "and the re-stop after its own deny (a re-stop after another handler's deny is "
+            "checked again). The stop text should point at thread "
             "ids, never restate the waits."
         )
 
@@ -461,7 +506,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"notif"],
-                safety_notes="Blocks once per stop chain; a re-entered stop is allowed.",
+                safety_notes="Blocks once per stop chain; the re-stop after its own deny is allowed.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_event="Stop",
