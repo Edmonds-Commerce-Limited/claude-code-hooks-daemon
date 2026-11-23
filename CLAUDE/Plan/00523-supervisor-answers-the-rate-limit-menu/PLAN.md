@@ -115,10 +115,13 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   (`untracked/agent-reports/261123-00523-independent-review.md`, not tracked),
   and every finding I1-I5 and L1-L4 is fixed test-first. L5 (one `--dump`
   per output burst) is accepted. PR #223 merged to main as `42486817b` (merge
-  commit, CI green). The opus delta review verdict was safe
-  (`subagent-reports/261123-opus-delta-review-pr223.md`). The Performance
+  commit; "CI green" is unverified here). The opus delta review verdict was
+  safe (`subagent-reports/261123-opus-delta-review-pr223.md`). The Performance
   sweeps flake `test_many_appends_each_run_are_judged_quickly` failed once on
-  this PR (1.68 s against 1.5 s) and passed on re-run.
+  this PR: the CI-log reader agent reported 1.68 s against the scaled budget
+  `scaled_cpu_seconds(1.5)` (1.5 s is only the base budget, not the bound the
+  runner applied), and it passed on re-run. Cited line numbers are unverified
+  here.
 
 ### Follow-ups from the delta review (open)
 
