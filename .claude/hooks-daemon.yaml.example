@@ -1006,7 +1006,7 @@ handlers:
       priority: 3
       # options:
       #   window_minutes: 30          # A notifying post older than this does not count (1..1440)
-      #   on_unreadable_bus: refuse   # `refuse` (default) denies a wait the bus cannot confirm; `allow` fails open with a WARNING
+      #   on_unreadable_bus: auto     # `auto` (default) refuses an unconfirmable wait only where the bus adapter can read notify flags, else allows with an advisory; `refuse` always denies it; `allow` fails open with a WARNING
 
     idle_workable_issue_stop_gate:  # Refuses an idle stop while a workable issue is cached and nothing is in flight (Plan 00470 Phase 7)
       enabled: true         # Inert unless the project declares an `issue-sdlc` persistent cron job; never terminal

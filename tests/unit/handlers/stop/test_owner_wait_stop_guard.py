@@ -25,7 +25,7 @@ from claude_code_hooks_daemon.handlers.stop.owner_wait_stop_guard import (
     DEFAULT_WINDOW_MINUTES,
     OwnerWaitStopGuardHandler,
 )
-from claude_code_hooks_daemon.utils.owner_wait_bus import BusUnreadable
+from claude_code_hooks_daemon.utils.owner_wait_bus import BusUnreadable, TeamchatOwnerWaitBus
 from claude_code_hooks_daemon.utils.owner_wait_check import (
     BusPost,
     BusSnapshot,
@@ -54,9 +54,13 @@ def _seats(role: str | None = "coordinator", team: str = "alpha") -> SeatContext
 
 
 class _FakeBus:
-    def __init__(self, result: BusSnapshot | BusUnreadable) -> None:
+    def __init__(self, result: BusSnapshot | BusUnreadable, *, flags: bool = True) -> None:
         self.result = result
+        self.flags = flags
         self.reads: list[str] = []
+
+    def flags_readable(self) -> bool:
+        return self.flags
 
     def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
         self.reads.append(team)
@@ -286,11 +290,129 @@ class TestUnreadableBusAllow:
         assert _run(handler, _stop(tmp_path)).decision is Decision.ALLOW
 
 
-class TestUnreadableBusRefuse:
-    """``on_unreadable_bus: refuse`` (the default) -- an unverifiable wait fails closed."""
+class _V1Broken(_Broken):
+    def flags_readable(self) -> bool:
+        return False
 
-    def test_default_is_refuse(self) -> None:
-        assert OwnerWaitStopGuardHandler()._on_unreadable_bus == "refuse"
+
+class _FlagsRaise(_FakeBus):
+    def flags_readable(self) -> bool:
+        raise OSError("probe failed")
+
+
+def _advisory(result: Any) -> str:
+    return "\n".join(result.context)
+
+
+class TestUnreadableBusAuto:
+    """``on_unreadable_bus: auto`` (the default): refuse only where the adapter can read flags.
+
+    On pingbus v1 the adapter cannot read the notify flag at all, so ``refuse``
+    would refuse every waiting coordinator stop. ``auto`` allows there, with an
+    advisory naming the team and the thread classes it could not check (v1
+    cannot list thread ids), and refuses once the adapter reports flags readable.
+    """
+
+    def test_default_is_auto(self) -> None:
+        assert OwnerWaitStopGuardHandler()._on_unreadable_bus == "auto"
+
+    def test_production_adapter_reports_flags_unreadable(self) -> None:
+        assert TeamchatOwnerWaitBus().flags_readable() is False
+
+    def test_flags_readable_adapter_refuses(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"), flags=True)
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert "--team alpha" in result.reason
+
+    def test_v1_adapter_allows_with_an_advisory(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"), flags=False)
+        with caplog.at_level(logging.WARNING):
+            result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+        advisory = _advisory(result)
+        assert "team alpha" in advisory
+        assert "owner-started" in advisory
+        assert "open question" in advisory
+        assert "pingbus thread --team alpha Q<n> --ask" in advisory
+        assert "pingbus thread --team alpha --re <event id> --ask" in advisory
+        assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
+
+    def test_v1_advisory_does_not_restate_the_waits(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"), flags=False)
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        advisory = _advisory(result)
+        assert "Q61" not in advisory
+        assert "owner's answers" not in advisory
+
+    def test_v1_raising_bus_allows_with_an_advisory(self, tmp_path: Path) -> None:
+        handler = _Handler(_seats(), _V1Broken(BusSnapshot()), on_unreadable_bus="auto")
+        result = _run(handler, _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+        assert "team alpha" in _advisory(result)
+        assert "boom" not in _advisory(result)
+
+    def test_a_raising_flags_probe_is_treated_as_unreadable_flags(self, tmp_path: Path) -> None:
+        bus = _FlagsRaise(BusUnreadable("history timed out"))
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+        assert "team alpha" in _advisory(result)
+
+    def test_v1_stale_threads_on_a_readable_team_still_deny(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question("Q61")), flags=False)
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert "teamchat bump Q61" in result.reason
+
+    def test_readable_and_notified_carries_no_advisory(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question(), posts=(_bump(),)), flags=False)
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+        assert result.context == []
+
+    def test_a_deny_also_carries_the_unchecked_team_advisory(self, tmp_path: Path) -> None:
+        class _PerTeam(_FakeBus):
+            def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
+                if team == "alpha":
+                    return _snapshot(_question("Q61"))
+                return BusUnreadable("history timed out")
+
+        seats = (
+            TeamSeat(team="alpha", role_kind=RoleKind.DECLARED, role="coordinator"),
+            TeamSeat(team="gamma", role_kind=RoleKind.DECLARED, role="coordinator"),
+        )
+        context = SeatContext(SeatState.RESOLVED, ProbeReason.RESOLVED, seats)
+        bus = _PerTeam(BusSnapshot(), flags=False)
+        result = _run(_Handler(context, bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert "teamchat bump Q61" in result.reason
+        assert "team gamma" in result.reason
+
+    def test_explicit_refuse_still_refuses_on_v1(self, tmp_path: Path) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"), flags=False)
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="refuse"), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+
+    @pytest.mark.parametrize("flags", [True, False])
+    @pytest.mark.parametrize("bad", ["deny", "", None, 1, True])
+    def test_invalid_value_falls_back_to_auto_and_logs(
+        self, bad: object, flags: bool, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bus = _FakeBus(BusUnreadable("history timed out"), flags=flags)
+        with caplog.at_level(logging.WARNING):
+            result = _run(_Handler(_seats(), bus, on_unreadable_bus=bad), _stop(tmp_path))
+        assert result.decision is (Decision.DENY if flags else Decision.ALLOW)
+        assert any("on_unreadable_bus" in rec.getMessage() for rec in caplog.records)
+
+    def test_example_config_writes_no_literal_refuse(self) -> None:
+        example = Path(__file__).parents[4] / ".claude" / "hooks-daemon.yaml.example"
+        assert "on_unreadable_bus: refuse" not in example.read_text(encoding="utf-8")
+
+
+class TestUnreadableBusRefuse:
+    """``on_unreadable_bus: refuse`` -- an unverifiable wait fails closed, whatever the adapter."""
 
     def test_unreadable_bus_is_refused_with_a_loud_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

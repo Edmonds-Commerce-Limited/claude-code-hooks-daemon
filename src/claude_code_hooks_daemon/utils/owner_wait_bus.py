@@ -12,8 +12,9 @@ Status of the contract (unverified here, Plan 00636 Task 1.2):
   R11) are relayed text only; no teamchat binary is in this checkout.
 
 So :meth:`TeamchatOwnerWaitBus.read` runs nothing and reports the history
-unreadable; the guard's ``on_unreadable_bus`` option decides what that means
-(default ``refuse``: the wait cannot be confirmed, so it fails closed). It
+unreadable and :meth:`TeamchatOwnerWaitBus.flags_readable` False; the guard's
+``on_unreadable_bus`` option decides what that means (default ``auto``: allow
+with an advisory here, refuse once an adapter reports flags readable). It
 never opens teamchat's seat store, state root or run directory, and never
 reads a password file. Replace :meth:`read` once teamchat documents a JSON
 history carrying the notify flag and the thread relation.
@@ -64,6 +65,14 @@ class OwnerWaitBus(Protocol):
         """The notifying reply, as templates: (open question asked, owner-started message)."""
         ...
 
+    def flags_readable(self) -> bool:
+        """Whether this adapter can read the notify flag and thread relation at all.
+
+        ``on_unreadable_bus: auto`` refuses an unreadable wait only when this is
+        True; where it is False (pingbus v1) a refusal could never be satisfied.
+        """
+        ...
+
 
 class TeamchatOwnerWaitBus:
     """The production adapter (see the module docstring for what is unverified)."""
@@ -71,6 +80,10 @@ class TeamchatOwnerWaitBus:
     def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
         """Unreadable until teamchat documents the fields; runs nothing."""
         return BusUnreadable(NO_HISTORY_CONTRACT)
+
+    def flags_readable(self) -> bool:
+        """False: no verified history contract carries the notify flag yet (v1)."""
+        return False
 
     def bump_command(self, team: str, thread_ids: Sequence[str]) -> str:
         """``teamchat bump <ids>``; ``--waiting`` when an id is not safe to print."""

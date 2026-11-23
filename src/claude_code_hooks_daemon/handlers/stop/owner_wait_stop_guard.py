@@ -18,11 +18,15 @@ per held team only where the 00631 probe declares this seat ``coordinator``
 probe or no team leaves the stop untouched and reads nothing.
 
 **An unreadable bus** (the adapter reports it, or raises) is governed by
-``options.on_unreadable_bus``: ``refuse`` (default) fails CLOSED, because an
+``options.on_unreadable_bus``. ``refuse`` fails CLOSED, because an
 unconfirmable wait is exactly the silent wait this guard exists to stop; the
 refusal tells the coordinator to post a notifying reply in each thread and stop
 again, and says why nothing could be confirmed. ``allow`` fails open with a
-WARNING log. Either way the WARNING is written.
+WARNING log. ``auto`` (default) is ``refuse`` where the adapter's
+``flags_readable()`` is True, and otherwise (pingbus v1, where no post could
+ever be confirmed) fails open by design with an ADVISORY in the stop's context
+naming the team and the thread classes left unchecked. The WARNING is always
+written.
 
 **Never a trap.** A stop that re-enters after the deny (``stop_hook_active``)
 is allowed: one refusal per stop chain, the convention of every one-shot Stop
@@ -99,11 +103,12 @@ logger = logging.getLogger(__name__)
 #: How recent a notifying post must be. Provisional until Plan 00636 Task 1.1 settles N.
 DEFAULT_WINDOW_MINUTES: Final[int] = 30
 MAX_WINDOW_MINUTES: Final[int] = 24 * 60
+ON_UNREADABLE_AUTO: Final[str] = "auto"
 ON_UNREADABLE_REFUSE: Final[str] = "refuse"
 ON_UNREADABLE_ALLOW: Final[str] = "allow"
-DEFAULT_ON_UNREADABLE_BUS: Final[str] = ON_UNREADABLE_REFUSE
+DEFAULT_ON_UNREADABLE_BUS: Final[str] = ON_UNREADABLE_AUTO
 _ON_UNREADABLE_VALUES: Final[frozenset[str]] = frozenset(
-    {ON_UNREADABLE_REFUSE, ON_UNREADABLE_ALLOW}
+    {ON_UNREADABLE_AUTO, ON_UNREADABLE_REFUSE, ON_UNREADABLE_ALLOW}
 )
 _SECONDS_PER_MINUTE: Final[int] = 60
 _STOP_PREFIX: Final[str] = "STOPPING BECAUSE:"
@@ -135,8 +140,10 @@ _RULE: Final[Rule] = Rule(
         "open question the seat asked or owns, and every owner-started thread, needs a\n"
         "NOTIFYING post from this seat with a real body within options.window_minutes;\n"
         "an unreadable notify flag or thread relation counts as not notifying. An\n"
-        "unreadable bus is refused by default (options.on_unreadable_bus: refuse; 'allow'\n"
-        "fails open with a log line). The deny names thread ids only, never the waits.\n"
+        "unreadable bus follows options.on_unreadable_bus: 'auto' (default) refuses where\n"
+        "the adapter reads notify flags and otherwise allows with an advisory; 'refuse'\n"
+        "always refuses; 'allow' fails open with a log line. The deny names thread ids\n"
+        "only, never the waits.\n"
         "One deny per stop chain: a re-entered stop is allowed."
     ),
 )
@@ -208,12 +215,30 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         if isinstance(value, str) and value in _ON_UNREADABLE_VALUES:
             return value
         logger.warning(
-            "owner_wait_stop_guard: options.on_unreadable_bus=%r is not 'refuse' or 'allow'; "
-            "using the fail-closed default %r",
+            "owner_wait_stop_guard: options.on_unreadable_bus=%r is not 'auto', 'refuse' or "
+            "'allow'; using the default %r",
             value,
             DEFAULT_ON_UNREADABLE_BUS,
         )
         return DEFAULT_ON_UNREADABLE_BUS
+
+    def _refuses_unreadable(self, policy: str) -> bool:
+        """Whether an unreadable team is refused: ``auto`` refuses only where flags are readable.
+
+        A raising probe counts as unreadable flags, so ``auto`` allows with the
+        advisory rather than refusing a wait no post could ever satisfy.
+        """
+        if policy != ON_UNREADABLE_AUTO:
+            return policy == ON_UNREADABLE_REFUSE
+        try:
+            return self._bus.flags_readable() is True
+        except Exception as exc:  # the adapter is a boundary; any fault is "cannot read flags"
+            log_and_continue(
+                logger,
+                exc,
+                reason="a raising flags_readable probe means the flags cannot be read, so auto allows with an advisory",
+            )
+            return False
 
     # -- seams -------------------------------------------------------------------
 
@@ -308,36 +333,41 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             return BusUnreadable(f"the bus adapter raised {type(exc).__name__}")
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Deny while a coordinator team has stale threads, or (refuse) an unreadable bus."""
+        """Deny on stale threads or a refused unreadable bus; ``auto`` on v1 adds an advisory."""
         signals = SessionSignals.from_hook_input(hook_input)
         context = self._resolve_seats(signals)
         policy = self._unreadable_policy()
         window = self._window_seconds()
         stale: list[_Stale] = []
         unconfirmed: list[_Unconfirmed] = []
+        unchecked: list[_Unconfirmed] = []
         for team in context.teams_held():
             gate = role_gate(hook_input, context, team=team, role=ROLE_COORDINATOR)
             if gate.verdict is not GateVerdict.APPLIES:
                 continue
             snapshot = self._read(gate.team, signals)
             if isinstance(snapshot, BusUnreadable):
+                refused = self._refuses_unreadable(policy)
                 logger.warning(
                     "owner_wait_stop_guard: team %s bus unreadable (%s); on_unreadable_bus=%s, "
                     "so the waiting stop is %s",
                     gate.team,
                     snapshot.reason,
                     policy,
-                    "refused" if policy == ON_UNREADABLE_REFUSE else "allowed unverified",
+                    "refused" if refused else "allowed unverified",
                 )
-                if policy == ON_UNREADABLE_REFUSE:
+                if refused:
                     unconfirmed.append(_Unconfirmed(gate.team, snapshot.reason))
+                elif policy == ON_UNREADABLE_AUTO:
+                    unchecked.append(_Unconfirmed(gate.team, snapshot.reason))
                 continue
             ids = stale_threads(snapshot, now=self._clock(), window_seconds=window)
             if ids:
                 stale.append(_Stale(gate.team, ids))
+        advisory = [self._render_unchecked(gap) for gap in unchecked]
         if not stale and not unconfirmed:
-            return BlockingResult(decision=Decision.ALLOW)
-        reason = self._render(stale, unconfirmed, window)
+            return BlockingResult(decision=Decision.ALLOW, context=advisory)
+        reason = "\n\n".join([self._render(stale, unconfirmed, window), *advisory])
         stand_in = self._stand_in_reason(hook_input)
         if stand_in:
             reason = f"{reason}\n\nALSO REQUIRED BEFORE STOPPING AGAIN:\n\n{stand_in}"
@@ -375,6 +405,18 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         )
         return "\n\n".join(parts)
 
+    def _render_unchecked(self, gap: _Unconfirmed) -> str:
+        """The ``auto`` advisory for a team whose bus this adapter cannot read (no thread ids)."""
+        question, owner_message = self._bus.notify_commands(gap.team)
+        return (
+            f"owner_wait_stop_guard ADVISORY -- team {gap.team}: this stop waits on a human, "
+            f"and the guard could not check ({gap.reason}) whether the owner was told. "
+            "Unchecked: every owner-started thread and every open question this seat asked "
+            "(this bus adapter cannot list their ids or read the notify flag). Make sure each "
+            f"has a notifying reply from this seat (`{owner_message}`, `{question}`), "
+            "naming what is awaited."
+        )
+
     def get_rules(self) -> list[Rule]:
         """The single rule behind this handler's deny."""
         return [_RULE]
@@ -390,12 +432,13 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             "body within `options.window_minutes` (default 30). A post whose notify flag or "
             "thread relation cannot be read does not count. The deny prints ONE bump command; "
             "run it, then stop again.\n\n"
-            "**Unreadable bus**: `options.on_unreadable_bus` is `refuse` by default, so a wait "
-            "the guard cannot confirm is refused once: post a notifying reply in each thread "
-            "(`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
-            "owner-started message), then stop again. `allow` lets it through with a log line. "
-            "Until the bus history exposes the notify flag, every waiting coordinator stop "
-            "is refused once.\n\n"
+            "**Unreadable bus**: `options.on_unreadable_bus` is `auto` by default. Where the bus "
+            "adapter can read notify flags, a wait the guard cannot confirm is refused once; on "
+            "pingbus v1 (no notify flag) it is allowed with an ADVISORY naming the team and the "
+            "thread classes it could not check. Either way: post a notifying reply in each "
+            "thread (`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
+            "owner-started message). `refuse` always refuses it once; `allow` lets it through "
+            "with a log line only.\n\n"
             "**Stands aside** for a worker or unknown role, no team, a sub-agent, a usage pause "
             "and a stop that re-enters after the deny. The stop text should point at thread "
             "ids, never restate the waits."
@@ -412,7 +455,8 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
                 description=(
                     "On a teamchat coordinator seat, a main-thread stop waiting on the owner "
                     "while an open question has no recent notifying post (or the bus cannot "
-                    "confirm one, under the default on_unreadable_bus: refuse) is denied and "
+                    "confirm one, under on_unreadable_bus: refuse, or auto with a flag-reading "
+                    "adapter) is denied and "
                     "names the notifying command."
                 ),
                 expected_decision=Decision.DENY,
