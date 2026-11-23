@@ -33,7 +33,8 @@ again, and says why nothing could be confirmed. ``allow`` fails open with a
 WARNING log. ``auto`` (default) is ``refuse`` where the adapter's
 ``flags_readable()`` is True, and otherwise (pingbus v1, where no post could
 ever be confirmed) fails open by design with an ADVISORY in the stop's context
-naming the team and the thread classes left unchecked. The WARNING is always
+naming the team and the thread classes left unchecked. A raising
+``flags_readable()`` makes ``auto`` refuse. The WARNING is always
 written. An invalid value fails CLOSED to ``refuse`` (not to the default).
 
 **A fault fails closed.** Any exception while checking (seat probe, wait
@@ -344,20 +345,22 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
     def _refuses_unreadable(self, policy: str) -> bool:
         """Whether an unreadable team is refused: ``auto`` refuses only where flags are readable.
 
-        A raising probe counts as unreadable flags, so ``auto`` allows with the
-        advisory rather than refusing a wait no post could ever satisfy.
+        A raising probe fails CLOSED (refuse, N3): a crashing probe must not
+        silently turn every refusal into an allow. The refusal is still once per
+        stop chain, so it never traps.
         """
         if policy != ON_UNREADABLE_AUTO:
             return policy == ON_UNREADABLE_REFUSE
         try:
             return self._bus.flags_readable() is True
-        except Exception as exc:  # the adapter is a boundary; any fault is "cannot read flags"
+        except Exception as exc:  # the adapter is a boundary; a fault fails closed
             log_and_continue(
                 logger,
                 exc,
-                reason="a raising flags_readable probe means the flags cannot be read, so auto allows with an advisory",
+                reason="a raising flags_readable probe fails closed, so auto refuses the unconfirmed wait once",
+                level=logging.WARNING,
             )
-            return False
+            return True
 
     # -- seams -------------------------------------------------------------------
 

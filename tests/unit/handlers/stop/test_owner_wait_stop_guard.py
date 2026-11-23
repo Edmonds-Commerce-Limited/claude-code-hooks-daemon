@@ -483,11 +483,12 @@ class TestUnreadableBusAuto:
         assert "team alpha" in _advisory(result)
         assert "boom" not in _advisory(result)
 
-    def test_a_raising_flags_probe_is_treated_as_unreadable_flags(self, tmp_path: Path) -> None:
+    def test_a_raising_flags_probe_fails_closed_to_refuse(self, tmp_path: Path) -> None:
+        # N3: a crashing probe must never silently downgrade every refusal to an allow.
         bus = _FlagsRaise(BusUnreadable("history timed out"))
         result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), _stop(tmp_path))
-        assert result.decision is Decision.ALLOW
-        assert "team alpha" in _advisory(result)
+        assert result.decision is Decision.DENY
+        assert "team alpha" in result.reason
 
     def test_v1_stale_threads_on_a_readable_team_still_deny(self, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question("Q61")), flags=False)
