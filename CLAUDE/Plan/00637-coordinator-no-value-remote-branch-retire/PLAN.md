@@ -58,6 +58,10 @@ and what is new.
   request time AND again at delete time. Targeted QA green.
 - [ ] ⬜ **Task 2.3**: Coordinator gate (`role == coordinator` in a held team)
   on the remote variant; delete under a lease on the reviewed tip.
+- [ ] ⬜ **Task 2.4**: Remote retires count against the existing removal-rate
+  window. DECIDED: ONE shared window with local removals, not a second
+  (coordinator agreed; DESIGN.md section 21). Red first: a local removal plus
+  a remote retire past the shared limit refuses the second.
 
 ### Phase 3: Record and report
 

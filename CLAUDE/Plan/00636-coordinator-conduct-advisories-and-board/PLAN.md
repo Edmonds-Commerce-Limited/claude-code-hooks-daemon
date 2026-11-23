@@ -54,11 +54,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   declined: 00630 is the umbrella and planned this child (its Task 1.2).
   Settle Q3 (skill home), Q6 (supervisor action) and Q18 (how the Stop
   handler learns which threads a stop names).
-- [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop, and
-  the multi-thread bump request (one bus call posts to N threads; open
-  teamchat-side dependency of Task 2.1; ask fedora-desktop.1). Also ask what
-  the teamchat v2 equivalent of `pingbus thread --ask` (a NOTIFYING post) is
-  and whether history marks a post as notifying; open dependency of Task 2.1.
+- [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop.
+  The multi-thread bump is already requested: fedora-desktop request 00209
+  R11 (`teamchat bump <ids> [--note ...]`, `teamchat bump --waiting`,
+  notifying by default); track it landing in teamchat, the dependency of
+  Task 2.1. Ask fedora-desktop.1 whether history marks a bump post (and any
+  post) as notifying, which settles Q18's second half.
 
 ### Phase 2: TDD, one item per branch
 
@@ -68,7 +69,11 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   thread passes; an unreadable bus fails open with a log line. "Posted this
   turn" is read from the read-only teamchat CLI history, no secrets. Only a
   NOTIFYING post counts: a plain post to the named thread leaves the stop
-  denied (the owner missed bumps that landed silently).
+  denied (the owner missed bumps that landed silently), and a post whose
+  notify status cannot be read counts as non-notifying (fail closed). The
+  remedy is ONE call: a refused stop prints the exact
+  `teamchat bump <ids>` command naming every unposted thread (R11). Depends
+  on R11 landing in teamchat.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
@@ -90,7 +95,8 @@ land here. Not gated on a seat. Each task starts with a failing test.
 
 ## Dependencies
 
-- Plan 00631 (probe). Open, teamchat side: multi-thread bump (Task 1.2).
+- Plan 00631 (probe). Teamchat side: fedora-desktop request 00209 R11
+  (`teamchat bump`) landing in teamchat (Task 2.1).
   Related: 00470, 00501, 00523, 00283; fedora-desktop
   Plan 00251.
 

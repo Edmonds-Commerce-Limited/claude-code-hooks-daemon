@@ -506,7 +506,8 @@ Rules for the coordinator-seat Stop handler:
    names got a bus post earlier this turn.
 3. Terminal-only status counts as unsent. The stop message is an echo of what
    went to the bus, never the only copy.
-4. The deny message names each unposted thread and the one post that fixes it.
+4. The deny message names each unposted thread and prints the exact single
+   bump command that fixes them all (below): one call, not one per thread.
 
 Verifying "posted this turn", transport-agnostically: the handler reads the
 team's history through the read-only teamchat CLI (`pingbus --team <t> history`
@@ -516,36 +517,46 @@ them to the named threads. No secrets are read and no bus file is opened. An
 unreadable bus (CLI absent, error, timeout) fails OPEN and logs the failure
 to the daemon log; it never blocks a stop on the handler's own fault.
 
-Open dependency (teamchat side, ask fedora-desktop.1): a multi-thread bump, one
-bus call that posts the same status to N threads, so the refusal costs one call
-rather than N. Until it exists the deny names the per-thread posts. Filed with
-Plan 00636 Task 1.2 alongside the wake-coalescing request.
+The remedy is the multi-thread bump, fedora-desktop request 00209 R11
+(coordinator, lts-infra bus id
+`$UmAjH_e42vs_kdlo2pYOwHKnGDCMJuQukkucJS8I9A4`):
+`teamchat bump Q61 Q64 [--note ...]` re-pings each listed thread still
+waiting on a human with "still waiting: <its question>";
+`teamchat bump --waiting` does every open thread the seat asked. It notifies
+by default. A refused stop prints the exact command to run, naming the
+unposted threads (`teamchat bump <ids>`), so the fix is ONE call, not N.
+Dependency: R11 landing in teamchat (Plan 00636 Task 2.1 depends on it); the
+guard calls the command the teamchat CLI documents, behind the same adapter.
 
 Notifying posts only (coordinator addendum, bus id
 `$dmAOwAJt3ZU7lEz-zXujdmyZbNwnQC66DRPHDnf1YdQ`): a thread post the owner must
 act on has to NOTIFY (v1: `pingbus thread --ask`). A plain post lands silently
 and the owner missed bumps that way, so the guard counts only notifying posts
 as "the owner was told". Rule 2 and "posted this turn" are read with that
-filter. The teamchat v2 equivalent of the notifying flag, and whether the
-history marks a post as notifying, is an open dependency to ask fedora-desktop.1
-(Plan 00636 Task 1.2); until known, the adapter treats a post whose notify
-status cannot be read as non-notifying and the deny says so.
+filter. A `teamchat bump` notifies by default, so the remedy always produces
+a notifying post. Fail closed on the filter: a post whose notify status cannot
+be read from the history counts as non-notifying, and the deny says so. (This
+is distinct from the unreadable-bus case above, which fails open.)
 
-Open question Q18: how does the handler learn which threads a stop names, and
-how does it tell a notifying post from a plain one?
-Second half: (d) read the notify marker from the history entry (needs the v2
-history to carry it), or (e) infer it from the posting command the turn ran.
-(d) is preferred; (e) is fragile. Settled with the first half.
-Options: (a) parse thread ids or names out of the stop reason text; (b) require
-a structured line in the stop message (`THREADS: a, b`); (c) treat every thread
-with an unanswered owner ask in the history as named. (a) is fragile, (b) adds a
-format agents must remember, (c) needs no cooperation but can over-refuse.
-Unsettled; Plan 00636 Task 1.1 settles it before Task 2.1 starts.
+Open question Q18, narrowed by R11: which threads does a stop name? With
+`teamchat bump --waiting` covering every open thread the seat asked, option
+(c) (every thread with an unanswered owner ask in the history is named) is
+the natural reading, and its over-refusal costs one bump call. Still open:
+(c) alone, or (c) plus (b) a structured `THREADS: a, b` line to narrow it;
+(a) parsing the reason text stays rejected as fragile. Second half, how a
+post is known to be notifying: (d) the notify marker on the history entry
+(preferred; ask fedora-desktop.1 whether R11's bump posts carry it), else
+(e) infer it from the bump command the turn ran. Plan 00636 Task 1.1 settles
+both before Task 2.1 starts.
 
 Test-first acceptance criteria (each red before the handler exists):
 
 - A plain, non-notifying post to the named thread does not satisfy the guard;
-  the stop is denied and the deny names the notifying post that fixes it.
+  the stop is denied and the deny prints the `teamchat bump <ids>` command.
+
+- A post whose notify status cannot be read counts as non-notifying (denied).
+
+- Two unposted named threads produce ONE bump command naming both.
 
 - A notifying post to the named thread satisfies it.
 
@@ -607,9 +618,10 @@ and the lease are all reused as is. `R-GIT-PUSH-DELETE-REMOTE` and
 subcommand the guards already know how to prove, not an exemption by role. A
 coordinator's own judgment is never the evidence: the reviewer's verdict is.
 
-**Open for the child to settle, no owner input needed.** Whether the remote
-variant counts against the same removal-rate window as local removals
-(recommendation: yes, one window).
+**Decided: one removal-rate window.** The remote variant counts against the
+SAME removal-rate window as local removals: one shared window, not a second
+one (coordinator agreed, lts-infra bus id
+`$UmAjH_e42vs_kdlo2pYOwHKnGDCMJuQukkucJS8I9A4`). Not an owner question.
 
 ## 22. Upgrade as a standing-authorisation preset (Q66 (b))
 
@@ -664,11 +676,11 @@ human. Rationale: the preset only records consent for attended sessions, which
 does not weaken the signature ruling; the unattended trigger is a different
 mechanism and stays gated on 00625 and the owner's signing key.
 
-**Open point for the owner.** The default `major` is the coordinator's
-reading of "b yes", and it sits against the signature-verification ruling:
-with `major` and an unsigned or unverifiable latest tag, nothing unattended
-may apply it. Confirm `major`, or choose `minor` as the default until 00625's
-verification ships.
+**Open point, put to the owner in Q66.** The default `major` is the
+coordinator's reading of "b yes", and it sits against the
+signature-verification ruling. The question is with the owner as: attended
+upgrades default to `major` now; unattended upgrades wait on Plan 00625's
+signed-tag verification. Until the owner answers, build to that reading.
 
 **Acceptance (tests first, per value; current 1.4.2, tags 1.4.3, 1.5.0, 2.0.0
 as the fixture):** `major` selects 2.0.0; `minor` selects 1.5.0 and emits the

@@ -66,7 +66,8 @@ Not seat-gated: a default in every project.
   unaffected; unparseable tags select nothing.
 - [ ] ⬜ **Task 4.2**: `upgrade` built-in preset in `standing_authorisations`,
   shipped enabled, recorded-request wording naming the key, default `major`
-  (owner to confirm, DESIGN.md section 22). Does not authorise an unattended
+  (put to the owner in Q66: attended `major` now, unattended waiting on
+  00625 signed tags; DESIGN.md section 22). Does not authorise an unattended
   upgrade; that waits on Plan 00625's signed-tag verification.
 
 ## Dependencies
