@@ -239,6 +239,11 @@ class TestComposerText:
     def test_no_composer_visible(self) -> None:
         assert _mod.rate_limit_composer_text("● done\n") is None
 
+    def test_placeholder_is_returned_verbatim(self) -> None:
+        # Only the resume step treats a placeholder as empty.
+        screen = "● done\n" + "─" * 40 + '\n> Try "fix it"\n' + "─" * 40 + "\n"
+        assert _mod.rate_limit_composer_text(screen) == 'Try "fix it"'
+
 
 def test_screen_dump_survives_the_worker_json() -> None:
     facts = _mod.TickFacts(
@@ -676,6 +681,46 @@ class TestResumeAfterReset:
     def test_foreign_text_in_the_box_abandons(self, sidecar_dir: Path, machine: Any) -> None:
         _answer_and_close(sidecar_dir, machine)
         outcome = _resume(sidecar_dir, machine, _resume_facts("half a thought"))
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "abandoned"
+
+    def test_placeholder_after_the_clear_still_continues(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Claude Code draws a dim suggestion in an empty box; hooks-screen
+        # renders it as text. It is not the human's text.
+        _answer_and_close(sidecar_dir, machine)
+        assert _resume(sidecar_dir, machine, _resume_facts("continue")).payload == _BACKSPACES
+        sent = _resume(
+            sidecar_dir,
+            machine,
+            _resume_facts('Try "fix the failing test"', now=_AFTER + 2, quiet=1.5),
+        )
+        assert sent.decision_value == _CONTINUE
+
+    def test_curly_quoted_placeholder_is_empty(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        text = f"Try {chr(0x201C)}refactor the parser{chr(0x201D)}"
+        sent = _resume(sidecar_dir, machine, _resume_facts(text))
+        assert sent.decision_value == _CONTINUE
+
+    def test_placeholder_after_output_stays_ambiguous(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Like an empty box: after output the human may already have continued.
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts('Try "x"', quiet=30.0))
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "answered"
+
+    @pytest.mark.parametrize(
+        "text", ['Try "x" and more', 'Try "unclosed', "try harder", 'Please Try "x"']
+    )
+    def test_near_placeholder_text_still_abandons(
+        self, sidecar_dir: Path, machine: Any, text: str
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts(text))
         assert outcome.payload is None
         assert _phase(sidecar_dir) == "abandoned"
 

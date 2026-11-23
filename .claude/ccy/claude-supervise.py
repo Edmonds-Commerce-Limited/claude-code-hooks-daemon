@@ -8763,6 +8763,10 @@ _RATE_LIMIT_RECHECK_SECONDS = 600.0
 _RATE_LIMIT_CLEAR_ATTEMPTS = 2
 _RATE_LIMIT_PREFILL = "continue"
 _RATE_LIMIT_BACKSPACES = "\x7f" * len(_RATE_LIMIT_PREFILL)
+# The dim suggestion Claude Code draws in an empty input box, which
+# hooks-screen renders as plain text: the whole box reads ``Try "<text>"``,
+# straight or curly quotes. Anything else in the box is someone's text.
+_RATE_LIMIT_PLACEHOLDER = re.compile('^Try (?:"[^"]+"|“[^“”]+”)$')
 _RATE_LIMIT_ENTER = "\r"
 _RATE_LIMIT_UP = "\x1b[A"
 _RATE_LIMIT_DOWN = "\x1b[B"
@@ -9194,6 +9198,8 @@ def _rate_limit_resume_step(
     text = rate_limit_composer_text(dump)
     if text is None:
         return None, f"{_RATE_LIMIT_LOG}: continue pending, no input box visible"
+    if _RATE_LIMIT_PLACEHOLDER.match(text):
+        text = ""
     if recheck and not text:
         return None, f"{_RATE_LIMIT_LOG}: output after the reset and an empty box, re-checking"
     attempts = _coerce_int(state.get("clear_attempts"))
