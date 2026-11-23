@@ -347,15 +347,16 @@ def _stamp_teamchat_signals(hook_input: Any, peer: tuple[int | None, str | None]
 
     Same reason and route as :func:`_stamp_session_hostname`: the relay copies
     bytes, so the connected hook process's environment (the session's) is read.
-    Only the two named variables are kept; a value already on the payload is
-    never overwritten, a blank one is not stamped, and nothing is read when
-    both are already present or the peer pid is unknown. An unreadable peer
-    stamps nothing (debug log): the role probe then reads the session as in
-    no team, which is today's behaviour.
+    Only the two named variables are kept.
+
+    The pair comes from ONE source (review F7), so a kit from one place is never
+    combined with a runtime from another. A readable peer environment is
+    authoritative and supplies both fields: a non-blank value replaces the
+    payload's, a blank or missing one removes it. When the peer pid is unknown
+    or its environment unreadable (debug log), the payload's pair stands as
+    sent; with none, the role probe reads the session as in no team.
     """
     if not isinstance(hook_input, dict):
-        return
-    if all(field in hook_input for _, field in _TEAMCHAT_STAMPS):
         return
     pid = peer[0]
     if pid is None or pid <= 0:
@@ -366,8 +367,10 @@ def _stamp_teamchat_signals(hook_input: Any, peer: tuple[int | None, str | None]
         return
     for variable, field in _TEAMCHAT_STAMPS:
         value = environ.get(variable, "").strip()
-        if value and field not in hook_input:
+        if value:
             hook_input[field] = value
+        else:
+            hook_input.pop(field, None)
 
 
 def redacted_blocking_response(response_json: str) -> str:

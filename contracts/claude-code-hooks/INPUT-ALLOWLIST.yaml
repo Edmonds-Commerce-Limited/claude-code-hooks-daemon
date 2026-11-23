@@ -47,7 +47,9 @@ entries:
   - id: "unknown-input-field:(shared):teamchat_kit"
     reason: >-
       Not sent by Claude Code: stamped beside teamchat_runtime, from the
-      session's TEAMCHAT_KIT, by the same two routes. It names the kit whose
+      session's TEAMCHAT_KIT, by the same two routes. The pair always comes
+      from one source: a readable session environment replaces or removes any
+      payload value for both fields. It names the kit whose
       bin/teamchat the role probe runs (utils/teamchat_seat). No vendored
       input_example can document a field the daemon adds.
     link: "CLAUDE/Plan/00631-teamchat-role-probe-core/PLAN.md"

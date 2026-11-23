@@ -58,7 +58,8 @@ class HookInputField:
     SESSION_HOSTNAME = "hooks_daemon_hostname"
     # NOT sent by Claude Code: the session's TEAMCHAT_RUNTIME and TEAMCHAT_KIT,
     # stamped like SESSION_HOSTNAME (init.sh, or the daemon from the connected
-    # process's environment), never overwriting a value already present. Absent
+    # process's environment). The pair comes from one source: a readable
+    # session environment replaces or removes payload values. Absent
     # outside a teamchat session. Consumed via
     # utils.teamchat_seat.SessionSignals.from_hook_input (Plan 00631 Task 2.2).
     TEAMCHAT_RUNTIME = "teamchat_runtime"
