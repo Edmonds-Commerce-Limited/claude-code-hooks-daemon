@@ -57,24 +57,24 @@ Neither input repository has a local checkout here; everything was read over
 - **fedora-desktop Plan 00207** (team roles): its `deployer` role is replaced by
   duty `host`; it is no longer a key here.
 
-### Pending Phase 0 input: the final `whoami --json` contract
+### Phase 0 input: the `whoami --json` contract (final, F44 merge pending)
 
-The shape is not final until fedora-desktop's branch `v2-seat-duty` merges
-(fedora-desktop.1, bus id `$-NMkedob43KHw6Tj4GqlK2kI0j8G1mNPysg6CYzdcX4`). It
-will be a documented contract with, per held seat, exactly four keys:
+Final per fedora-desktop.1: merged on their v2 branch at `fe67f23c3`, not yet
+on F44 (bus id `$-NMkedob43KHw6Tj4GqlK2kI0j8G1mNPysg6CYzdcX4`). `v` is
+required and is 1 (an unknown `v` is no answer); unknown extra keys are
+ignored; `duty` is the seat kind (open set, read as declared). `whoami` exits
+69 outside a session or before the seat link exists, which is "no team here",
+not an error. Per held seat, exactly four keys:
 
 ```text
 teamchat whoami --json
 {"v": 1, "teams": [{"team": "<team>", "handle": "<handle>", "role": "<role|null>", "duty": "<duty|null>"}]}
 ```
 
-Plans and fixtures use only those four keys until the merge. The proposal text
-at 93fd6761a names the second key `member`; the contract names it `handle`, and
-this plan follows the contract. Still to record when it lands: the exact merged
-shape and the F44 commit hash of the merge (00631 Task 1.1). The 00631 builder
-is already working against this four-key shape on a branch the coordinator
-reports as based on `a4fed6cbe399e3308` (not present in this clone, so not
-verified here).
+The proposal text at 93fd6761a names the second key `member`; the contract
+names it `handle`, and this plan follows the contract. Still to record: the
+F44 commit hash of the merge, and exit 65 against teamchat's `exits` (00631
+Task 1.1). The 00631 fixtures (`tests/support/teamchat.py`) encode this shape.
 
 ## 3. Signals the daemon uses (shapes, not values)
 
@@ -90,8 +90,10 @@ public.
 | `teamchat status`                 | CLI                      | other seats' liveness for B5 and readiness (or fedora-desktop Plan 00251)               |
 
 `whoami` exit codes: 0 read ok (the list may be empty); 69 no session (no
-`TEAMCHAT_RUNTIME`, or not a run directory); 65 unreadable or fails strict
-decode (the spec's inference, to be confirmed against teamchat's `exits`).
+`TEAMCHAT_RUNTIME`, not a run directory, or the seat link not yet there;
+confirmed by fedora-desktop.1); 65 unreadable or fails strict decode (the
+spec's inference, to be confirmed against teamchat's `exits`; 00631 treats 65
+and every other non-zero alike, as no answer, so nothing depends on it).
 
 `TEAMCHAT_MEMBERSHIP` is NOT a session signal: `ccy-start-claude` reads and
 unsets it, and a host `cc` session never has it. `status.json` is decoded
@@ -150,9 +152,13 @@ byte-pump relay the daemon reads the connected hook process's environment
 (`_stamp_session_hostname` in `src/claude_code_hooks_daemon/daemon/server.py`,
 field `HookInputField.SESSION_HOSTNAME`).
 
-This plan reuses that route for `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` only. A
-value already on the payload is never overwritten; a peer whose environment
-cannot be read stamps nothing (absent).
+This plan reuses that route for `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` only.
+Precedence (chosen deliberately, Plan 00631 review F7): the pair comes from one
+source, never one field from each. A readable session environment (the relay
+peer's, or the init.sh forwarder's own) is authoritative: a non-blank value
+replaces the payload's, a blank or missing one removes it. Only when that
+environment cannot be read is the payload's pair kept as sent; with neither,
+the session reads as in no team (absent).
 
 Where `whoami` runs (M-7): the run directory is `/tmp/teamchat/<run>` inside a
 ccy container and `$XDG_RUNTIME_DIR/teamchat/run/<run>` on a host, and the

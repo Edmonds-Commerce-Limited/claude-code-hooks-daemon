@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.utils.cli_command import recovery_command
 from claude_code_hooks_daemon.utils.cron_hosts import (
     PeerHostname,
     hostname_override_of_process,
+    process_environ,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
@@ -332,6 +333,44 @@ def _stamp_session_hostname(
         logger.debug("No session hostname stamped: %s", hostname.unreadable_because)
     if hostname.override is not None:
         hook_input[HookInputField.SESSION_HOSTNAME] = hostname.override
+
+
+#: Session environment variable -> payload field, for the teamchat role probe.
+_TEAMCHAT_STAMPS: tuple[tuple[str, str], ...] = (
+    ("TEAMCHAT_RUNTIME", HookInputField.TEAMCHAT_RUNTIME),
+    ("TEAMCHAT_KIT", HookInputField.TEAMCHAT_KIT),
+)
+
+
+def _stamp_teamchat_signals(hook_input: Any, peer: tuple[int | None, str | None]) -> None:
+    """Stamp the session's teamchat signals on an event-socket payload (Plan 00631 Task 2.2).
+
+    Same reason and route as :func:`_stamp_session_hostname`: the relay copies
+    bytes, so the connected hook process's environment (the session's) is read.
+    Only the two named variables are kept.
+
+    The pair comes from ONE source (review F7), so a kit from one place is never
+    combined with a runtime from another. A readable peer environment is
+    authoritative and supplies both fields: a non-blank value replaces the
+    payload's, a blank or missing one removes it. When the peer pid is unknown
+    or its environment unreadable (debug log), the payload's pair stands as
+    sent; with none, the role probe reads the session as in no team.
+    """
+    if not isinstance(hook_input, dict):
+        return
+    pid = peer[0]
+    if pid is None or pid <= 0:
+        return
+    environ, reason = process_environ(pid)
+    if environ is None:
+        logger.debug("No teamchat signals stamped: %s", reason)
+        return
+    for variable, field in _TEAMCHAT_STAMPS:
+        value = environ.get(variable, "").strip()
+        if value:
+            hook_input[field] = value
+        else:
+            hook_input.pop(field, None)
 
 
 def redacted_blocking_response(response_json: str) -> str:
@@ -2095,6 +2134,7 @@ class HooksDaemon:
             else:
                 peer = _peer_pid(writer)  # one SO_PEERCRED query for both stamps
                 _stamp_session_hostname(hook_input, writer, peer)
+                _stamp_teamchat_signals(hook_input, peer)
                 _stamp_peer_pid(hook_input, writer, peer)
                 await self._answer_event(
                     event_json_key, hook_input, writer, arrival_time=arrival_time

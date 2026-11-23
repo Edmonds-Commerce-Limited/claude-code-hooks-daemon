@@ -3488,6 +3488,31 @@ class ReferenceReposConfig(BaseModel):
         return normalised
 
 
+class TeamSeatConfig(BaseModel):
+    """The teamchat role probe (Plan 00631; utils/teamchat_seat).
+
+    Attributes:
+        detection: ``auto`` runs the kit's ``whoami`` when the session carries
+            a teamchat runtime; ``off`` never runs it and reads every session
+            as in no team
+        resolve_ttl_seconds: How long one answer is reused; a role change
+            takes effect within one TTL
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    detection: Literal["auto", "off"] = Field(
+        default="auto", description="Probe the session's teamchat seat (auto) or never (off)"
+    )
+    resolve_ttl_seconds: Annotated[int, Field(ge=1, le=3600)] = Field(
+        default=60, description="Seconds one role answer is reused"
+    )
+
+    @property
+    def detection_enabled(self) -> bool:
+        return self.detection == "auto"
+
+
 class Config(BaseModel):
     """Root configuration model for hooks daemon.
 
@@ -3508,6 +3533,7 @@ class Config(BaseModel):
             session hostname (Plan 00479)
         claude_md: Injected ``<hooksdaemon>`` block configuration, currently
             the handler-promotion policy (Plan 00116 Decision I)
+        team_seat: The teamchat role probe's detection and TTL (Plan 00631)
     """
 
     model_config = ConfigDict(extra="allow")
@@ -3534,6 +3560,7 @@ class Config(BaseModel):
     persistent_crons: PersistentCronsConfig = Field(default_factory=PersistentCronsConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
     claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
+    team_seat: TeamSeatConfig = Field(default_factory=TeamSeatConfig)
     hosts: dict[str, HostConfig] = Field(
         default_factory=dict,
         description="Per-host settings keyed by label (Plan 00479)",

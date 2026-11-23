@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.utils.safe_signal import (
     DaemonStop,
     RefusedSignalTarget,
     signal_own_session_child,
+    signal_own_session_group,
     signal_verified_daemon,
     stop_verified_daemon,
     verified_daemon_process,
@@ -867,3 +868,33 @@ class TestAGroupIsSignalledOnlyWhenOurOwnChildLeadsIt:
         with pytest.raises(RefusedSignalTarget, match="own group"):
             signal_own_session_child(child, signal.SIGKILL)
         assert child.poll() is None, "our own group must not have been signalled"
+
+
+class TestAGroupWhoseLeaderIsUnreapedIsSignalledWithoutReaping:
+    def test_an_exited_unreaped_leader_still_lets_the_group_be_killed(self) -> None:
+        script = "/bin/sleep 30 & echo $!; exit 0"
+        child = subprocess.Popen(
+            ["/bin/sh", "-c", script], stdout=subprocess.PIPE, start_new_session=True
+        )
+        assert child.stdout is not None
+        grandchild = int(child.stdout.readline().strip())
+        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+        signal_own_session_group(child, signal.SIGKILL)
+        child.wait()
+        child.stdout.close()
+        deadline = time.monotonic() + 5
+        while psutil.pid_exists(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not psutil.pid_exists(grandchild) or (
+            psutil.Process(grandchild).status() == psutil.STATUS_ZOMBIE
+        )
+
+    def test_a_reaped_leader_is_not_signalled(self) -> None:
+        child = subprocess.Popen(["/bin/true"], start_new_session=True)
+        child.wait()
+        with pytest.raises(ProcessLookupError):
+            signal_own_session_group(child, signal.SIGKILL)
+
+    def test_a_mock_is_refused(self) -> None:
+        with pytest.raises(RefusedSignalTarget):
+            signal_own_session_group(MagicMock(), signal.SIGKILL)

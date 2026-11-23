@@ -1,4 +1,4 @@
-# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch) and Plan 00594 (branches.wip.stack_max_depth).
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth) and Plan 00631 (team_seat).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -201,6 +201,20 @@ config_changes:
         scratch:
           filing:
             max_bytes: 65536
+    - key: team_seat
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00631). The teamchat role probe: detection (auto runs the
+        kit's whoami when the session carries TEAMCHAT_RUNTIME; off never runs
+        it and reads every session as in no team) and resolve_ttl_seconds
+        (60, 1 to 3600; a role change takes effect within one TTL). A session
+        outside a teamchat team is unaffected either way; the defaults need no
+        change.
+      example_yaml: |
+        team_seat:
+          detection: auto
+          resolve_ttl_seconds: 60
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

@@ -9170,6 +9170,24 @@ def cmd_issue_validity(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_team_seat(args: argparse.Namespace) -> int:
+    """Print this session's resolved teamchat roles (Plan 00631); read-only.
+
+    Returns:
+        0 resolved or absent, 3 unresolved, 4 configuration error.
+    """
+    from claude_code_hooks_daemon.daemon.team_seat_cli import main as team_seat_main
+
+    project_root = Path(getattr(args, "project_root", None) or get_project_path(None))
+    return team_seat_main(
+        project_root=project_root,
+        environ=os.environ,
+        as_json=args.json,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+
+
 def _loaded_handler_keys(
     args: argparse.Namespace, project_root: Path, event_config_key: str
 ) -> set[str]:
@@ -15133,6 +15151,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--project-root", type=Path, help="Project root (auto-detected by default)"
     )
     parser_issue_validity.set_defaults(func=cmd_issue_validity)
+
+    # team-seat (Plan 00631) — read-only: this session's per-team teamchat roles
+    parser_team_seat = subparsers.add_parser(
+        "team-seat",
+        help=(
+            "Print this session's teamchat seats: the role, duty and handle in each team, "
+            "or absent/unresolved with the reason (exit 3 when unresolved)"
+        ),
+    )
+    parser_team_seat.add_argument("--json", action="store_true", help="Emit JSON")
+    parser_team_seat.add_argument(
+        "--project-root", type=Path, help="Project root (auto-detected by default)"
+    )
+    parser_team_seat.set_defaults(func=cmd_team_seat)
 
     # probe (Plan 00466 N12) — a hand-built payload, marked as synthetic traffic
     parser_probe = subparsers.add_parser(
