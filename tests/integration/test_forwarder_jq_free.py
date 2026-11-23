@@ -380,10 +380,23 @@ _TEAMCHAT_FIELDS = ("teamchat_runtime", "teamchat_kit")
         (
             {"TEAMCHAT_RUNTIME": "/run/tc/a", "TEAMCHAT_KIT": "/opt/kit"},
             {"teamchat_runtime": "/already/there"},
-            {"teamchat_runtime": "/already/there", "teamchat_kit": "/opt/kit"},
+            {"teamchat_runtime": "/run/tc/a", "teamchat_kit": "/opt/kit"},
         ),
+        (
+            {"TEAMCHAT_RUNTIME": "/run/tc/a"},
+            {"teamchat_kit": "/payload/kit"},
+            {"teamchat_runtime": "/run/tc/a"},
+        ),
+        ({}, {"teamchat_runtime": "/x", "teamchat_kit": "/y"}, {}),
     ],
-    ids=["both", "runtime-only", "blank-stamps-nothing", "existing-value-kept"],
+    ids=[
+        "both",
+        "runtime-only",
+        "blank-stamps-nothing",
+        "environment-replaces-payload",
+        "pair-never-mixes-sources",
+        "no-environment-clears-payload",
+    ],
 )
 def test_teamchat_signals_are_forwarded(
     env_vars: dict[str, str],
@@ -393,7 +406,8 @@ def test_teamchat_signals_are_forwarded(
     live_pid_file: Path,
 ) -> None:
     """Plan 00631 Task 2.2: the daemon never inherits the session's teamchat
-    environment, so the forwarder stamps it; a value already present is kept."""
+    environment, so the forwarder stamps it. Its own environment is the one
+    source for the pair (review F7): it replaces or removes payload values."""
     server = _RecordingSocketServer(sock_path, b"{}\n")
     server.start()
     hook_input = {"hook_event_name": "Stop", **_MAIN_PROBE, **payload_extra}

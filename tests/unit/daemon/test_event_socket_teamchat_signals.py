@@ -4,8 +4,9 @@ The role probe runs ``$TEAMCHAT_KIT/bin/teamchat whoami --json`` with the
 SESSION's ``TEAMCHAT_RUNTIME``. The daemon's own environment is not the
 session's, and the relay never parses the payload, so the daemon reads both
 variables from the process on the other end of the per-event socket and stamps
-them as ``teamchat_runtime`` / ``teamchat_kit``. A value already on the payload
-(the python transport stamps its own) is never overwritten.
+them as ``teamchat_runtime`` / ``teamchat_kit``. The pair comes from ONE source
+(review F7): a readable peer environment supplies both fields, replacing or
+removing payload values; only when it is unreadable does the payload pair stand.
 """
 
 from __future__ import annotations
@@ -65,7 +66,10 @@ class TestStampTeamchatSignals:
 
         assert payload == {"hook_event_name": "Stop"}
 
-    def test_an_existing_value_is_never_overwritten(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_peer_environment_replaces_a_payload_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review F7: the peer's environment is authoritative when readable."""
         _, read = _environ_reader({"TEAMCHAT_RUNTIME": "/peer", "TEAMCHAT_KIT": _KIT})
         monkeypatch.setattr(server, "process_environ", read)
         payload: dict[str, Any] = {HookInputField.TEAMCHAT_RUNTIME: "/from-transport"}
@@ -73,12 +77,43 @@ class TestStampTeamchatSignals:
         server._stamp_teamchat_signals(payload, (4242, None))
 
         assert payload == {
-            HookInputField.TEAMCHAT_RUNTIME: "/from-transport",
+            HookInputField.TEAMCHAT_RUNTIME: "/peer",
             HookInputField.TEAMCHAT_KIT: _KIT,
         }
 
-    def test_both_present_reads_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        calls, read = _environ_reader({})
+    def test_the_pair_never_mixes_sources(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Review F7: a payload kit is never combined with the peer's runtime."""
+        calls, read = _environ_reader({"TEAMCHAT_RUNTIME": "/peer"})
+        monkeypatch.setattr(server, "process_environ", read)
+        payload: dict[str, Any] = {
+            HookInputField.TEAMCHAT_RUNTIME: "/a",
+            HookInputField.TEAMCHAT_KIT: "/payload-kit",
+        }
+
+        server._stamp_teamchat_signals(payload, (4242, None))
+
+        assert payload == {HookInputField.TEAMCHAT_RUNTIME: "/peer"}
+        assert calls == [4242]
+
+    def test_a_peer_outside_a_team_clears_payload_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, read = _environ_reader({"TEAMCHAT_RUNTIME": " "})
+        monkeypatch.setattr(server, "process_environ", read)
+        payload: dict[str, Any] = {
+            "hook_event_name": "Stop",
+            HookInputField.TEAMCHAT_RUNTIME: "/a",
+            HookInputField.TEAMCHAT_KIT: "/b",
+        }
+
+        server._stamp_teamchat_signals(payload, (4242, None))
+
+        assert payload == {"hook_event_name": "Stop"}
+
+    def test_an_unreadable_peer_leaves_the_payload_pair(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, read = _environ_reader(None, "gone")
         monkeypatch.setattr(server, "process_environ", read)
         payload: dict[str, Any] = {
             HookInputField.TEAMCHAT_RUNTIME: "/a",
@@ -87,7 +122,10 @@ class TestStampTeamchatSignals:
 
         server._stamp_teamchat_signals(payload, (4242, None))
 
-        assert calls == []
+        assert payload == {
+            HookInputField.TEAMCHAT_RUNTIME: "/a",
+            HookInputField.TEAMCHAT_KIT: "/b",
+        }
 
     @pytest.mark.parametrize("peer", [(None, "no SO_PEERCRED"), (0, None), (-1, None)])
     def test_an_unknown_peer_reads_nothing(
