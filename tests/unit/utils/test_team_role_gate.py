@@ -81,6 +81,23 @@ def test_undetermined_team_in_a_team_session_is_role_unknown() -> None:
     )
 
 
+@pytest.mark.parametrize("team", ["Alpha", "ALPHA", " alpha "])
+def test_team_name_matches_case_insensitively(team: str) -> None:
+    """Review F9: a case mismatch must never read as 'no seat here'."""
+    context = parse_whoami(fx.COORDINATOR_ONLY)
+    assert role_gate(MAIN, context, team=team, role="coordinator").verdict is (
+        GateVerdict.APPLIES
+    )
+
+
+@pytest.mark.parametrize("team", ["   ", "\t", "\n"])
+def test_blank_team_is_role_unknown(team: str) -> None:
+    context = parse_whoami(fx.COORDINATOR_ONLY)
+    assert role_gate(MAIN, context, team=team, role="coordinator").verdict is (
+        GateVerdict.ROLE_UNKNOWN
+    )
+
+
 def test_undetermined_team_without_a_team_is_not_applicable() -> None:
     assert role_gate(MAIN, ABSENT, team="", role="coordinator").verdict is (
         GateVerdict.NOT_APPLICABLE

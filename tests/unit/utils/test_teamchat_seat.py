@@ -331,6 +331,72 @@ class TestRolesAndDuties:
         assert context.any_duty("coordinator") is False
         assert context.duty_in("alpha") == "host"
 
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            # Review F2: a host row merged with a null-duty row.
+            [("alpha", "host"), ("alpha", None)],
+            # Review F2: a duty that fails the grammar might be host.
+            [("alpha", "Host!")],
+            [("alpha", None)],
+            [("alpha", " HOST ")],
+            [("alpha", "Host")],
+            [("alpha", "coordinator"), ("alpha", "host")],
+            [("alpha", "coordinator"), ("alpha", "worker")],
+            [("alpha", ["host"])],
+            # A host row under another spelling of the same team name.
+            [("Alpha", "host"), ("alpha", "coordinator")],
+            [(" alpha", "host"), ("alpha", "coordinator")],
+        ],
+    )
+    def test_coordinator_needs_a_readable_non_host_duty(
+        self, rows: list[tuple[str, Any]]
+    ) -> None:
+        seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
+        context = probe(fx.whoami(*seats))
+        answer = context.role_for_team("alpha")
+        assert answer.kind is RoleKind.UNKNOWN
+        assert not answer.holds_role("coordinator")
+        assert answer.guards_armed is True
+
+    @pytest.mark.parametrize("duty", ["host", " host ", "HOST", "Host"])
+    def test_any_host_row_makes_the_team_host(self, duty: str) -> None:
+        context = probe(
+            fx.whoami(fx.seat("alpha", "worker", duty="worker"), fx.seat("alpha", "worker", duty=duty))
+        )
+        assert context.duty_in("alpha") == "host"
+        assert context.any_duty("host") is True
+        assert context.role_for_team("alpha").holds_role("worker")
+
+    def test_conflicting_non_host_duties_are_unknown(self) -> None:
+        context = probe(
+            fx.whoami(
+                fx.seat("alpha", "worker", duty="worker"),
+                fx.seat("alpha", "worker", duty="reviewer"),
+            )
+        )
+        assert context.duty_in("alpha") == UNKNOWN
+        assert context.duty_unknown() is True
+
+    def test_role_and_duty_are_normalised(self) -> None:
+        context = probe(fx.whoami(fx.seat("alpha", " Worker ", duty=" WORKER")))
+        assert context.role_in("alpha") == "worker"
+        assert context.duty_in("alpha") == "worker"
+
+    def test_team_names_match_case_insensitively(self) -> None:
+        """Review F9: a caller's ``Alpha`` finds teamchat's ``alpha``."""
+        context = probe(fx.whoami(fx.seat("Alpha", "coordinator")))
+        assert context.teams_held() == ("alpha",)
+        for team in ("alpha", "ALPHA", " Alpha "):
+            assert context.role_for_team(team).holds_role("coordinator")
+            assert context.role_in(team) == "coordinator"
+            assert context.duty_in(team) == "coordinator"
+
+    def test_team_spellings_merge_into_one_team(self) -> None:
+        context = probe(fx.whoami(fx.seat("Alpha", "worker"), fx.seat("alpha", "worker")))
+        assert context.teams_held() == ("alpha",)
+        assert context.duplicate_teams == ("alpha",)
+
     def test_role_null_is_unknown(self) -> None:
         context = probe(fx.ROLE_NULL)
         assert context.role_for_team("alpha").kind is RoleKind.UNKNOWN
