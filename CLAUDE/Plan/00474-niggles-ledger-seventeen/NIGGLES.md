@@ -8345,3 +8345,11 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: Medium (a blocked seat is invisible to the people who could unblock it).
 
 **Status**: ⬜ Open, non-blocking, queued behind v2. Fix shape: when a push is denied by permission and the seat is awaiting-human, post one short bus report (through the coordinator, per the team's rules) naming the branch and the block, once per distinct block, not once per tick. Related to the Plan 00636 owner-wait Stop guard (owner notification on the bus).
+
+### N713 — acceptance probe `test_every_executable_probe_matches_its_expected_decision_and_reason` is INCONCLUSIVE when the Kotlin linter hits its 15 s wall-clock budget on a loaded CI runner
+
+**Source**: PR 228 CI, run 45216027109, py3.11 acceptance leg, failed twice on the same probe (`subagent-reports/261123-ci-fail-228-acceptance.md`); earlier PRs hit the same timeout. The PR changes nothing on the lint path.
+
+**Severity**: Medium (blocks merges until a re-run lands; costs a diagnosis each time).
+
+**Status**: ⬜ Open. Test-first: a probe whose only obstacle is a linter time-out should either use a budget scaled to the runner or be reported as skipped-with-reason rather than failing the leg; keep a probe that genuinely mis-decides failing.
