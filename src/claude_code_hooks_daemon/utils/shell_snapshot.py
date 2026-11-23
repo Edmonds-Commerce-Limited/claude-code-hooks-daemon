@@ -9,7 +9,8 @@ it expands like ``*``.
 The hook payload names no snapshot and nothing inside one names a session, so
 the running shell's own snapshot cannot be picked out. The verdict is therefore
 the narrow one the owner ruled: bash's default expansion is assumed only when
-EVERY readable snapshot records both options as off. Any snapshot that turns
+EVERY readable snapshot records both options, and ``nocaseglob`` (Ledger 00474
+N716), as off. Any snapshot that turns
 either on, that cannot be read, that does not record both, or no snapshot at
 all, leaves the caller on the conservative reading. So does a command that
 runs ``shopt`` or ``set -O`` itself, since it may switch the options on for its
@@ -38,13 +39,20 @@ SNAPSHOT_DIRNAME: Final[str] = "shell-snapshots"
 #: stale file from long ago cannot pin the verdict and the cost stays bounded.
 MAX_SNAPSHOTS_READ: int = 200
 
-_GLOB_OPTIONS: Final[tuple[str, ...]] = ("globstar", "dotglob")
+_GLOB_OPTIONS: Final[tuple[str, ...]] = ("globstar", "dotglob", "nocaseglob")
 _SHOPT_LINE: Final[re.Pattern[str]] = re.compile(
-    r"^[ \t]*shopt[ \t]+-(?P<state>[su])[ \t]+(?P<option>globstar|dotglob)[ \t]*$", re.MULTILINE
+    r"^[ \t]*shopt[ \t]+-(?P<state>[su])[ \t]+(?P<option>globstar|dotglob|nocaseglob)[ \t]*$",
+    re.MULTILINE,
 )
 #: A command that can change the options for its own run: ``shopt ...``, ``set -O ...``,
-#: ``bash -O ...``.
-_SWITCHES_OPTIONS: Final[re.Pattern[str]] = re.compile(r"\bshopt\b|(?<!\S)[-+]O\b")
+#: ``bash -O ...``; ``GLOBIGNORE`` (dot names match) or ``BASHOPTS`` (any option) set
+#: without ``shopt``; or code the guard does not read run first (``BASH_ENV``, ``source``,
+#: ``.``, ``eval``), which may run ``shopt`` itself (Ledger 00474 N716).
+_SWITCHES_OPTIONS: Final[re.Pattern[str]] = re.compile(
+    r"\bshopt\b|(?<!\S)[-+]O\b|\b(?:GLOBIGNORE|BASHOPTS|BASH_ENV)\b|\b(?:source|eval)\b"
+    r"|(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*\.[ \t]",
+    re.MULTILINE,
+)
 
 _Signature = tuple[int, tuple[tuple[str, int], ...]]
 
@@ -59,7 +67,7 @@ def reset_snapshot_cache() -> None:
 
 
 def default_glob_semantics(command: str, *, config_dir: Path | None = None) -> bool:
-    """Is a bare ``**`` in ``command`` expanded by bash's defaults (like ``*``)?
+    """Does ``command`` glob by bash's defaults: ``**`` like ``*``, no dot names, case exact?
 
     ``config_dir`` defaults to Claude Code's own (:func:`claude_config_dir`).
     ``False`` is the conservative answer and is returned whenever the question
@@ -116,7 +124,7 @@ def _signature(directory: Path) -> tuple[_Signature, list[str]]:
 
 
 def _records_both_off(path: Path) -> bool:
-    """Does the snapshot record ``globstar`` and ``dotglob`` as off, and neither as on?"""
+    """Does the snapshot record every option of :data:`_GLOB_OPTIONS` as off, and none as on?"""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:

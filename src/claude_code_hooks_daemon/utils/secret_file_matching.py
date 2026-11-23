@@ -25,7 +25,6 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 import contextlib
 import contextvars
 import errno
-import fnmatch
 import functools
 import itertools
 import logging
@@ -3035,28 +3034,150 @@ def iter_protected_mentions(
                 yield (pattern, word)
 
 
-#: A whole unquoted word holding an extglob group (``kit/@(bin|zz)/late``),
-#: whose ``(``, ``|`` and ``)`` the ordinary token stream splits on.
-_EXTGLOB_WORD: Final[re.Pattern[str]] = re.compile(
-    r"(?<![\w$])[^\s;&<>|()]*(?:[?*+@!]\([^()\s]*\)[^\s;&<>|()]*)+"
-)
+#: What ends an unquoted shell word outside an extglob group.
+_WORD_BREAKS: Final[frozenset[str]] = frozenset(" \t\n;&|<>()")
+#: Characters that open an extglob group when an unquoted ``(`` follows.
+_EXTGLOB_OPERATORS: Final[frozenset[str]] = frozenset("?*+@!")
+#: Backslash escapes bash removes inside double quotes.
+_DOUBLE_QUOTE_ESCAPABLE: Final[frozenset[str]] = frozenset('"\\$`\n')
 
 
 def _extglob_words(command: str) -> list[str]:
-    """Each unquoted word of ``command`` holding an extglob group (Ledger 00474 N710).
+    """Each word of ``command`` holding an extglob group, dequoted (Ledger 00474 N710, N716).
 
-    Bash reads ``@(a|b)`` as one word once ``extglob`` is on; the ordinary
-    stream splits it at ``(`` and ``|``, so no piece would be expanded as the
-    pattern it is. Quoted text is masked first: a quoted group is a literal.
+    Bash reads ``kit/@(bin|zz)/late`` as one word once ``extglob`` is on; the
+    ordinary stream splits it at ``(`` and ``|``. The word is taken whole, as
+    bash splits it: a quote or escape earlier in it, a quoted alternative and a
+    nested group stay inside, and quotes are removed. Every quoted string and
+    command substitution is read again as a command of its own (a ``bash -c``
+    or ``eval`` body), since the guard cannot tell which one a shell runs. A
+    group that never closes is a syntax error bash runs nothing for: skipped.
     """
     if "(" not in command:
         return []
-    unquoted = mask_quoted(command, keep_double=False)
-    return list(
-        dict.fromkeys(
-            command[match.start() : match.end()] for match in _EXTGLOB_WORD.finditer(unquoted)
-        )
-    )
+    found: dict[str, None] = {}
+    pending = [command]
+    for text in pending:  # bodies are appended while iterating; each is shorter than its text
+        for word in _scan_extglob_words(text, pending):
+            found[word] = None
+    return list(found)
+
+
+def _scan_extglob_words(text: str, bodies: list[str]) -> list[str]:
+    """The dequoted extglob words of ``text``; each quoted or substituted body holding ``(`` goes to ``bodies``."""
+    words: list[str] = []
+    current: list[str] = []
+    grouped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char in _WORD_BREAKS:
+            if grouped and current:
+                words.append("".join(current))
+            current, grouped = [], False
+            index += 1
+            continue
+        if char in _EXTGLOB_OPERATORS and text.startswith("(", index + 1):
+            end = _group_end(text, index + 1)
+            if end is None:
+                # Never closes: bash refuses the line. The rest is judged by the ordinary stream.
+                current, grouped = [], False
+                break
+            current.append(_dequoted(text[index:end]))
+            grouped = True
+            index = end
+            continue
+        piece, body, index = _word_piece(text, index)
+        current.append(piece)
+        if body is not None and "(" in body:
+            bodies.append(body)
+    if grouped and current:
+        words.append("".join(current))
+    return words
+
+
+def _word_piece(text: str, index: int) -> tuple[str, str | None, int]:
+    """The dequoted piece of a word starting at ``text[index]``, any body it quotes, and where it ends."""
+    char = text[index]
+    if char == "\\":
+        return text[index + 1 : index + 2], None, index + 2
+    if char == "'" or text.startswith("$'", index):
+        start = text.index("'", index) + 1
+        close = _quote_end(text, start, "'", escapes=char == "$")
+        body = text[start:close]
+        return body, body, close + 1
+    if char == '"':
+        close = _quote_end(text, index + 1, '"', escapes=True)
+        body = _double_quoted(text[index + 1 : close])
+        return body, body, close + 1
+    if text.startswith("$(", index) or text.startswith("`", index):
+        if char == "`":
+            close = _quote_end(text, index + 1, "`", escapes=True) + 1
+            inner = text[index + 1 : close - 1]
+        else:
+            close = _group_end(text, index + 1) or len(text)
+            inner = text[index + 2 : close - 1]
+        return text[index:close], inner, close
+    return char, None, index + 1
+
+
+def _quote_end(text: str, start: int, quote: str, *, escapes: bool) -> int:
+    """Index of the ``quote`` closing a string opened before ``start``; the end when none does."""
+    index = start
+    while index < len(text):
+        if escapes and text[index] == "\\":
+            index += 2
+            continue
+        if text[index] == quote:
+            return index
+        index += 1
+    return len(text)
+
+
+def _group_end(text: str, open_index: int) -> int | None:
+    """Index just past the ``)`` closing the ``(`` at ``open_index``, honouring quotes; None if none."""
+    depth = 0
+    index = open_index
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char in "'\"`":
+            index = _quote_end(text, index + 1, char, escapes=char != "'") + 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return None
+
+
+def _double_quoted(raw: str) -> str:
+    """The text a double-quoted string ``raw`` holds once bash removes its escapes."""
+    out: list[str] = []
+    index = 0
+    while index < len(raw):
+        if raw[index] == "\\" and raw[index + 1 : index + 2] in _DOUBLE_QUOTE_ESCAPABLE:
+            out.append(raw[index + 1])
+            index += 2
+            continue
+        out.append(raw[index])
+        index += 1
+    return "".join(out)
+
+
+def _dequoted(group: str) -> str:
+    """An extglob ``group`` with its quotes and escapes removed, the way bash matches it."""
+    out: list[str] = []
+    index = 0
+    while index < len(group):
+        piece, _body, index = _word_piece(group, index)
+        out.append(piece)
+    return "".join(out)
 
 
 def _with_option_value_forms(tokens: Iterable[str]) -> Iterator[str]:
@@ -3471,14 +3592,15 @@ def _token_mention_judged(
                 # ``*.zzz-passwd`` stem) really does glob-expand to the
                 # protected file and must still deny -- see
                 # ``_both_edges_residue_is_near_total_stem_match``.
+                # Ledger 00474 N716: case-blind unless bash's defaults (no nocaseglob) are certain.
                 if (
                     len(residue) >= _MIN_GLOB_OVERLAP_CHARS
-                    and residue in stem_basename
+                    and _residue_in_stem(residue, stem_basename, default_globs)
                     and (
                         not (has_leading_wildcard and has_trailing_wildcard)
                         or _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
                     )
-                    and fnmatch.fnmatchcase(stem_basename, _bash_bracket_negation(basename))
+                    and _component_spells(basename, stem_basename, ignore_case=not default_globs())
                 ):
                     return pattern
                 # Plan 00272 gap fix (G2), GATED to leading-wildcard
@@ -3578,6 +3700,13 @@ def _token_mention_judged(
                 return found
         return _overflow_mention(token, effective_cwds, patterns)
     return None
+
+
+def _residue_in_stem(residue: str, stem: str, default_globs: Callable[[], bool]) -> bool:
+    """Does literal ``residue`` occur in ``stem``; in any case unless bash's defaults are certain."""
+    if residue in stem:
+        return True
+    return not default_globs() and residue.casefold() in stem.casefold()
 
 
 def has_name_agnostic_glob(command: str) -> bool:
@@ -4261,8 +4390,6 @@ _GLOBSTAR: Final[str] = "**"
 _WORD_GLOB_UNREADABLE_PATTERN: Final[str] = "a globbed word holds a pattern the guard cannot read"
 #: An extglob operator (``?( *( +( @( !(``), live once ``shopt -s extglob`` is on.
 _EXTGLOB_OPENER: Final[re.Pattern[str]] = re.compile(r"[?*+@!]\(")
-#: Bracket expressions fnmatch closes at their first ``]``: POSIX classes and kin.
-_POSIX_BRACKET_OPENERS: Final[tuple[str, ...]] = ("[[:", "[[=", "[[.")
 
 
 class _WordGlobStopped(Exception):
@@ -4462,7 +4589,7 @@ class _WordGlobWalk:
             return self._globstar(reached, last)
         if not _component_is_pattern(component):
             return self._literal(reached, component, last)
-        pattern = _component_regex(component)
+        pattern = _component_regex(component, not self.default_semantics)
         if pattern is None:
             raise _WordGlobStopped(_WORD_GLOB_UNREADABLE_PATTERN)
         hidden = component.startswith(".") or not self.default_semantics
@@ -4488,7 +4615,7 @@ class _WordGlobWalk:
         links = self.listings.link_entries(reached.path)
         if not links:
             return []
-        pattern = _component_regex(component)
+        pattern = _component_regex(component, not self.default_semantics)
         if pattern is None:
             raise _WordGlobStopped(_WORD_GLOB_UNREADABLE_PATTERN)
         hidden = component.startswith(".") or not self.default_semantics
@@ -4596,6 +4723,9 @@ def _extglob_regex(component: str) -> str | None:
     paren) before it reached the guard, and a nested group is not read: the
     first cannot be judged at all, the second is widened to anything.
     """
+    if any(char in component for char in _UNTRANSLATED_IN_EXTGLOB):
+        # A bracket, an escape or a quote beside a group is not read here: anything.
+        return _ANY_NAME_REGEX
     parts: list[str] = []
     index = 0
     while index < len(component):
@@ -4621,39 +4751,113 @@ _COMPONENT_REGEX_CACHE_SIZE: Final[int] = 4096
 
 
 @functools.lru_cache(maxsize=_COMPONENT_REGEX_CACHE_SIZE)
-def _component_regex(component: str) -> re.Pattern[str] | None:
+def _component_regex(component: str, ignore_case: bool = True) -> re.Pattern[str] | None:
     """``component`` as a whole-name regex matching at least what bash would; None if unreadable.
 
-    Bash negates a bracket with ``^`` as well as ``!``; a backslash escape is
-    dropped, which can only widen the match (``\\*`` then matches more than
-    ``*``). A POSIX class (``[[:alpha:]]``), which fnmatch closes at its first
-    ``]``, is widened to anything. An extglob (``@(a|b)``) is translated; one
-    whose group does not close in the component cannot be read: None.
+    Every shell pattern this module matches is read here (Ledger 00474 N716):
+    a plain glob by :func:`_shell_glob_regex`, an extglob (``@(a|b)``) by
+    :func:`_extglob_regex`; one whose group does not close in the component
+    cannot be read: None. ``ignore_case`` reads it as ``nocaseglob`` does, the
+    wide reading for any caller that cannot rule that option out.
     """
+    flags = re.IGNORECASE if ignore_case else 0
     if _EXTGLOB_OPENER.search(component) is not None:
         translated = _extglob_regex(component)
         if translated is None:
             return None
-        return re.compile(f"(?s:{translated})\\Z")
-    if any(opener in component for opener in _POSIX_BRACKET_OPENERS):
-        return re.compile(f"(?s:{_ANY_NAME_REGEX})\\Z")
-    return re.compile(fnmatch.translate(_bash_bracket_negation(component).replace("\\", "")))
+    else:
+        translated = _shell_glob_regex(component)
+    try:
+        return re.compile(f"(?s:{translated})\\Z", flags)
+    except re.error as error:
+        # A bracket regex cannot spell (a reversed range): read as anything (fail closed).
+        log_and_continue(
+            logger, error, reason="a glob the regex engine refuses is read as any name"
+        )
+        return re.compile(f"(?s:{_ANY_NAME_REGEX})\\Z", flags)
 
 
-def _bash_bracket_negation(pattern: str) -> str:
-    """Shell glob ``pattern`` spelled for fnmatch: bash negates a bracket with ``^`` as with ``!``.
+def _shell_glob_regex(pattern: str) -> str:
+    """Regex source for plain glob ``pattern`` (``*``, ``?``, brackets), at least as wide as bash.
 
-    Python's fnmatch reads ``[^z]`` as "``^`` or ``z``"; bash reads it as "not
-    ``z``". Every fnmatch of a shell word in this module goes through here.
+    A backslash may be an escape or, in a word already dequoted, a literal
+    character: it becomes an optional literal backslash and the next character
+    keeps its glob meaning, which covers both readings. A bracket beside a
+    backslash, or holding a POSIX class, equivalence class or collating symbol,
+    makes the whole component anything; any other bracket is read exactly by
+    :func:`_bracket_regex`, and one that does not close is a literal ``[``.
     """
-    return pattern.replace("[^", "[!")
+    if "\\" in pattern and "[" in pattern:
+        return _ANY_NAME_REGEX
+    parts: list[str] = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "[":
+            bracket = _bracket_regex(pattern, index)
+            if bracket is not None:
+                regex, index = bracket
+                if regex == _ANY_NAME_REGEX:
+                    return _ANY_NAME_REGEX
+                parts.append(regex)
+                continue
+        parts.append(_GLOB_CHARACTER_REGEX.get(char) or re.escape(char))
+        index += 1
+    return "".join(parts)
 
 
-def _component_spells(spelling: str, name: str) -> bool:
-    """Could word component ``spelling`` (a glob or not) name the entry ``name``?"""
+#: What a glob character outside a bracket reads as.
+_GLOB_CHARACTER_REGEX: Final[dict[str, str]] = {"*": ".*", "?": ".", "\\": "\\\\?"}
+#: Openers of a POSIX class (``[:alpha:]``), equivalence class or collating symbol in a bracket.
+_BRACKET_CLASS_KINDS: Final[str] = ":=."
+#: Characters that negate a bracket when they come first: bash takes ``^`` as well as ``!``.
+_BRACKET_NEGATORS: Final[str] = "!^"
+#: Characters :func:`_extglob_regex` does not translate beside a group.
+_UNTRANSLATED_IN_EXTGLOB: Final[str] = "[\\\"'"
+
+
+def _bracket_regex(pattern: str, start: int) -> tuple[str, int] | None:
+    """The bracket opening at ``pattern[start]`` as regex source, and the index after it.
+
+    Read as bash reads it: ``!`` or ``^`` negates only right after the opening
+    ``[``; a ``]`` right after that (or after the negator) is a member; a ``[``
+    inside is a member; ``a-z`` is a range. A class of any kind answers
+    :data:`_ANY_NAME_REGEX` for the whole component. None when the bracket does
+    not close: bash reads its ``[`` literally.
+    """
+    index = start + 1
+    negated = index < len(pattern) and pattern[index] in _BRACKET_NEGATORS
+    if negated:
+        index += 1
+    members: list[str] = []
+    first = True
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "]" and not first:
+            prefix = "^" if negated else ""
+            return f"[{prefix}{''.join(members)}]", index + 1
+        first = False
+        following = pattern[index + 1] if index + 1 < len(pattern) else ""
+        if char == "[" and following and following in _BRACKET_CLASS_KINDS:
+            return _ANY_NAME_REGEX, len(pattern)
+        if following == "-" and index + 2 < len(pattern) and pattern[index + 2] != "]":
+            members.append(f"{re.escape(char)}-{re.escape(pattern[index + 2])}")
+            index += 3
+            continue
+        members.append(re.escape(char))
+        index += 1
+    return None
+
+
+def _component_spells(spelling: str, name: str, *, ignore_case: bool = True) -> bool:
+    """Could word component ``spelling`` (a glob or not) name the entry ``name``?
+
+    A pattern is read case-blind unless the caller knows ``nocaseglob`` is off;
+    a literal component is compared exactly, as bash compares it.
+    """
     if not _component_is_pattern(spelling):
         return spelling == name
-    pattern = _component_regex(spelling)
+    pattern = _component_regex(spelling, ignore_case)
     return pattern is None or pattern.match(name) is not None
 
 
