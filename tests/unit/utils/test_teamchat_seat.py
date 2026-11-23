@@ -706,6 +706,69 @@ class TestResolver:
         resolver.resolve(SessionSignals(runtime="/tmp/teamchat/run-b", kit=KIT))
         assert len(runner.calls) == 2
 
+    def test_cache_is_bounded(self) -> None:
+        runner, clock = ok(fx.WORKER_ONLY), Clock()
+        resolver = SeatContextResolver(ttl_seconds=60, clock=clock, runner=runner, max_entries=3)
+        for index in range(10):
+            resolver.resolve(SessionSignals(runtime=f"/tmp/teamchat/run-{index}", kit=KIT))
+            clock.now += 1
+        assert resolver.cache_size() == 3
+
+    def test_full_cache_evicts_expired_entries_first(self) -> None:
+        runner, clock = ok(fx.WORKER_ONLY), Clock()
+        resolver = SeatContextResolver(ttl_seconds=60, clock=clock, runner=runner, max_entries=3)
+        old = SessionSignals(runtime="/tmp/teamchat/run-old", kit=KIT)
+        resolver.resolve(old)
+        clock.now += 61
+        keep_a = SessionSignals(runtime="/tmp/teamchat/run-a", kit=KIT)
+        keep_b = SessionSignals(runtime="/tmp/teamchat/run-b", kit=KIT)
+        resolver.resolve(keep_a)
+        resolver.resolve(keep_b)
+        resolver.resolve(SessionSignals(runtime="/tmp/teamchat/run-c", kit=KIT))
+        assert resolver.cache_size() == 3
+        calls = len(runner.calls)
+        resolver.resolve(keep_a)
+        resolver.resolve(keep_b)
+        assert len(runner.calls) == calls
+
+    def test_full_cache_evicts_the_oldest_live_entry(self) -> None:
+        runner, clock = ok(fx.WORKER_ONLY), Clock()
+        resolver = SeatContextResolver(ttl_seconds=60, clock=clock, runner=runner, max_entries=2)
+        oldest = SessionSignals(runtime="/tmp/teamchat/run-1", kit=KIT)
+        newer = SessionSignals(runtime="/tmp/teamchat/run-2", kit=KIT)
+        resolver.resolve(oldest)
+        clock.now += 1
+        resolver.resolve(newer)
+        clock.now += 1
+        resolver.resolve(SessionSignals(runtime="/tmp/teamchat/run-3", kit=KIT))
+        calls = len(runner.calls)
+        resolver.resolve(newer)
+        assert len(runner.calls) == calls
+        resolver.resolve(oldest)
+        assert len(runner.calls) == calls + 1
+
+    def test_refreshing_a_cached_session_does_not_evict_another(self) -> None:
+        runner, clock = ok(fx.WORKER_ONLY), Clock()
+        resolver = SeatContextResolver(ttl_seconds=60, clock=clock, runner=runner, max_entries=2)
+        first = SessionSignals(runtime="/tmp/teamchat/run-1", kit=KIT)
+        second = SessionSignals(runtime="/tmp/teamchat/run-2", kit=KIT)
+        resolver.resolve(first)
+        resolver.resolve(second)
+        clock.now += 61
+        resolver.resolve(first)
+        assert resolver.cache_size() == 2
+
+    def test_default_cache_bound(self) -> None:
+        assert teamchat_seat.MAX_CACHE_ENTRIES >= 1
+        resolver = SeatContextResolver(runner=ok(fx.WORKER_ONLY), clock=Clock())
+        for index in range(teamchat_seat.MAX_CACHE_ENTRIES + 5):
+            resolver.resolve(SessionSignals(runtime=f"/tmp/teamchat/run-{index}", kit=KIT))
+        assert resolver.cache_size() == teamchat_seat.MAX_CACHE_ENTRIES
+
+    def test_max_entries_must_be_positive(self) -> None:
+        with pytest.raises(ValueError, match="max_entries"):
+            SeatContextResolver(max_entries=0)
+
     def test_absent_runs_nothing(self) -> None:
         runner = ok(fx.WORKER_ONLY)
         resolver = self._resolver(runner, Clock())
