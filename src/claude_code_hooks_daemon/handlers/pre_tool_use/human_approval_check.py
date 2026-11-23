@@ -235,9 +235,11 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """An armed seat running a push, delete, world-writable chmod or merge into main.
 
-        Cheapest first, and the seat probe last: a session with no teamchat
-        runtime, or a command naming no act, never probes. Any failure here
-        is silent, because nothing is armed yet.
+        A session with no teamchat runtime never probes. The seat is resolved
+        (TTL-cached) BEFORE the command is classified, so the two failure
+        sides stay apart: a failure before arming is silent, because a
+        seatless session must see no change; a failure while classifying for
+        an armed seat counts as the act, so the mode's refusal judges it.
         """
         if self.is_dormant() or hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
@@ -245,12 +247,9 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
             signals = SessionSignals.from_hook_input(hook_input)
             if not signals.runtime:
                 return False
-            if not classify_acts(get_bash_command(hook_input) or "", self._cwd(hook_input)):
-                return False
-            context = self._seat_resolver().resolve(signals)
-            return is_armed(
+            armed = is_armed(
                 hook_input,
-                context,
+                self._seat_resolver().resolve(signals),
                 coordinator_seats_only=self._coordinator_seats_only is not False,
             )
         except Exception as exc:
@@ -260,6 +259,17 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
                 reason="a failure before arming leaves the check silent; a seatless session must see no change",
             )
             return False
+        if not armed:
+            return False
+        try:
+            return bool(classify_acts(get_bash_command(hook_input) or "", self._cwd(hook_input)))
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a failure classifying an armed seat's command counts as the act (fail closed)",
+            )
+            return True
 
     @staticmethod
     def _cwd(hook_input: Mapping[str, Any]) -> Path:

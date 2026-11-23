@@ -109,6 +109,10 @@ def exploding_verifier(_signals: SessionSignals, _cite: ApprovalCite) -> Verifie
     raise RuntimeError("verifier crashed")
 
 
+def _exploding_classify(_command: str, _cwd: Path) -> frozenset[ActClass]:
+    raise RuntimeError("classifier crashed")
+
+
 @pytest.fixture(autouse=True)
 def _reset_disclosure_tracker() -> Iterator[None]:
     reset_data_layer()
@@ -246,9 +250,43 @@ class TestArming:
         assert handler.matches(bash(PUSH, runtime="")) is False
         assert resolver.calls == []
 
-    def test_no_act_never_asks_the_resolver(self) -> None:
-        handler, resolver = make()
+    def test_no_act_is_silent_for_an_armed_seat(self) -> None:
+        handler, _ = make()
         assert handler.matches(bash("git status")) is False
+
+    def test_classify_failure_counts_as_the_act_for_an_armed_seat(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review finding 4: classifying runs AFTER arming, and fails closed there."""
+        monkeypatch.setattr(module, "classify_acts", _exploding_classify)
+        handler, _ = make(COORDINATOR)
+        assert handler.matches(bash(PUSH)) is True
+        result = handler.handle(bash(PUSH))
+        assert result.decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "context", [WORKER, SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)]
+    )
+    def test_classify_failure_is_silent_for_an_unarmed_seat(
+        self, monkeypatch: pytest.MonkeyPatch, context: SeatContext
+    ) -> None:
+        monkeypatch.setattr(module, "classify_acts", _exploding_classify)
+        handler, _ = make(context)
+        assert handler.matches(bash(PUSH)) is False
+
+    def test_classify_failure_is_silent_for_a_subagent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(module, "classify_acts", _exploding_classify)
+        handler, _ = make(COORDINATOR)
+        assert handler.matches(subagent(PUSH)) is False
+
+    def test_classify_failure_with_no_runtime_never_probes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(module, "classify_acts", _exploding_classify)
+        handler, resolver = make(COORDINATOR)
+        assert handler.matches(bash(PUSH, runtime="")) is False
         assert resolver.calls == []
 
     def test_not_bash_is_silent(self) -> None:
