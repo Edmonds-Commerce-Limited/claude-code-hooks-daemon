@@ -191,6 +191,25 @@ class TestClassifyActs:
     def test_prose_and_harmless_name_no_act(self, command: str) -> None:
         assert classify_acts(command, Path(CWD)) == frozenset()
 
+    @pytest.mark.parametrize(
+        ("command", "act"),
+        [
+            ("git -C /srv/repo push origin feature", ActClass.PUSH),
+            ("git --no-pager push origin feature", ActClass.PUSH),
+            ("/usr/bin/git push origin feature", ActClass.PUSH),
+            ("sudo git push origin feature", ActClass.PUSH),
+            ("\\git push origin feature", ActClass.PUSH),
+            ("cd /srv/repo && git push origin feature", ActClass.PUSH),
+            ("git -C /srv/repo branch -D feature", ActClass.DELETE),
+            ("/usr/bin/git worktree remove ../wt", ActClass.DELETE),
+            ("sudo chmod 777 shared", ActClass.PERMISSION),
+            ("git -C /srv/repo merge feature", ActClass.MERGE_MAIN),
+        ],
+    )
+    def test_respelled_command_still_classifies(self, command: str, act: ActClass) -> None:
+        """The evasion harness cannot arm a seat, so respellings are pinned here."""
+        assert act in classify_acts(command, Path(CWD))
+
     def test_trailing_cite_comment_still_classifies_as_push(self) -> None:
         assert ActClass.PUSH in classify_acts(CITED_PUSH, Path(CWD))
 
