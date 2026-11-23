@@ -63,12 +63,25 @@ Not seat-gated: a default in every project.
 - [ ] ⬜ **Task 4.1**: Tests first: the four `upgrade.automatic_scope` values
   (major, minor, patch, none) against a fixed current version and tag list;
   one-line notice at a forbidden boundary, never a block; manual upgrade
-  unaffected; unparseable tags select nothing.
+  unaffected; unparseable tags select nothing; identical results attended and
+  unattended; first-upgrade risk notice emitted exactly once.
 - [ ] ⬜ **Task 4.2**: `upgrade` built-in preset in `standing_authorisations`,
-  shipped enabled, recorded-request wording naming the key, default `major`
-  (put to the owner in Q66: attended `major` now, unattended waiting on
-  00625 signed tags; DESIGN.md section 22). Does not authorise an unattended
-  upgrade; that waits on Plan 00625's signed-tag verification.
+  shipped enabled, recorded-request wording naming the key, default `major`,
+  applied the same to attended and unattended upgrades (owner ruling, Q66
+  scope follow-up, bus id `$KlxivVJ6cbAIoN4uNerRK2Hj8BDO3nEioVdVwoLYVP8`;
+  DESIGN.md section 22). No session-kind branch.
+- [ ] ⬜ **Task 4.3**: Build the `none` value and the one-line notice on the
+  first automatic upgrade under the preset (names the key, the `none` switch,
+  and that tags are not yet signature-checked). Neither exists today.
+
+**RISK for the owner (not a blocker).** Until Plan 00625's signature
+verification ships, default `major` means automatic upgrades to an
+unverified latest tag in every project. Existing mitigation: the upgrade
+flow's tag-exists check, state snapshot, config backup, venv verify, verified
+restart and failure rollback, which catch a broken upgrade but not a
+malicious tag. Built here: `none` and the first-upgrade notice. When 00625
+ships, its verification gates every automatic upgrade, attended or not.
+Detail: DESIGN.md section 22.
 
 ## Dependencies
 
@@ -78,6 +91,8 @@ Not seat-gated: a default in every project.
 
 - [ ] Every merged branch has a gate record or an explicit "not gated".
 - [ ] Absent-team fixture passes; profile never relaxes a guard.
+- [ ] `upgrade.automatic_scope` behaves identically attended and unattended;
+  `none` and the first-upgrade notice ship with the preset.
 - [ ] Release-bound items recorded in the pending-release holding area.
 
 ## Delivery & Milestones

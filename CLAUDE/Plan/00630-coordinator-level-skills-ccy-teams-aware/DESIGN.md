@@ -641,7 +641,7 @@ standing approval and upgrade lock) is an unfilled template: it names no
 switch, no signing key and no lock design yet, so there is nothing to reuse
 and nothing to be blocked on mechanically.
 
-**Key.** Proposed `upgrade.automatic_scope`, values `major | minor | patch | none`, default `major` (the coordinator's reading of the owner's "b yes").
+**Key.** `upgrade.automatic_scope`, values `major | minor | patch | none`, default `major` (owner ruling below), the same for attended and unattended upgrades.
 Plan 00625 must reuse this name for its switch rather than coin another.
 
 **Semantics.** The "current" version is the installed daemon version read from
@@ -661,26 +661,34 @@ setting; never block, and a manual upgrade is never affected by the key. An
 unparseable version or tag list admits nothing and logs why (fail closed,
 notice only).
 
-**Interplay with signature verification.** Earlier owner-side ruling:
-unattended upgrades must verify the tag signature. The scope key decides
-WHICH tag is eligible; verification decides whether an eligible tag may be
-applied unattended. They compose with AND.
+**Owner ruling: no attended/unattended split (Q66 scope follow-up).** The
+owner answered "unattended or not should not make a difference really"
+(Q66 question id `$U506zXj_P9k99uc1zLrkfS89CYP2vGMfOS7TpyrWYxo`, relayed by
+the coordinator on the lts-infra bus, id
+`$KlxivVJ6cbAIoN4uNerRK2Hj8BDO3nEioVdVwoLYVP8`). So:
 
-**Decision (recommendation).** Ship the preset now, enabled, with the
-verification the upgrade path already performs, and have the preset's text
-authorise only an upgrade the agent runs through the documented upgrade
-procedure (an attended session act). Do NOT ship an unattended, no-human
-upgrade until Plan 00625 lands its signed-tag verification and upgrade lock:
-the preset authorises the act, 00625 is what makes it safe to fire without a
-human. Rationale: the preset only records consent for attended sessions, which
-does not weaken the signature ruling; the unattended trigger is a different
-mechanism and stays gated on 00625 and the owner's signing key.
+- `upgrade.automatic_scope` applies identically to every automatic upgrade,
+  whether the session is attended or unattended. Default `major`. Ships now.
+- When Plan 00625's signed-tag verification ships, it applies to EVERY
+  automatic upgrade, attended or not. The scope key decides WHICH tag is
+  eligible; verification decides whether that tag may be applied. They
+  compose with AND, with no session-kind condition on either.
+- Nothing in this design, Plan 00633 or Plan 00625 may branch on attended
+  versus unattended for upgrades. This replaces the earlier recommendation
+  (preset authorising only attended upgrades, unattended waiting on 00625).
 
-**Open point, put to the owner in Q66.** The default `major` is the
-coordinator's reading of "b yes", and it sits against the
-signature-verification ruling. The question is with the owner as: attended
-upgrades default to `major` now; unattended upgrades wait on Plan 00625's
-signed-tag verification. Until the owner answers, build to that reading.
+**RISK for the owner (accepted by the ruling, not a blocker).** Until Plan
+00625's signature verification ships, the default `major` means every project
+automatically upgrades to the latest release tag WITHOUT any check that the
+tag is genuine: whoever can push a tag to the release repository decides what
+code every project runs next. The mitigations, and what exists today:
+
+| Mitigation                                                                                                                                                                                                                                                                                                                                                          | Exists today?                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Upgrade-flow safety in `scripts/upgrade_version.sh`: target tag must resolve to a commit; state snapshot (`create_state_snapshot`, `scripts/install/rollback.sh`); config backup (`backup_config`); `verify_venv`; `restart_daemon_verified`; EXIT-trap rollback that restores the snapshot (or checks out the previous ref) and restarts the old daemon on failure | Yes. It catches a BROKEN upgrade; it does not detect a MALICIOUS one                                |
+| Tag signature verification                                                                                                                                                                                                                                                                                                                                          | No. No `verify-tag`/GPG check anywhere in the upgrade scripts; Plan 00625 (still an empty template) |
+| `upgrade.automatic_scope: none` (turns every automatic upgrade off per project)                                                                                                                                                                                                                                                                                     | No. Built by Plan 00633 Phase 4                                                                     |
+| One-line notice on the first automatic upgrade under the preset (names the preset, the key, the `none` switch and that tags are not yet signature-checked)                                                                                                                                                                                                          | No. Built by Plan 00633 Phase 4                                                                     |
 
 **Acceptance (tests first, per value; current 1.4.2, tags 1.4.3, 1.5.0, 2.0.0
 as the fixture):** `major` selects 2.0.0; `minor` selects 1.5.0 and emits the
@@ -688,5 +696,9 @@ notice naming 2.0.0; `patch` selects 1.4.3 and emits the notice naming 1.5.0
 and 2.0.0; `none` selects nothing and emits one notice; no newer tag in scope
 emits no notice; a manual upgrade ignores the key in all four; an unparseable
 tag list selects nothing and logs; the preset text is a recorded request that
-names `upgrade.automatic_scope` and contains no "ignore/override" wording; an
-unsigned latest tag is never applied unattended once 00625 lands.
+names `upgrade.automatic_scope` and contains no "ignore/override" wording;
+every case gives the same result in an attended and an unattended session
+(no session-kind branch); the first automatic upgrade under the preset emits
+the one-line risk notice once, and later ones do not; once 00625 lands, an
+unsigned latest tag is never applied by ANY automatic upgrade, attended or
+not.
