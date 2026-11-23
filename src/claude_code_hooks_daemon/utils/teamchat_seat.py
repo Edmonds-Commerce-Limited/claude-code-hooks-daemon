@@ -41,6 +41,7 @@ reason category only, never the command's output, which is untrusted.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -59,6 +60,8 @@ from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
@@ -499,7 +502,7 @@ def _binary_trust(binary: str) -> CommandStatus | None:
         return CommandStatus.UNTRUSTED
     real_binary = given.resolve()
     real_kit = given.parent.parent.resolve()
-    if not real_binary.is_relative_to(real_kit):
+    if not path_is_relative_to(real_binary, real_kit):
         return CommandStatus.UNTRUSTED
     for path in (real_binary, real_binary.parent, real_kit):
         try:
@@ -519,10 +522,8 @@ def _kill_group(process: subprocess.Popen[bytes]) -> None:
 
     Called only before the leader is reaped, so the group id is still its own.
     """
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        _LOGGER.debug("teamchat seat probe: process group already gone")
+    with contextlib.suppress(ProcessLookupError):
+        signal_own_session_child(process, signal.SIGKILL)
     process.wait()
 
 
@@ -718,8 +719,7 @@ class SeatContextResolver:
         if cached is not None and now - cached[0] < self._ttl:
             return cached[1]
         context = probe_seat_context(signals, runner=self._runner, timeout=self._timeout)
-        with self._lock:
-            self._store(signals, now, context)
+        self._store(signals, now, context)
         return context
 
     def cache_size(self) -> int:
@@ -728,12 +728,15 @@ class SeatContextResolver:
             return len(self._cache)
 
     def _store(self, signals: SessionSignals, now: float, context: SeatContext) -> None:
-        """Cache one answer, evicting to stay within ``max_entries``. Caller holds the lock."""
-        if signals not in self._cache and len(self._cache) >= self._max_entries:
-            expired = [key for key, (stamp, _) in self._cache.items() if now - stamp >= self._ttl]
-            for key in expired:
-                del self._cache[key]
-            while len(self._cache) >= self._max_entries:
-                oldest = min(self._cache, key=lambda key: self._cache[key][0])
-                del self._cache[oldest]
-        self._cache[signals] = (now, context)
+        """Cache one answer, evicting to stay within ``max_entries``, under the lock."""
+        with self._lock:
+            if signals not in self._cache and len(self._cache) >= self._max_entries:
+                expired = [
+                    key for key, (stamp, _) in self._cache.items() if now - stamp >= self._ttl
+                ]
+                for key in expired:
+                    del self._cache[key]
+                while len(self._cache) >= self._max_entries:
+                    oldest = min(self._cache, key=lambda key: self._cache[key][0])
+                    del self._cache[oldest]
+            self._cache[signals] = (now, context)

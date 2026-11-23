@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import TeamSeatConfig
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.utils import teamchat_seat
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     KIT_ENV_VAR,
@@ -111,7 +112,7 @@ class TestAbsent:
         assert context.state is SeatState.ABSENT
         assert context.reason is ProbeReason.NO_SESSION
         assert context.teams_held() == ()
-        assert caplog.records == []
+        assert [r for r in caplog.records if r.name == teamchat_seat.__name__] == []
 
     def test_empty_teams_is_absent(self) -> None:
         context = probe(fx.NO_TEAMS)
@@ -132,7 +133,7 @@ class TestAbsent:
     def test_absent_logs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.DEBUG, logger=teamchat_seat.__name__)
         probe_seat_context(SessionSignals(), runner=ok(""))
-        assert caplog.records == []
+        assert [r for r in caplog.records if r.name == teamchat_seat.__name__] == []
 
     def test_signals_from_environ(self) -> None:
         assert SessionSignals.from_environ({}) == SessionSignals()
@@ -516,9 +517,13 @@ class TestRolesAndDuties:
 class TestCommandCall:
     def test_whoami_is_the_kit_binary_with_the_session_runtime(self) -> None:
         runner = ok(fx.WORKER_ONLY)
-        probe_seat_context(SIGNALS, runner=runner, timeout=1.5)
+        probe_seat_context(SIGNALS, runner=runner, timeout=Timeout.TEAMCHAT_WHOAMI)
         assert runner.calls == [
-            ((f"{KIT}/bin/teamchat", "whoami", "--json"), {RUNTIME_ENV_VAR: RUNTIME}, 1.5)
+            (
+                (f"{KIT}/bin/teamchat", "whoami", "--json"),
+                {RUNTIME_ENV_VAR: RUNTIME},
+                Timeout.TEAMCHAT_WHOAMI,
+            )
         ]
 
     def test_argv_tolerates_trailing_slash(self) -> None:
