@@ -192,9 +192,40 @@ class TestParseReset:
         assert reset == datetime(2026, 11, 29, 15, 0, tzinfo=_LONDON).timestamp()
 
     def test_date_with_year(self) -> None:
+        now = datetime(2026, 12, 30, 10, 0, tzinfo=_LONDON).timestamp()
         screen = _dialog(_STANDARD).replace("resets 3pm", "resets Jan 2, 2027, 3:30pm")
-        reset = _mod.parse_rate_limit_reset(screen, _NOW)
+        reset = _mod.parse_rate_limit_reset(screen, now)
         assert reset == datetime(2027, 1, 2, 15, 30, tzinfo=_LONDON).timestamp()
+
+    @pytest.mark.parametrize("zone", ["(Europe/London)", ""])
+    @pytest.mark.parametrize(
+        "when",
+        [
+            "Feb 31, 3pm",  # no such day
+            "Feb 31, 2027, 3pm",
+            "Jan 2, 0000, 3pm",  # year 0 does not exist
+            "Dec 31, 9999, 11pm",  # the edge of datetime; may overflow
+            "Jan 1, 9999, 3pm",  # far future
+            "Nov 20, 2025, 3pm",  # a past explicit year
+            "Nov 20, 3pm",  # a yearless date a few days past
+            "Nov 23, 9am",  # an hour past
+            "Dec 2, 3pm",  # nine days ahead, past the cap
+            "Jan 2, 2027, 3pm",  # weeks ahead
+        ],
+    )
+    def test_impossible_past_or_far_resets_are_refused(self, when: str, zone: str) -> None:
+        screen = _dialog(_STANDARD).replace("resets 3pm (Europe/London)", f"resets {when} {zone}")
+        assert _mod.parse_rate_limit_reset(screen, _NOW) is None
+
+    def test_a_reset_just_passed_is_kept_within_the_grace(self) -> None:
+        screen = _dialog(_STANDARD).replace("resets 3pm", "resets Nov 23, 9:58am")
+        reset = _mod.parse_rate_limit_reset(screen, _NOW)
+        assert reset == datetime(2026, 11, 23, 9, 58, tzinfo=_LONDON).timestamp()
+
+    def test_a_weekly_reset_within_the_cap_is_kept(self) -> None:
+        screen = _dialog(_STANDARD).replace("resets 3pm", "resets Nov 30, 3pm")
+        reset = _mod.parse_rate_limit_reset(screen, _NOW)
+        assert reset == datetime(2026, 11, 30, 15, 0, tzinfo=_LONDON).timestamp()
 
     def test_date_without_year_past_new_year_rolls_forward(self) -> None:
         now = datetime(2026, 12, 30, 10, 0, tzinfo=_LONDON).timestamp()

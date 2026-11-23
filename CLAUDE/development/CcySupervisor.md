@@ -503,7 +503,9 @@ backspaces (at most two tries) and then sends its own `continue`. It does this
 only when the session is idle and
 settled, the box is visible and no busy footer is shown. The reset time is the
 one STORED when the dialog was answered. If no reset time was parsed, no
-continue is ever sent.
+continue is ever sent. A parsed reset counts only when it lies between 300 s in
+the past and 8 days ahead (a weekly limit plus a day). An impossible date, a
+past date, or one further ahead counts as unparsed.
 
 If output appears after the reset, the supervisor re-checks for at most
 `_RATE_LIMIT_RECHECK_SECONDS` (600 s). The output may be an idle redraw or the

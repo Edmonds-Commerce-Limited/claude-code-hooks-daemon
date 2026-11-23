@@ -1338,6 +1338,8 @@ _RATE_LIMIT_MONTHS = {
 # A yearless date this far in the past is next year's (the dialog never shows
 # a reset that has already happened).
 _RATE_LIMIT_YEAR_ROLL_SECONDS = 30 * 86400.0
+_RATE_LIMIT_RESET_PAST_GRACE_SECONDS = 300.0
+_RATE_LIMIT_RESET_MAX_AHEAD_SECONDS = 8 * 86400.0
 # The host sends the worker the bottom rows of the rendered screen, and only
 # once the child has stopped drawing, so a half-painted frame is never read.
 _SCREEN_DUMP_ROWS = 40
@@ -1417,8 +1419,26 @@ def parse_rate_limit_reset(dump: str, now: float) -> float | None:
     Formats: ``3pm``, ``3:30pm``, ``Nov 29, 3pm``, ``Jan 2, 2027, 3:30pm``, each
     with an optional ``(Area/City)`` zone (no zone means local time). A time
     alone already past means tomorrow; a yearless date more than 30 days past
-    means next year. Anything else, an unknown zone included, gives None.
+    means next year. Anything else, an unknown zone included, gives None. So
+    does a reset more than ``_RATE_LIMIT_RESET_PAST_GRACE_SECONDS`` past (the
+    resume would fire while the limit holds) or more than
+    ``_RATE_LIMIT_RESET_MAX_AHEAD_SECONDS`` ahead (8 days: a weekly limit plus
+    a day, so a misread date cannot hold every injection for longer).
     """
+    reset = _parse_rate_limit_reset_unchecked(dump, now)
+    if reset is None:
+        return None
+    if (
+        not now - _RATE_LIMIT_RESET_PAST_GRACE_SECONDS
+        <= reset
+        <= (now + _RATE_LIMIT_RESET_MAX_AHEAD_SECONDS)
+    ):
+        return None
+    return reset
+
+
+def _parse_rate_limit_reset_unchecked(dump: str, now: float) -> float | None:
+    """`parse_rate_limit_reset` before the range check."""
     rows = [row for row in dump.splitlines() if "hit your" in row and "resets " in row]
     if not rows:
         return None
@@ -1456,7 +1476,7 @@ def parse_rate_limit_reset(dump: str, now: float) -> float | None:
         if candidate.timestamp() < now - _RATE_LIMIT_YEAR_ROLL_SECONDS:
             candidate = datetime(today.year + 1, month, day_of_month, hour, minute, tzinfo=zone)
         return candidate.timestamp()
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
 
 
