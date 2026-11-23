@@ -8750,8 +8750,6 @@ def _note_focus_hold(
 _RATE_LIMIT_ENV_VAR = "CCY_RATE_LIMIT_DIALOG"
 _RATE_LIMIT_OFF_VALUES = frozenset({"off", "0", "false", "no"})
 _RATE_LIMIT_STATE_PREFIX = "supervise-rate-limit-dialog"
-_RATE_LIMIT_UNRECOGNISED_FILE = "supervise-rate-limit-unrecognised.txt"
-_RATE_LIMIT_UNRECOGNISED_BYTES = 16 * 1024
 _RATE_LIMIT_SETTLE_SECONDS = 3.0
 _RATE_LIMIT_OCCURRENCE_KEY_CAP = 6
 _RATE_LIMIT_WINDOW_KEY_CAP = 30
@@ -8939,16 +8937,14 @@ def _new_rate_limit_window(reset: float | None, now: float) -> dict[str, object]
     }
 
 
-def _save_unrecognised_screen(status_dir: Path, dump: str) -> None:
-    """Keep the last near-miss screen, so a real capture can replace the fixtures."""
-    path = status_dir / _RATE_LIMIT_UNRECOGNISED_FILE
-    tail = dump.encode("utf-8")[-_RATE_LIMIT_UNRECOGNISED_BYTES:].decode("utf-8", "ignore")
-    try:
-        if path.exists() and path.read_text(encoding="utf-8") == tail:
-            return
-        path.write_text(tail, encoding="utf-8")
-    except OSError as exc:
-        append_worker_error(f"could not save the unrecognised rate-limit screen: {exc}")
+def _describe_unrecognised_screen(dump: str) -> str:
+    """A near-miss screen as a sha256 prefix and a row count, never its text.
+
+    The screen may show anything, secrets included, so its content is neither
+    logged nor saved; the digest only tells two near-misses apart.
+    """
+    digest = hashlib.sha256(dump.encode("utf-8")).hexdigest()[:12]
+    return f"sha256 {digest}, {len(dump.splitlines())} rows"
 
 
 def _rate_limit_dialog_step(
@@ -9004,10 +9000,9 @@ def _rate_limit_dialog_step(
                 state["occurrence_keys"] = 0
                 _save_rate_limit_state(path, state)
         if rate_limit_dialog_near_miss(dump):
-            _save_unrecognised_screen(status_dir, dump)
             note = note or (
                 f"{_RATE_LIMIT_LOG}: a screen like it was not recognised, nothing typed "
-                f"(saved to {_RATE_LIMIT_UNRECOGNISED_FILE})"
+                f"({_describe_unrecognised_screen(dump)})"
             )
         return None, note
 

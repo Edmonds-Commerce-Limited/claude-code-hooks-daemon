@@ -484,9 +484,10 @@ bot-prefixed `continue`. All of this lives in `_rate_limit_dialog_step`,
 sends it only when the screen check exists, the switch is on, and output has
 been quiet for 2 s; otherwise the field is `""` and the feature does nothing.
 The recogniser is strict: it needs the title, exactly one pointer, numbered
-rows and the target label. Anything less is left alone. A screen that only
-looks like the dialog is saved, as the latest near miss, to
-`supervise-rate-limit-unrecognised.txt` in the status directory.
+rows, the target label, and a `You've hit your ... limit` row above the title.
+Anything less is left alone. A screen that only looks like the dialog is logged
+as a near miss by a sha256 prefix and its row count. Its text is never logged
+or saved, because the screen may show secrets.
 
 **Answering.** The supervisor presses one arrow per tick. It presses Enter only
 when the pointer has stayed on the target row for two ticks with the same

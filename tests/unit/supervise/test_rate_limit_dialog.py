@@ -5,9 +5,9 @@ capture of the dialog exists yet; the text is built from the strings in the
 Claude Code 2.1.330 bundle (dialog title ``What do you want to do?``, row
 label ``Stop and wait for limit to reset``, the ``You've hit your <limit> ·
 resets <time>`` message and its time formats). The row shape (pointer, ``1. label``)
-follows Claude Code's Select rendering. The supervisor saves the first
-unrecognised dialog-like screen to ``supervise-rate-limit-unrecognised.txt``
-so a real incident can replace these fixtures.
+follows Claude Code's Select rendering. An unrecognised dialog-like screen is
+logged only as a sha256 prefix and a row count (the screen may hold secrets,
+so it is never saved); a live capture (Task 1.1) will replace these fixtures.
 
 The detector must be strict: it may type keys, so anything it does not
 recognise exactly is left alone.
@@ -16,6 +16,7 @@ recognise exactly is left alone.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -485,14 +486,25 @@ class TestHumanAndNearMiss:
         )
         assert outcome.payload == "\r"
 
-    def test_near_miss_screen_is_saved(self, sidecar_dir: Path, machine: Any) -> None:
+    def test_near_miss_is_logged_by_hash_and_never_saved(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # The screen may hold anything (secrets included), so only a digest
+        # and the row count reach the log, and nothing is written to disk.
         screen = "What do you want to do?\n  1. Stop and wait for limit to re…\n" + _prompt_screen(
-            ""
+            "secret-token-value"
         )
-        outcome = _tick(sidecar_dir, machine, _dialog_facts(screen))
+        before = {p for p in sidecar_dir.parent.rglob("*") if p.is_file()}
+        outcome = _resume(sidecar_dir, machine, _dialog_facts(screen))
         assert outcome.decision_value != _KEY
-        saved = sidecar_dir.parent / "supervise-rate-limit-unrecognised.txt"
-        assert saved.read_text(encoding="utf-8").endswith(screen[-200:])
+        log = outcome.noop_reason_log or ""
+        digest = hashlib.sha256(screen.encode("utf-8")).hexdigest()[:12]
+        assert f"sha256 {digest}" in log
+        assert f"{len(screen.splitlines())} rows" in log
+        assert "secret-token-value" not in log
+        written = {p for p in sidecar_dir.parent.rglob("*") if p.is_file()} - before
+        assert all("secret-token-value" not in p.read_text(errors="ignore") for p in written)
+        assert not (sidecar_dir.parent / "supervise-rate-limit-unrecognised.txt").exists()
 
 
 def _prompt_screen(text: str) -> str:
