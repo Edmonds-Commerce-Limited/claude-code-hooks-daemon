@@ -1714,20 +1714,23 @@ def find_protected_mention_detail(
     :func:`bash_route_word_stream`. ``bash_tool_command`` -- see
     :func:`_brace_expansion_tokens`.
     """
-    return next(
-        iter_protected_mentions(
-            command,
-            patterns,
-            deadline=deadline,
-            cwd=cwd,
-            context=context,
-            normalised_words=normalised_words,
-            bash_tool_command=bash_tool_command,
-            cwds=cwds,
-            index=index,
-        ),
-        None,
-    )
+    # Review finding 6: a caller outside any guard's scope still shares one set of
+    # glob reads across the command's words (a nested scope reuses the outer one).
+    with link_scan_scope():
+        return next(
+            iter_protected_mentions(
+                command,
+                patterns,
+                deadline=deadline,
+                cwd=cwd,
+                context=context,
+                normalised_words=normalised_words,
+                bash_tool_command=bash_tool_command,
+                cwds=cwds,
+                index=index,
+            ),
+            None,
+        )
 
 
 #: Command heads whose quoted arguments are text they only READ or PRINT, by
@@ -4377,7 +4380,13 @@ class _GlobListings:
         try:
             is_directory: bool | None = stat.S_ISDIR(Path(joined).stat().st_mode)
         except OSError as exc:
-            # Only a path that must be passed through needs this answer; it raises there.
+            log_and_continue(
+                logger,
+                exc,
+                reason="a spelled path whose target cannot be stat-ed is no directory when dangling, "
+                "else unknown, and a word that must pass through it stops (fail closed)",
+                level=logging.DEBUG,
+            )
             is_directory = (
                 False if exc.errno in _ABSENT_ERRNOS or exc.errno == errno.ELOOP else None
             )
