@@ -266,7 +266,13 @@ def recent_stop_hook_block_texts(
             continue
         try:
             entry = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a transcript line that is not JSON (a torn tail write) carries no block marker, so it is skipped",
+                level=logging.DEBUG,
+            )
             continue
         if isinstance(entry, dict):
             text = _entry_block_text(entry)
