@@ -8315,3 +8315,13 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: BLOCKING for fedora-desktop.1 (cannot author plan scripts); High generally.
 
 **Status**: ⬜ Open. Test-first fix: red tests (1) a script holding the standard bootstrap line (and the `cd "$VAR"` and `mkdir` shapes) authors cleanly under `*.secret*`; (2) a script that really names a protected path (`cat ./prod.secret.env`, a quoted path string, a glob that truly expands to a protected file via the index) is still denied; (3) a glob token such as `*.secret*` or a basename-overlap match is judged only against PATH operands (an argument of a path-taking verb, a redirect target, a `source`/`.` operand after expansion), never against arbitrary words, variable names or command names. Then restrict the overlap heuristics to path-operand tokens. See N696, N698.
+
+### N710 — secret-file guard treats a glob as a glob only in the FIRST path part: `cat kit/*/late` and `cat b?n/late` bypass the link check
+
+**Source**: independent Opus review of PR 228 (`subagent-reports/261123-opus-independent-review-pr228.md`, finding 1). The reviewer's claim, UNVERIFIED here. Pre-existing; NOT caused by PR 228.
+
+**Evidence (reviewer's)**: from the project root with no `cd`, `cat kit/*/late` and `cat b?n/late` are allowed, while the literal `cat kit/bin/late` (where `late` links to a protected dummy file) is denied. The guard only handles a glob in the first path part (`secret_file_matching.py` around lines 4455 and 4468), so a glob in a later part skips the link/realpath check.
+
+**Severity**: HIGH (security): a protected file's contents can be read through a link by a glob the guard does not expand.
+
+**Status**: ⬜ Open. Needs an Opus fix plus independent review. Test-first fix proposal: red tests (1) a glob in ANY path part is expanded and each match judged by the link/realpath check, or the command fails closed; (2) literal paths behave unchanged; (3) a glob that matches nothing behaves unchanged. Then fix `secret_file_matching.py` to satisfy them.
