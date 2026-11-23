@@ -132,6 +132,24 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   the bump command names `--team`, F7 thread ids and stopwords are not a
   body, F8 `started_at` required and in seconds, F9 `goal-blocked` is not a
   wait on a human; docs default `auto`.
+- [x] ✅ **Task 2.1c**: fix the PR 226 delta review
+  (`subagent-reports/261123-opus-delta-review-pr226.md`) test-first: N2 a
+  waiting target must be an owner/human/user/operator noun, an `@handle` or a
+  name in the new `options.owner_names` (a bare capitalised word no longer
+  counts, so "waiting on Joseph" needs `owner_names: [Joseph]`); N1 the fault
+  deny carries the stand-in, and auto_continue_stop judges the re-stop after
+  this guard's deny afresh; N3 a raising `flags_readable()` under `auto`
+  refuses.
+- [ ] ⬜ **Task 2.1d (OPEN follow-ups from the delta review, not fixed)**:
+  - N4: the guard's stand-in gate is looser than auto_continue_stop's (reads a
+    possibly stale last assistant text, needs neither the `STOPPING BECAUSE:`
+    prefix nor the marker write), so a stray one-off stand-in can be asked for.
+  - N5: the 200-line own-refusal lookback can see this guard's deny from an
+    EARLIER stop chain and pass a later chain another handler denied first.
+    Fix direction: require the guard's marker to be the latest block, or after
+    the last real user prompt.
+  - N6: an unreadable transcript makes every team-session stop "waiting", so a
+    coordinator under v1 `auto` gets the advisory on every such stop.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
