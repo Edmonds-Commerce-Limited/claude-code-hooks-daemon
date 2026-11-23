@@ -8401,3 +8401,13 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: Low (an intermittent red check that costs a diagnosis and a re-run).
 
 **Status**: ⬜ Open. Do not loosen the bound blindly: first measure on CI whether the first-in-file position (cold caches, a large heap after collecting 65k items) explains the time, e.g. by warming up with one small call before timing.
+
+### N718 — for a non-root user, a mid-word glob after a variable (`cat $V/*/name`) is always denied once the glob walk reaches `/root`
+
+**Source**: PR 230 CI, run 45254007557, both unit legs (`subagent-reports/261123-pr230-unit-failure.md`). The test failure is fixed on the branch by making the test hermetic. The behaviour below is left as it is.
+
+**Evidence**: the guard also judges `$V/*/name` with `$V` empty, so it judges `/*/name`, and `_GlobListings._probe` lstat-s `/<each top-level dir>/name`. As non-root, `lstat('/root/name')` is EACCES, and that fails closed (`a globbed word passes a directory or an entry that cannot be read`). This is consistent with the literal route's N663 rule (`cat /root/name` also fails closed), but every `$V/*/name` command becomes a false positive on a normal, non-root host. bash's own glob reads that EACCES as "no match". Sibling: `test_bash_command[double_star_glob]` in the hostile-input sweep walks the real `/`, so its verdict is host-tree dependent. It passes CI at `GLOB_LISTING_CAP` 4096, flips locally at 600, and `chdir` cannot isolate it.
+
+**Severity**: Medium (usability; fail-closed, so not a leak).
+
+**Status**: ⬜ Open. Decide whether an EACCES on a probe of a spelled path (not a listing) counts as no match, mirroring bash. If yes: test-first, uid-independent (monkeypatch `os.lstat` to raise EACCES), keep a reachable link denied, and get a security delta review because it loosens a fail-closed branch.

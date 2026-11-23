@@ -370,8 +370,11 @@ class TestShapesTheMatcherMustNotNarrow:
     def test_a_glob_after_a_literal_variable_is_judged_like_its_literal(
         self, project: Project
     ) -> None:
-        literal = _both("D=kit; cat $D/bin/late", project.root)
-        globbed = _both("D=kit; cat $D/*/late", project.root)
+        # Led by `./`: the guard also judges the word with `$D` empty, and a bare
+        # `$D/*/late` then probes `/<every top-level dir>/late` on the real host,
+        # where a non-root runner's unsearchable `/root` fails closed.
+        literal = _both("D=kit; cat ./$D/bin/late", project.root)
+        globbed = _both("D=kit; cat ./$D/*/late", project.root)
         assert globbed == literal
 
     def test_a_glob_under_pwd_is_judged_like_its_literal(self, project: Project) -> None:

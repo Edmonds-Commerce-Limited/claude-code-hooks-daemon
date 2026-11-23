@@ -830,7 +830,15 @@ class TestCombinatorialSmallInputShapesStayLinear:
     """
 
     @pytest.mark.parametrize("shape_name", _SMALL_SHAPE_NAMES)
-    def test_bash_command(self, shape_name: str) -> None:
+    def test_bash_command(
+        self, shape_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The input carries no cwd, so a relative glob (`**/***/*...`) is walked
+        # from the process cwd. Rooted in the checkout, whether the larger size
+        # crosses the secret guard's glob listing cap (a fail-closed deny, the
+        # guard working) depends on how many directories the host's checkout
+        # holds. An empty cwd keeps the verdict host-independent (N281's rule).
+        monkeypatch.chdir(tmp_path)
         _build, small_n = _SMALL_COMBINATORIAL_SHAPES[shape_name]
         large_text = _hostile_small_bash_command_at(shape_name, SIZE_FACTOR * small_n)
         superlinear: list[str] = []
