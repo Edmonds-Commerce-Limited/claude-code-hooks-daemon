@@ -4298,6 +4298,31 @@ def _may_be_relative_path(token: str) -> bool:
     return any(part not in ("", ".") for part in token.split("/"))
 
 
+def _listed_kind(entry: os.DirEntry[str]) -> tuple[bool, bool]:
+    """``(is a link, is a directory)`` for one entry; an unclassifiable entry costs only itself.
+
+    Ledger 00474 N709: one pair of links pointing at each other made the whole
+    directory unlistable, and so every relative word after a computed move a
+    finding. A link loop leads nowhere a word can open (as in :func:`_link_kind`);
+    any other entry that cannot be classified is counted as a link to a
+    directory, so a word naming it is still a finding (fail closed).
+    """
+    try:
+        is_link = entry.is_symlink()
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an entry that cannot be classified may be a link, so a word naming it is a finding (fail closed)",
+            level=logging.DEBUG,
+        )
+        return (True, True)
+    if not is_link:
+        return (False, _entry_may_be_directory(entry))
+    kind = _link_kind(entry)
+    return (True, kind is not _LinkKind.OTHER)
+
+
 class CwdSet(tuple[str, ...]):
     """The directories a command may run in, and which of them really exist.
 
@@ -4397,7 +4422,7 @@ class CwdSet(tuple[str, ...]):
             try:
                 with os.scandir(directory) as entries:
                     self._listings[directory] = {
-                        entry.name: (entry.is_symlink(), entry.is_dir()) for entry in entries
+                        entry.name: _listed_kind(entry) for entry in entries
                     }
             except OSError as exc:
                 log_and_continue(
