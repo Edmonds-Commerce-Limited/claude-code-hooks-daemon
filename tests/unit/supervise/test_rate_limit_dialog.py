@@ -372,12 +372,12 @@ class TestDialogKeys:
         assert outcome.decision_value == "noop"
 
     def test_dry_run_types_nothing(self, sidecar_dir: Path, machine: Any) -> None:
-        for offset in range(3):
-            outcome = _tick(
-                sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset), dry_run=True
-            )
-            assert outcome.payload is None
-        assert "would press" in (outcome.noop_reason_log or "")
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset), dry_run=True)
+            for offset in range(3)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+        assert "would press" in (outcomes[-1].noop_reason_log or "")
 
     def test_env_off_leaves_the_dialog_alone(
         self, sidecar_dir: Path, machine: Any, monkeypatch: pytest.MonkeyPatch
@@ -418,10 +418,12 @@ class TestOncePerWindow:
     ) -> None:
         self._answer(sidecar_dir, machine)
         _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), now=_NOW + 5))
-        for offset in range(6, 9):
-            outcome = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
-            assert outcome.payload is None
-        assert "already answered" in (outcome.noop_reason_log or "")
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            for offset in range(6, 9)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+        assert "already answered" in (outcomes[-1].noop_reason_log or "")
 
     def test_lost_enter_is_pressed_again(self, sidecar_dir: Path, machine: Any) -> None:
         self._answer(sidecar_dir, machine)
@@ -561,10 +563,12 @@ class TestResumeAfterReset:
 
     def test_nothing_before_the_reset(self, sidecar_dir: Path, machine: Any) -> None:
         _answer_and_close(sidecar_dir, machine)
-        for now in (_NOW + 60, _RESET - 1, _RESET + 60):
-            outcome = _resume(sidecar_dir, machine, _resume_facts("continue", now=now))
-            assert outcome.decision_value not in (_KEY, _CONTINUE)
-        assert "waiting for the limit to reset" in (outcome.noop_reason_log or "")
+        outcomes = [
+            _resume(sidecar_dir, machine, _resume_facts("continue", now=now))
+            for now in (_NOW + 60, _RESET - 1, _RESET + 60)
+        ]
+        assert all(outcome.decision_value not in (_KEY, _CONTINUE) for outcome in outcomes)
+        assert "waiting for the limit to reset" in (outcomes[-1].noop_reason_log or "")
 
     def test_output_after_the_reset_abandons(self, sidecar_dir: Path, machine: Any) -> None:
         _answer_and_close(sidecar_dir, machine)
@@ -689,3 +693,100 @@ class TestResumeGates:
         outcome = _resume(sidecar_dir, machine, _resume_facts(""))
         assert outcome.decision_value != _CONTINUE
         assert outcome.payload is None
+
+
+# ── Unit 3: the host sends the bottom of the rendered screen ─────────────────
+
+
+def _dump_stub(tmp_path: Path) -> Path:
+    """A hooks-screen stand-in: 50 numbered rows for --dump, counting its runs."""
+    import stat
+
+    counter = tmp_path / "runs"
+    script = tmp_path / "hooks-screen-stub"
+    script.write_text(
+        "#!/bin/bash\n"
+        "cat > /dev/null\n"
+        f"echo run >> {counter}\n"
+        'if [[ " $* " == *" --dump "* ]]; then\n'
+        '  for i in $(seq 1 50); do echo "row $i"; done\n'
+        "else\n"
+        "  echo main\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return script
+
+
+def _runs(tmp_path: Path) -> int:
+    counter = tmp_path / "runs"
+    return len(counter.read_text().splitlines()) if counter.exists() else 0
+
+
+class TestHostScreenDump:
+    def _check(self, binary: Path | None, **kw: Any) -> tuple[Any, Any]:
+        buffer = _mod.ScreenBuffer()
+        buffer.append(b"frame one")
+        check = _mod.ScreenFocusCheck(buffer, binary=binary, size_fn=lambda: (100, 30), **kw)
+        return check, buffer
+
+    def test_bottom_forty_rows(self, tmp_path: Path) -> None:
+        check, _ = self._check(_dump_stub(tmp_path))
+        dump = check.recent_dump()
+        rows = dump.splitlines()
+        assert len(rows) == 40
+        assert rows[0] == "row 11"
+        assert rows[-1] == "row 50"
+
+    def test_cached_until_new_output(self, tmp_path: Path) -> None:
+        check, buffer = self._check(_dump_stub(tmp_path))
+        check.recent_dump()
+        check.recent_dump()
+        assert _runs(tmp_path) == 1
+        buffer.append(b"frame two")
+        check.recent_dump()
+        assert _runs(tmp_path) == 2
+
+    def test_missing_binary_gives_empty(self) -> None:
+        check, _ = self._check(None)
+        assert check.recent_dump() == ""
+
+    def test_missing_binary_is_resolved_again_at_most_once_a_minute(self, tmp_path: Path) -> None:
+        clock = [1000.0]
+        calls: list[float] = []
+        stub = _dump_stub(tmp_path)
+
+        def resolve() -> Path | None:
+            calls.append(clock[0])
+            return stub if clock[0] >= 1070.0 else None
+
+        check, buffer = self._check(None, clock=lambda: clock[0], resolve_binary=resolve)
+        assert check.recent_dump() == ""
+        clock[0] = 1030.0
+        buffer.append(b"x")
+        assert check.recent_dump() == ""
+        assert calls == []
+        clock[0] = 1061.0
+        buffer.append(b"y")
+        assert check.recent_dump() == ""
+        assert calls == [1061.0]
+        clock[0] = 1125.0
+        buffer.append(b"z")
+        assert check.recent_dump().endswith("row 50")
+        assert calls == [1061.0, 1125.0]
+
+    def test_sent_only_after_two_quiet_seconds(self, tmp_path: Path) -> None:
+        check, _ = self._check(_dump_stub(tmp_path))
+        assert _mod._rate_limit_screen_dump(check, output_quiet_seconds=1.9) == ""
+        assert _runs(tmp_path) == 0
+        assert _mod._rate_limit_screen_dump(check, output_quiet_seconds=2.0).endswith("row 50")
+
+    def test_not_sent_without_a_check_or_with_the_switch_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert _mod._rate_limit_screen_dump(None, output_quiet_seconds=10.0) == ""
+        check, _ = self._check(_dump_stub(tmp_path))
+        monkeypatch.setenv("CCY_RATE_LIMIT_DIALOG", "off")
+        assert _mod._rate_limit_screen_dump(check, output_quiet_seconds=10.0) == ""
+        assert _runs(tmp_path) == 0

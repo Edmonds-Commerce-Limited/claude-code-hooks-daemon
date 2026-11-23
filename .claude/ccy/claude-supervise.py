@@ -1334,6 +1334,11 @@ _RATE_LIMIT_MONTHS = {
 # A yearless date this far in the past is next year's (the dialog never shows
 # a reset that has already happened).
 _RATE_LIMIT_YEAR_ROLL_SECONDS = 30 * 86400.0
+# The host sends the worker the bottom rows of the rendered screen, and only
+# once the child has stopped drawing, so a half-painted frame is never read.
+_SCREEN_DUMP_ROWS = 40
+_RATE_LIMIT_DUMP_QUIET_SECONDS = 2.0
+_SCREEN_RESOLVE_INTERVAL_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -1493,9 +1498,16 @@ class ScreenFocusCheck:
         clock: Callable[[], float] = time.monotonic,
         log: Callable[[str], object] | None = None,
         missing_note: str = _SCREEN_MISSING_NOTE,
+        resolve_binary: Callable[[], Path | None] | None = None,
     ) -> None:
         self._buffer = buffer
         self._binary = binary
+        # Plan 00523: a binary built after launch is found again, at most once
+        # per `_SCREEN_RESOLVE_INTERVAL_SECONDS`.
+        self._resolve_binary = resolve_binary
+        self._last_resolve_at = clock()
+        self._dump: str | None = None
+        self._dump_total = -1
         self._missing_note = missing_note
         self._size_fn = size_fn
         self._timeout = timeout
@@ -1562,8 +1574,29 @@ class ScreenFocusCheck:
         self._last_quiet, self._last_quiet_total, self._last_quiet_at = quiet, total, now
         return quiet
 
+    def recent_dump(self) -> str:
+        """Plan 00523: the bottom rows of the ``--dump`` rendering, ``""`` on any failure.
+
+        Rendered again only after new output; a failure is not cached, so the
+        next call retries.
+        """
+        total = self._buffer.total_appended
+        if self._dump is not None and self._dump_total == total:
+            return self._dump
+        text = self._spawn(self._buffer.snapshot(), "--dump")
+        if text is None:
+            return ""
+        rows = text.splitlines()[-_SCREEN_DUMP_ROWS:]
+        self._dump, self._dump_total = "\n".join(rows), total
+        return self._dump
+
     def _spawn(self, snapshot: bytes, extra: str) -> str | None:
         """Raw stdout text of one hooks-screen run, or None (reason noted)."""
+        if self._binary is None and self._resolve_binary is not None:
+            now = self._clock()
+            if now - self._last_resolve_at >= _SCREEN_RESOLVE_INTERVAL_SECONDS:
+                self._last_resolve_at = now
+                self._binary = self._resolve_binary()
         if self._binary is None:
             self._failed(self._missing_note)
             return None
@@ -1638,7 +1671,23 @@ def _build_screen_check(
         capture_dir=capture_dir,
         log=log.write if log is not None else None,
         missing_note=screen_binary_missing_note(),
+        resolve_binary=lambda: resolve_screen_binary(project_dir, os.environ),
     )
+
+
+def _rate_limit_screen_dump(screen: ScreenFocusCheck | None, *, output_quiet_seconds: float) -> str:
+    """Plan 00523: the screen rows the worker reads the rate-limit dialog from.
+
+    ``""`` (nothing rendered) while the child is still drawing, without a
+    screen check, or with ``CCY_RATE_LIMIT_DIALOG`` off.
+    """
+    if (
+        screen is None
+        or output_quiet_seconds < _RATE_LIMIT_DUMP_QUIET_SECONDS
+        or not _rate_limit_dialog_enabled()
+    ):
+        return ""
+    return screen.recent_dump()
 
 
 @dataclass
@@ -12109,7 +12158,11 @@ def supervise(
     # background task or sub-agent), so it builds the check when the focus hold
     # has not.
     idle_compact_on = policy.idle_compact_mode != _IDLE_COMPACT_OFF
-    if activity.screen is None and (activity.focus.enabled or idle_compact_on):
+    # Plan 00523: so does the rate-limit dialog answer (the worker reads it from
+    # the rendered screen the host sends).
+    if activity.screen is None and (
+        activity.focus.enabled or idle_compact_on or _rate_limit_dialog_enabled()
+    ):
         activity.screen = _build_screen_check(output_activity, stdin_fd=resolved_stdin_fd, log=log)
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
     machine = CompactStateMachine(policy)
@@ -12309,6 +12362,9 @@ def supervise(
                         # Plan 00551: scopes the worker's identity scan.
                         child_pid=pid,
                         true_idle=true_idle,
+                        screen_dump=_rate_limit_screen_dump(
+                            activity.screen, output_quiet_seconds=output_quiet_seconds
+                        ),
                     ),
                     focus_hold,
                 )
