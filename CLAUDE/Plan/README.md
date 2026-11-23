@@ -44,7 +44,7 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00635: host-seat lane guard](00635-host-seat-lane-guard/PLAN.md) - Not Started (child (e) of 00630: refuse QA, test and build where a held team has duty host; owner decision lts-infra Q64 pending; depends on 00631)
 
-- [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - Not Started (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
+- [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - In Progress (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
 - [00637: coordinator no-value remote branch retire](00637-coordinator-no-value-remote-branch-retire/PLAN.md) - Not Started (child (g) of 00630: logged coordinator retire of an unmerged remote branch on top of branch-reject, owner ruling Q17; depends on 00631)
 

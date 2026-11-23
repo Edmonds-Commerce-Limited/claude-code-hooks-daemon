@@ -1,6 +1,6 @@
 # Plan 00636: coordinator conduct advisories and board
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: Medium
@@ -79,7 +79,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 - [ ] ⬜ **Task 2.1**: s4 (Stop mirror check, `AskUserQuestion` deny, and the
   owner-directive Stop handler). Tests first: a coordinator stop with an
   unposted thread is denied; a worker or unknown role is untouched; a posted
-  thread passes; an unreadable bus fails open with a log line. "Posted this
+  thread passes; an unreadable bus is governed by `on_unreadable_bus`
+  (default `refuse`, fail closed; `allow` fails open with a WARNING; see
+  Task 2.1a and the open design point below). Partly done: the
+  owner-directive Stop handler shipped as Task 2.1a; the
+  `AskUserQuestion` deny on coordinator seats is out of 2.1a's scope and
+  still open. "Posted this
   turn" is read from the read-only teamchat CLI history, no secrets. Only a
   NOTIFYING post counts: a plain post to the named thread leaves the stop
   denied (the owner missed bumps that landed silently), and a post whose
@@ -87,7 +92,7 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   remedy is ONE call: a refused stop prints the exact
   `teamchat bump <ids>` command naming every unposted thread (R11). Depends
   on R11 landing in teamchat.
-- [ ] ⬜ **Task 2.1a** (MUST, owner HARD requirement, test-first; extends
+- [x] ✅ **Task 2.1a** (MUST, owner HARD requirement, test-first; extends
   2.1 and supersedes its "posted this turn" rule): the waiting-on-human Stop
   check of DESIGN.md 20.1. Red tests first: detect a waiting stop by reason
   text or awaiting-human mode; for every open question the seat asked or
@@ -95,7 +100,11 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   non-boilerplate body; otherwise deny and print the one bump command for the
   stale threads; deny text names ids only and never restates the waits;
   unreadable notify flag counts as non-notifying; worker and unknown role
-  untouched; unreadable bus fails open with a loud log. Deterministic: ids,
+  untouched; an unreadable bus (or a raising adapter) is decided by
+  `options.on_unreadable_bus`: `refuse` (default) denies once, names the
+  notifying-reply commands and says why nothing could be confirmed; `allow`
+  fails open with a WARNING. Shipped as `owner_wait_stop_guard` (Stop,
+  priority 3, rule `R-STOP-OWNER-WAIT-UNBUMPED`). Deterministic: ids,
   timestamps, notify flag; no LLM judgement. Acceptance tests are the
   20.1 list. Also (peer note from the coordinator): an owner-started thread
   (top-level HUMAN message in the questions room) is OPEN until a notifying
@@ -106,6 +115,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   reply; unverified here whether v1 history exposes m.thread; fail closed). Conduct advisory for a human-message reply
   posted outside its thread: only if the bus data exposes thread id and author
   kind (open, confirm with fedora-desktop.1 in Task 1.2).
+- **OPEN design point** (for the coordinator and owner, Task 2.1a): on
+  pingbus v1 the adapter cannot read the notify flag or `m.thread`, so the
+  default `on_unreadable_bus: refuse` refuses EVERY waiting stop on a
+  coordinator seat once, until a v2 adapter can read both. `allow` is the
+  escape hatch (fail open, WARNING). Decide whether `refuse` stays the
+  shipped default while v1 is the only adapter.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
@@ -136,7 +151,9 @@ land here. Not gated on a seat. Each task starts with a failing test.
 
 - [ ] Each item has an absent-team fixture that passes and a coordinator
   fixture that failed first.
-- [ ] Release-bound items recorded in the pending-release holding area.
+- [ ] Release-bound items recorded in the pending-release holding area
+  (Task 2.1a: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-*.md` and
+  `config-changes/v3.77.0.yaml`).
 
 ## Delivery & Milestones
 

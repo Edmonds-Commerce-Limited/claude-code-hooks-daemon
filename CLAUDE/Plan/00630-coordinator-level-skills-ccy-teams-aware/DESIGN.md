@@ -526,6 +526,9 @@ adapter), takes outbound entries stamped after this turn's start, and matches
 them to the named threads. No secrets are read and no bus file is opened. An
 unreadable bus (CLI absent, error, timeout) fails OPEN and logs the failure
 to the daemon log; it never blocks a stop on the handler's own fault.
+(Corrected by the coordinator for 00636 Task 2.1a: the unreadable-bus
+default is now `refuse`, fail closed; `allow` restores fail-open. See the
+last bullet of 20.1.)
 
 The remedy is the multi-thread bump, fedora-desktop request 00209 R11
 (coordinator, lts-infra bus id
@@ -546,7 +549,8 @@ as "the owner was told". Rule 2 and "posted this turn" are read with that
 filter. A `teamchat bump` notifies by default, so the remedy always produces
 a notifying post. Fail closed on the filter: a post whose notify status cannot
 be read from the history counts as non-notifying, and the deny says so. (This
-is distinct from the unreadable-bus case above, which fails open.)
+is distinct from the unreadable-bus case above, now `refuse` by default;
+see 20.1.)
 
 Open question Q18, narrowed by R11: which threads does a stop name? With
 `teamchat bump --waiting` covering every open thread the seat asked, option
@@ -579,7 +583,8 @@ Test-first acceptance criteria (each red before the handler exists):
 
 - A stop with terminal-only status (no post anywhere) counts as unsent.
 
-- An unreadable bus passes and writes a log line.
+- An unreadable bus writes a log line and, under the default
+  `on_unreadable_bus: refuse`, is refused once (passes under `allow`).
 
 - A stop that does not wait on the owner is untouched.
 
@@ -617,8 +622,15 @@ Reconciliation with the rest of section 20:
   not readable from history while a timestamp is.
 - Rule 3 (stop message is an echo) is tightened by item 5: it is a pointer.
 - The notifying-only filter and its fail-closed rule stand unchanged.
-- The unreadable-bus fail-open stands, but is logged loudly and is distinct
-  from an unreadable notify flag, which fails closed.
+- Unreadable bus (corrected by the coordinator, superseding "fail-open
+  stands"): `owner_wait_stop_guard.options.on_unreadable_bus` decides, and
+  its default is `refuse`. An unreadable bus or a raising adapter refuses the
+  waiting stop once, names the notifying-reply commands and says why nothing
+  could be confirmed; `allow` fails open. Either way a WARNING is logged.
+  OPEN for the coordinator and owner: on pingbus v1 the adapter cannot read
+  the notify flag or `m.thread`, so `refuse` refuses every waiting stop on a
+  coordinator seat once until a v2 adapter can read both; `allow` is the
+  escape hatch (00636 PLAN.md, open design point).
 
 Open item (Q18 second half, recorded 2026-11-23): whether pingbus v1 `history`
 can supply the notify flag. `pingbus history --help` (read-only) lists only
