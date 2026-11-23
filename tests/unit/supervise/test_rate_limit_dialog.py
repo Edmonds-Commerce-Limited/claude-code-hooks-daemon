@@ -889,6 +889,26 @@ class TestPrefillHold:
         outcome = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("continue")))
         assert outcome.payload is None
 
+    def test_restore_held_while_the_answered_dialog_is_still_closing(
+        self, tmp_path: Path
+    ) -> None:
+        # The Enter sets `answered` with the occurrence still open; the closing
+        # redraw sends an empty dump, and the pre-fill is already there.
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        state = _mod._new_rate_limit_window(later + 3600.0, later - 5.0)
+        state.update(phase="answered", occurrence_open=True)
+        _mod._save_rate_limit_state(_mod._rate_limit_state_path(tmp_path, _CHILD), state)
+        outcome = _tick(sidecar_dir, machine, self._facts(later, ""))
+        assert outcome.payload is None
+
+    def test_transcript_continue_above_an_empty_box_does_not_hold(self, tmp_path: Path) -> None:
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        _prefill_state(tmp_path, phase="abandoned", reset=later - 600.0)
+        rule = "─" * 40
+        screen = "\n".join([rule, "> continue", "", "● Resuming.", ""]) + _prompt_screen("")
+        outcome = _tick(sidecar_dir, machine, self._facts(later, screen))
+        assert outcome.decision_value == "would-model"
+
     def test_restore_fires_once_the_continue_was_sent(self, tmp_path: Path) -> None:
         sidecar_dir, machine, later = self._ready(tmp_path)
         _prefill_state(tmp_path, phase="done", reset=later - 600.0)

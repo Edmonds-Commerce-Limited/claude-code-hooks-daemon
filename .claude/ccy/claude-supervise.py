@@ -8992,10 +8992,12 @@ def _rate_limit_prefill_blocks(facts: TickFacts, status_dir: Path) -> bool:
         return False
     state = _load_rate_limit_state(path, facts.now_wall)
     phase = state.get("phase")
-    if not phase or state.get("occurrence_open"):
-        return False
     if phase in (_PHASE_ANSWERED, _PHASE_CLEARED):
+        # Also while the occurrence is still open: the Enter sets `answered`
+        # and the pre-fill appears as the dialog closes, before a dump says so.
         return True
+    if not phase:
+        return False
     return bool(facts.screen_dump) and (
         rate_limit_composer_text(facts.screen_dump) == _RATE_LIMIT_PREFILL
     )

@@ -496,9 +496,10 @@ reset window is answered once. If the human presses any key except a terminal
 focus or mouse report, the window is left to them. While the dialog is on the
 screen it decides the whole tick, so nothing else is typed into it.
 
-**The resume.** After `reset + 120 s`, Claude Code leaves `continue` pre-filled
-in the box. The supervisor clears it with backspaces (at most two tries) and
-then sends its own `continue`. It does this only when the session is idle and
+**The resume.** Once the dialog is answered, Claude Code leaves `continue`
+pre-filled in the box. After `reset + 120 s` the supervisor clears it with
+backspaces (at most two tries) and then sends its own `continue`. It does this
+only when the session is idle and
 settled, the box is visible and no busy footer is shown. The reset time is the
 one STORED when the dialog was answered. If no reset time was parsed, no
 continue is ever sent.
@@ -524,13 +525,14 @@ happens once per window.
 counts typed keys only, so it cannot see Claude Code's pre-fill.
 `_rate_limit_prefill_blocks` folds into `can_inject` and into the usage-pause
 `/compact`. It blocks every family while a resume is pending (phase `answered`
-or `cleared`), even with no screen. After that it blocks only while the screen
-still shows the pre-fill. A model restore therefore waits until after the
-continue.
+or `cleared`). This holds from the Enter onward, while the dialog is still
+closing, and even when no screen is sent. In a later phase (`done` or
+`abandoned`) it blocks only while the screen still shows the pre-fill. A model
+restore therefore waits until after the continue.
 
 **State.** The state file is `supervise-rate-limit-dialog.<child_pid>.json` in
-the status directory: one file per Claude child, dropped a day after its
-window.
+the status directory. There is one file per Claude child, and it is ignored
+once a day has passed since its window.
 
 **Building the binary and relaunching.** The worker hot-reloads the decision
 code. The screen read is HOST code, however, so it takes effect only on the
@@ -550,6 +552,9 @@ nice -n 19 bash screen/build.sh
   reconstructed from Claude Code 2.1.330 strings, not captured live. Nothing
   has been verified against a real dialog. The near-miss file exists so that a
   real capture can replace the fixtures.
+- Claude Code has its own auto-continue. Whether choosing Stop leaves it armed
+  is unknown. If it does, the supervisor's `continue` could duplicate Claude
+  Code's own.
 
 ## Own-session identity: the child's process tree
 
