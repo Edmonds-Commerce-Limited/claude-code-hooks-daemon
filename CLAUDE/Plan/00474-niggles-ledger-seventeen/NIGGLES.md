@@ -8353,3 +8353,23 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: Medium (blocks merges until a re-run lands; costs a diagnosis each time).
 
 **Status**: ⬜ Open. Test-first: a probe whose only obstacle is a linter time-out should either use a budget scaled to the runner or be reported as skipped-with-reason rather than failing the leg; keep a probe that genuinely mis-decides failing.
+
+### N714 — the branch-pool warning keeps naming a branch that `branch-keep` already marked kept
+
+**Source**: fedora-desktop.1 relay via lts-infra.1 (peer note, authority none; UNVERIFIED here).
+
+**Evidence (reported)**: the pool warning keeps naming `private-names-no-first-word` as the branch to finish after `branch-keep` marked it kept with a reason. The sweep honours the keep and `branch-preflight` allows creation, so the warning's pointer is stale.
+
+**Severity**: Low (misleading advice, no block).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a kept merged branch is not named in the pool warning's "Finish or remove first" line; green by sharing the keep filter the sweep already applies.
+
+### N715 — `branch-sweep` blames a removal for "1 path a removal would lose" when the worktree path is absent or unreadable
+
+**Source**: same relay (UNVERIFIED here).
+
+**Evidence (reported)**: a worktree registered at a path that is missing from the container is reported as holding "1 path a removal would lose"; the real cause is that `git status` cannot enter the folder.
+
+**Severity**: Low (wrong diagnosis; the safe default of keeping it is right).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a registered worktree whose directory is absent or unreadable is reported as "path missing or unreadable", not as unsaved work; fail closed (keep it) unchanged.
