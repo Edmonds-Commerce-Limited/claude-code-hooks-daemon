@@ -1401,6 +1401,54 @@ class TestApplyVeto:
         assert again.payload == "\r"
         assert _phase(sidecar_dir) == "answered"
 
+    def test_the_host_loop_consults_the_veto_before_typing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Delta review D5: the `apply_veto=` wiring in `supervise()` itself.
+        import os
+        import sys
+
+        calls: list[tuple[Any, dict[str, Any]]] = []
+
+        def spy(outcome: Any, **kw: Any) -> str:
+            calls.append((outcome, kw))
+            return "test veto"
+
+        monkeypatch.setattr(_mod, "_rate_limit_host_veto", spy)
+        received = tmp_path / "child-stdin.bin"
+        child = (
+            "import os, select, sys, time\n"
+            "end = time.monotonic() + 0.8\n"
+            "got = b''\n"
+            "while time.monotonic() < end:\n"
+            "    if select.select([0], [], [], 0.05)[0]:\n"
+            "        got += os.read(0, 64)\n"
+            f"open({str(received)!r}, 'wb').write(got)\n"
+        )
+        stdin_fd = os.open(os.devnull, os.O_RDONLY)
+        try:
+            _mod.supervise(
+                [sys.executable, "-c", child],
+                dry_run=False,
+                log=_mod.DecisionLog(tmp_path / "decision.log"),
+                stdin_fd=stdin_fd,
+                poll_seconds=0.05,
+                sidecar_dir=tmp_path / "untracked" / "context-sidecar",
+                decider=lambda facts: _key_outcome("\r"),
+                restart_coordinator=_mod.RestartCoordinator(
+                    state_path=tmp_path / "state" / "restart-request.json"
+                ),
+            )
+        finally:
+            os.close(stdin_fd)
+        assert calls, "the host typed a rate-limit key without consulting the veto"
+        outcome, kw = calls[0]
+        assert outcome.payload == "\r"
+        assert kw["shipped_dump"] == ""
+        assert kw["status_dir"] == tmp_path / "untracked"
+        assert isinstance(kw["child_pid"], int)
+        assert b"\r" not in received.read_bytes()
+
     def test_a_vetoed_outcome_types_nothing_and_is_not_adopted(self) -> None:
         typed: list[bytes] = []
         machine = _mod.CompactStateMachine(_mod.CompactPolicy())
