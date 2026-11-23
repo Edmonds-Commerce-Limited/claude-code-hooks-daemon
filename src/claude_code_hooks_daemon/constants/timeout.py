@@ -173,6 +173,9 @@ class Timeout:
     # path, and a probe that cannot answer in time degrades to "role unknown"
     # (guards stay armed), so a longer wait buys nothing.
     TEAMCHAT_WHOAMI = 2
+    # Plan 00634: one `teamchat verify` call before a destructive act. A verify
+    # that cannot answer in time is a deny, so a longer wait buys nothing.
+    TEAMCHAT_VERIFY = 3
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
     GIT_FETCH_BACKGROUND = 30  # 30 seconds (background git fetch in status line)

@@ -89,9 +89,7 @@ class FixedVerifier:
         self.answer = answer
         self.calls: list[ApprovalCite] = []
 
-    def __call__(
-        self, signals: SessionSignals, cite: ApprovalCite
-    ) -> VerifiedLine | VerifyFailure:
+    def __call__(self, signals: SessionSignals, cite: ApprovalCite) -> VerifiedLine | VerifyFailure:
         self.calls.append(cite)
         return self.answer
 
@@ -153,6 +151,13 @@ class TestArming:
 
     def test_coordinator_in_any_held_team_arms(self) -> None:
         assert is_armed(MAIN, MULTI) is True
+
+    def test_switch_arms_every_seat_on_the_main_thread(self) -> None:
+        assert is_armed(MAIN, WORKER, coordinator_seats_only=False) is True
+
+    def test_switch_never_arms_an_absent_team_or_a_subagent(self) -> None:
+        assert is_armed(MAIN, ABSENT, coordinator_seats_only=False) is False
+        assert is_armed(SUBAGENT, WORKER, coordinator_seats_only=False) is False
 
 
 # --- the cite ------------------------------------------------------------------
@@ -256,11 +261,23 @@ class TestTeamchatVerifyCli:
             (CommandOutcome(CommandStatus.EXITED, exit_code=2), Refusal.VERIFY_REFUSED),
         ],
     )
-    def test_every_failure_mode_refuses(
-        self, outcome: CommandOutcome, refusal: Refusal
-    ) -> None:
+    def test_every_failure_mode_refuses(self, outcome: CommandOutcome, refusal: Refusal) -> None:
         answer = TeamchatVerifyCli(runner=FakeRunner(outcome))(SIGNALS, CITE)
         assert answer == VerifyFailure(refusal)
+
+    @pytest.mark.parametrize(
+        "cite",
+        [
+            ApprovalCite(team="alpha", event_id="--team"),
+            ApprovalCite(team="-x", event_id=fx.HUMAN_ID),
+            ApprovalCite(team="alpha", event_id=fx.HUMAN_ID + "\n"),
+        ],
+    )
+    def test_a_cite_built_without_parse_cite_is_still_checked(self, cite: ApprovalCite) -> None:
+        runner = answering(fx.verify_answer())
+        answer = TeamchatVerifyCli(runner=runner)(SIGNALS, cite)
+        assert answer == VerifyFailure(Refusal.NO_CITE)
+        assert runner.calls == []
 
     def test_kit_missing_refuses_without_running(self) -> None:
         runner = answering(fx.verify_answer())
@@ -342,8 +359,18 @@ class TestCheckApproval:
         assert verdict.passed is False
         assert verifier.calls == []
 
+    def test_no_acts_never_passes(self) -> None:
+        verdict = check(acts=frozenset())
+        assert verdict.passed is False
+
+    def test_a_verifier_answering_anything_else_denies(self) -> None:
+        verdict = check(verifier=lambda signals, cite: True)
+        assert (verdict.passed, verdict.refusal) == (False, Refusal.ANSWER_UNREADABLE)
+
     def test_reason_never_carries_the_line_text(self) -> None:
-        verdict = check(verifier=TeamchatVerifyCli(runner=answering(fx.verify_answer(kind="agent"))))
+        verdict = check(
+            verifier=TeamchatVerifyCli(runner=answering(fx.verify_answer(kind="agent")))
+        )
         assert verdict.passed is False
         assert "go ahead" not in verdict.reason
 
@@ -366,6 +393,30 @@ class TestApprovalRecord:
         clock.now += 61
         check(verifier=verifier, records=records, clock=clock)
         assert len(verifier.calls) == 2
+
+    def test_the_record_lapses_exactly_at_its_ttl(self) -> None:
+        clock = Clock()
+        records = ApprovalRecords(clock=clock, ttl_seconds=60)
+        verifier = FixedVerifier(human_line())
+        check(verifier=verifier, records=records, clock=clock)
+        clock.now += 60
+        check(verifier=verifier, records=records, clock=clock)
+        assert len(verifier.calls) == 2
+
+    def test_a_go_covered_act_is_not_recorded_as_cited(self) -> None:
+        clock = Clock()
+        records = ApprovalRecords(clock=clock)
+        go = GoGrant(team="alpha", classes=frozenset({ActClass.PUSH}), window_end=5000.0)
+        verifier = FixedVerifier(human_line())
+        check(
+            go=go,
+            acts=frozenset({ActClass.PUSH, ActClass.DELETE}),
+            verifier=verifier,
+            records=records,
+            clock=clock,
+        )
+        refusing = FixedVerifier(VerifyFailure(Refusal.VERIFY_REFUSED))
+        assert check(verifier=refusing, records=records, clock=clock).passed is False
 
     def test_the_record_is_per_act_class(self) -> None:
         clock = Clock()
@@ -390,9 +441,17 @@ class TestApprovalRecord:
     def test_a_refusal_is_never_recorded(self) -> None:
         clock = Clock()
         records = ApprovalRecords(clock=clock)
-        check(verifier=FixedVerifier(human_line(declared_human=False)), records=records, clock=clock)
-        assert check(verifier=FixedVerifier(VerifyFailure(Refusal.VERIFY_REFUSED)),
-                     records=records, clock=clock).passed is False
+        check(
+            verifier=FixedVerifier(human_line(declared_human=False)), records=records, clock=clock
+        )
+        assert (
+            check(
+                verifier=FixedVerifier(VerifyFailure(Refusal.VERIFY_REFUSED)),
+                records=records,
+                clock=clock,
+            ).passed
+            is False
+        )
 
 
 # --- a verified readiness GO as the cite (M-8) ----------------------------------
