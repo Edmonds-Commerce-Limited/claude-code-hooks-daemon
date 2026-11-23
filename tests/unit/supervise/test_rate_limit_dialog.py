@@ -570,14 +570,55 @@ class TestResumeAfterReset:
         assert all(outcome.decision_value not in (_KEY, _CONTINUE) for outcome in outcomes)
         assert "waiting for the limit to reset" in (outcomes[-1].noop_reason_log or "")
 
-    def test_output_after_the_reset_abandons(self, sidecar_dir: Path, machine: Any) -> None:
+    def test_redraw_after_the_reset_then_quiet_still_resumes(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # An idle status-line redraw after the reset leaves the pre-fill in the
+        # box: nobody submitted anything, so the resume goes on once settled.
         _answer_and_close(sidecar_dir, machine)
-        outcome = _resume(sidecar_dir, machine, _resume_facts("continue", quiet=30.0))
-        assert outcome.decision_value not in (_KEY, _CONTINUE)
-        assert "output after the reset" in (outcome.noop_reason_log or "")
+        clear = _resume(sidecar_dir, machine, _resume_facts("continue", quiet=30.0))
+        assert clear.payload == _BACKSPACES
+        sent = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + 2, quiet=1.5))
+        assert sent.decision_value == _CONTINUE
+        later = [
+            _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + offset, quiet=3.0))
+            for offset in (5, 30, 900)
+        ]
+        assert all(outcome.decision_value not in (_KEY, _CONTINUE) for outcome in later)
+
+    def test_output_after_the_reset_waits_for_a_settled_screen(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts("continue", quiet=1.0))
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "answered"
+
+    def test_empty_box_after_output_never_continues_and_abandons_at_the_deadline(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Output then an empty box: the human may already have continued.
+        _answer_and_close(sidecar_dir, machine)
+        waiting = [
+            _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + offset, quiet=30.0))
+            for offset in (0, 60, 300)
+        ]
+        assert all(outcome.payload is None for outcome in waiting)
+        assert _phase(sidecar_dir) == "answered"
+        deadline = _AFTER + _mod._RATE_LIMIT_RECHECK_SECONDS
+        late = _resume(sidecar_dir, machine, _resume_facts("", now=deadline, quiet=30.0))
+        assert late.payload is None
+        assert "output after the reset" in (late.noop_reason_log or "")
         assert _phase(sidecar_dir) == "abandoned"
-        again = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + 10))
-        assert again.decision_value not in (_KEY, _CONTINUE)
+
+    def test_prefill_after_the_deadline_abandons(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        first = _resume(sidecar_dir, machine, _resume_facts("continue", quiet=1.0))
+        assert first.payload is None
+        deadline = _AFTER + _mod._RATE_LIMIT_RECHECK_SECONDS
+        late = _resume(sidecar_dir, machine, _resume_facts("continue", now=deadline, quiet=30.0))
+        assert late.payload is None
+        assert _phase(sidecar_dir) == "abandoned"
 
     def test_no_parsed_reset_never_continues(self, sidecar_dir: Path, machine: Any) -> None:
         unparsed = _ON_TARGET.replace("resets 3pm (Europe/London)", "resets soon")

@@ -8750,6 +8750,7 @@ _RATE_LIMIT_OCCURRENCE_KEY_CAP = 6
 _RATE_LIMIT_WINDOW_KEY_CAP = 30
 _RATE_LIMIT_STATE_TTL_SECONDS = 86400.0
 _RATE_LIMIT_RESUME_GRACE_SECONDS = 120.0
+_RATE_LIMIT_RECHECK_SECONDS = 600.0
 _RATE_LIMIT_CLEAR_ATTEMPTS = 2
 _RATE_LIMIT_PREFILL = "continue"
 _RATE_LIMIT_BACKSPACES = "\x7f" * len(_RATE_LIMIT_PREFILL)
@@ -9019,9 +9020,10 @@ def _rate_limit_resume_step(
     otherwise-NOOP MONITOR tick, no usage pause, no BLOCKED, no unconfirmed own
     line). Acts only once the dialog answered this window has closed, the
     STORED reset time plus a grace has passed, and the session is settled with
-    the input box visible. Output after the reset in phase ``answered`` means
-    the session has already moved on, so the window is abandoned; that fails
-    closed, so an idle redraw also suppresses the resume.
+    the input box visible. Output after the reset in phase ``answered`` opens a
+    re-check of ``_RATE_LIMIT_RECHECK_SECONDS``: the resume goes on only if the
+    settled screen still shows the pre-fill, and the window is abandoned at the
+    deadline otherwise (fail closed). Phase ``done`` keeps it once per window.
     """
     if facts.child_pid is None or not facts.screen_dump or not _rate_limit_dialog_enabled():
         return None, None
@@ -9053,11 +9055,28 @@ def _rate_limit_resume_step(
         and not screen_shows_busy_footer(dump)
     ):
         return None, f"{_RATE_LIMIT_LOG}: continue pending but session busy"
-    if phase == _PHASE_ANSWERED and facts.output_quiet_seconds < now - reset:
-        return finish(_PHASE_ABANDONED, "output after the reset, no continue sent")
+    # Output after the reset (an idle redraw, or the session moving on) opens
+    # a bounded re-check: only a settled screen still showing the pre-fill
+    # proves nothing was submitted; an empty box stays ambiguous until the
+    # deadline abandons the window.
+    recheck = phase == _PHASE_ANSWERED and facts.output_quiet_seconds < now - reset
+    if recheck:
+        until = state.get("resume_recheck_until")
+        if not isinstance(until, (int, float)):
+            until = now + _RATE_LIMIT_RECHECK_SECONDS
+            state["resume_recheck_until"] = until
+            _save_rate_limit_state(path, state)
+        if now >= until:
+            return finish(
+                _PHASE_ABANDONED, "output after the reset, re-check window over, no continue sent"
+            )
+        if facts.output_quiet_seconds < _RATE_LIMIT_SETTLE_SECONDS:
+            return None, f"{_RATE_LIMIT_LOG}: output after the reset, waiting for it to settle"
     text = rate_limit_composer_text(dump)
     if text is None:
         return None, f"{_RATE_LIMIT_LOG}: continue pending, no input box visible"
+    if recheck and not text:
+        return None, f"{_RATE_LIMIT_LOG}: output after the reset and an empty box, re-checking"
     attempts = _coerce_int(state.get("clear_attempts"))
     if text == _RATE_LIMIT_PREFILL:
         if phase == _PHASE_CLEARED and attempts >= _RATE_LIMIT_CLEAR_ATTEMPTS:
