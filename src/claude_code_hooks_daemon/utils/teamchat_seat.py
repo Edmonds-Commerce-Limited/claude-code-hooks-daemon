@@ -69,6 +69,10 @@ EXIT_NO_SESSION: Final[int] = 69
 EXIT_UNREADABLE: Final[int] = 65
 #: The value :meth:`SeatContext.role_in` / ``duty_in`` give when unreadable.
 UNKNOWN: Final[str] = "unknown"
+#: Most ``whoami`` output read or parsed; more reads as unknown (review F1/F5).
+MAX_OUTPUT_BYTES: Final[int] = 64 * 1024
+#: Deepest container nesting decoded. The contract needs 3; extra keys get slack.
+MAX_JSON_DEPTH: Final[int] = 32
 ROLE_COORDINATOR: Final[str] = "coordinator"
 DUTY_HOST: Final[str] = "host"
 
@@ -99,6 +103,7 @@ class ProbeReason(StrEnum):
     SEAT_UNREADABLE = "seat_unreadable"
     COMMAND_FAILED = "command_failed"
     NOT_JSON = "not_json"
+    OUTPUT_TOO_LARGE = "output_too_large"
     VERSION_MISMATCH = "version_mismatch"
     SHAPE_MISMATCH = "shape_mismatch"
 
@@ -329,12 +334,49 @@ def _merge(team: str, rows: list[_Row]) -> TeamSeat:
     return TeamSeat(team, RoleKind.DECLARED, role, handle, duty)
 
 
+def _nesting_exceeds(text: str, limit: int) -> bool:
+    """Whether ``text`` opens more than ``limit`` JSON containers at once.
+
+    Brackets inside string literals do not count. Checked before decoding so a
+    hostile document can never drive the recursive decoder to its limit.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > limit:
+                return True
+        elif char in "]}":
+            depth -= 1
+    return False
+
+
 def parse_whoami(text: str) -> SeatContext:
-    """Parse ``teamchat whoami --json`` output (exit 0). Never raises."""
+    """Parse ``teamchat whoami --json`` output (exit 0). Never raises.
+
+    Oversized output, a document nested past :data:`MAX_JSON_DEPTH` and any
+    decoder failure (including ``RecursionError``) all read as unknown.
+    """
+    if len(text) > MAX_OUTPUT_BYTES:
+        return SeatContext.unresolved(ProbeReason.OUTPUT_TOO_LARGE)
+    if _nesting_exceeds(text, MAX_JSON_DEPTH):
+        return SeatContext.unresolved(ProbeReason.NOT_JSON)
     try:
         document: object = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError, MemoryError) as exc:
         # json.JSONDecodeError is a ValueError; the text itself is not logged.
+        _LOGGER.debug("teamchat seat probe: output not decodable (%s)", type(exc).__name__)
         return SeatContext.unresolved(ProbeReason.NOT_JSON)
     rows = _rows(document)
     if isinstance(rows, ProbeReason):
