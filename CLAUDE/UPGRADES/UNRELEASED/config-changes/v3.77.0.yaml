@@ -250,19 +250,22 @@ config_changes:
       recommended: false
       dormant: false
       description: >-
-        on_unreadable_bus (refuse | allow, default refuse): what a waiting
-        coordinator stop gets when the bus cannot confirm the notifying posts.
-        refuse denies once and says why; allow fails open with a WARNING. On
-        pingbus v1 the adapter cannot read the notify flag, so refuse refuses
-        every waiting coordinator stop once until a v2 adapter lands; allow is
-        the escape hatch. An invalid value is treated as refuse, with a
-        WARNING.
+        on_unreadable_bus (auto | refuse | allow, default auto): what a
+        waiting coordinator stop gets when the bus cannot confirm the
+        notifying posts. auto refuses once (saying why) where the adapter
+        reports the notify flag and thread relation readable, and otherwise
+        allows with an advisory naming the team and the unchecked thread
+        classes. On pingbus v1 the adapter cannot read the notify flag, so
+        auto allows with the advisory, which costs one extra continue turn
+        per waiting coordinator stop. refuse always refuses an unconfirmed
+        wait once (on v1, every waiting coordinator stop); allow fails open
+        with a WARNING. An invalid value falls back to auto, with a WARNING.
       example_yaml: |
         handlers:
           stop:
             owner_wait_stop_guard:
               options:
-                on_unreadable_bus: allow
+                on_unreadable_bus: auto
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

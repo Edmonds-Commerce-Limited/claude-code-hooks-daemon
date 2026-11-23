@@ -80,8 +80,8 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   owner-directive Stop handler). Tests first: a coordinator stop with an
   unposted thread is denied; a worker or unknown role is untouched; a posted
   thread passes; an unreadable bus is governed by `on_unreadable_bus`
-  (default `refuse`, fail closed; `allow` fails open with a WARNING; see
-  Task 2.1a and the open design point below). Partly done: the
+  (default `auto`; see Task 2.1a and the settled design point below).
+  Partly done: the
   owner-directive Stop handler shipped as Task 2.1a; the
   `AskUserQuestion` deny on coordinator seats is out of 2.1a's scope and
   still open. "Posted this
@@ -100,10 +100,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   non-boilerplate body; otherwise deny and print the one bump command for the
   stale threads; deny text names ids only and never restates the waits;
   unreadable notify flag counts as non-notifying; worker and unknown role
-  untouched; an unreadable bus (or a raising adapter) is decided by
-  `options.on_unreadable_bus`: `refuse` (default) denies once, names the
-  notifying-reply commands and says why nothing could be confirmed; `allow`
-  fails open with a WARNING. Shipped as `owner_wait_stop_guard` (Stop,
+  untouched (a declared worker; an unknown role stays armed after the PR 226
+  review); an unreadable bus (or a raising adapter) is decided by
+  `options.on_unreadable_bus`: `auto` (default) refuses once where the adapter
+  reads the flags and otherwise allows with an advisory; `refuse` denies once,
+  names the notifying-reply commands and says why nothing could be confirmed;
+  `allow` fails open with a WARNING. Shipped as `owner_wait_stop_guard` (Stop,
   priority 3, rule `R-STOP-OWNER-WAIT-UNBUMPED`). Deterministic: ids,
   timestamps, notify flag; no LLM judgement. Acceptance tests are the
   20.1 list. Also (peer note from the coordinator): an owner-started thread
@@ -115,12 +117,20 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   reply; unverified here whether v1 history exposes m.thread; fail closed). Conduct advisory for a human-message reply
   posted outside its thread: only if the bus data exposes thread id and author
   kind (open, confirm with fedora-desktop.1 in Task 1.2).
-- **OPEN design point** (for the coordinator and owner, Task 2.1a): on
-  pingbus v1 the adapter cannot read the notify flag or `m.thread`, so the
-  default `on_unreadable_bus: refuse` refuses EVERY waiting stop on a
-  coordinator seat once, until a v2 adapter can read both. `allow` is the
-  escape hatch (fail open, WARNING). Decide whether `refuse` stays the
-  shipped default while v1 is the only adapter.
+- **Settled design point** (Task 2.1a): on pingbus v1 the adapter cannot read
+  the notify flag or `m.thread`, so `refuse` would refuse EVERY waiting stop
+  on a coordinator seat once. The coordinator chose `auto` as the default:
+  refuse where the adapter reports the flags readable, allow with an advisory
+  on v1 (fail-open by design there; the advisory is its only effect and costs
+  one extra continue turn).
+- [x] ✅ **Task 2.1b**: fix the PR 226 independent review
+  (`subagent-reports/261123-opus-independent-review-pr226.md`), each finding
+  test-first: F1 stand-in requirement carried on the deny, F2 wider waiting
+  wordings, F3 only this guard's own refusal earns the re-entry pass, F4 an
+  unknown role or unresolved probe stays armed, F5 a fault fails closed, F6
+  the bump command names `--team`, F7 thread ids and stopwords are not a
+  body, F8 `started_at` required and in seconds, F9 `goal-blocked` is not a
+  wait on a human; docs default `auto`.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.

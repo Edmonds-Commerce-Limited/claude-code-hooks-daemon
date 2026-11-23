@@ -4855,14 +4855,14 @@ branches:
 | **Type**       | Blocking                |
 | **Event**      | Stop                    |
 
-**Description:** A coordinator seat that stops waiting on a human must have told them on the team bus. A main-thread stop whose `STOPPING BECAUSE:` text waits on a human (or whose session is in the awaiting-human mode) is refused (rule `R-STOP-OWNER-WAIT-UNBUMPED`) unless every open owner-facing thread the seat asked or owns got a NOTIFYING post from this seat, with a real body, within `window_minutes`. The refusal names the threads and the `pingbus thread ... --ask` commands, never restates the waits. It applies only per team where the role probe says this seat is `coordinator`; a worker, an unknown role or no team reads nothing. A re-entered stop is always allowed, and it stands aside while the session is usage-paused. Never terminal. Design: [00630 DESIGN.md section 20.1](../../CLAUDE/Plan/00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md).
+**Description:** A coordinator seat that stops waiting on a human must have told them on the team bus. A main-thread stop whose text after `STOPPING BECAUSE:` waits on a human (ordinary wordings count: "blocked on the owner", "pending Joseph's answer", "need the owner to pick", "until the owner decides"; quoted spans and a negated clause such as "not waiting on any user input" do not), or whose session is in the `awaiting-human` mode, is refused (rule `R-STOP-OWNER-WAIT-UNBUMPED`) unless every open owner-facing thread the seat asked or owns got a NOTIFYING post from this seat, with a real body, within `window_minutes`. A body of only mentions, thread ids, bump words and stopwords (`bump Q61`, `still waiting on @owner`) is not a real body. The `goal-blocked` mode alone is not a wait on a human. The refusal names the threads, the one `teamchat bump --team <team> ...` command and the `pingbus thread ... --ask` forms, never restates the waits. It applies only per team where the role probe says this seat is `coordinator`; a declared worker, no team or a sub-agent reads nothing. An unknown role, an unresolved probe or a stop whose message cannot be read keeps the guard armed: it counts as an unconfirmed wait under `on_unreadable_bus`. Only a stop that re-enters after THIS guard's own refusal is passed (one refusal per stop chain); another handler's deny is judged afresh. Any fault while checking an armed coordinator's stop refuses it once with static text, whatever `on_unreadable_bus` says. It stands aside while the session is usage-paused. Never terminal. Design: [00630 DESIGN.md section 20.1](../../CLAUDE/Plan/00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md).
 
-**Unreadable bus:** with the default `on_unreadable_bus: refuse`, a bus the adapter cannot read (or an adapter that raises) refuses the waiting stop once, saying why nothing could be confirmed. On pingbus v1 the adapter cannot read the notify flag, so every waiting coordinator stop is refused once until a v2 adapter lands; `allow` fails open with a WARNING instead.
+**Unreadable bus:** with the default `on_unreadable_bus: auto`, a wait the bus cannot confirm is refused once (saying why) where the adapter reports the notify flag and thread relation readable, and otherwise allowed with an advisory naming the team and the thread classes left unchecked. On pingbus v1 the adapter cannot read the notify flag, so `auto` allows with the advisory; that advisory reaches the session as stop context, which costs one extra continue turn per waiting coordinator stop. `refuse` always refuses an unconfirmed wait once (on v1 that is every waiting coordinator stop); `allow` fails open with a WARNING. An invalid value falls back to the default `auto`, with a warning.
 
-| Option              | Default  | Description                                                               |
-| ------------------- | -------- | ------------------------------------------------------------------------- |
-| `window_minutes`    | `30`     | A notifying post older than this does not count (integer 1..1440)         |
-| `on_unreadable_bus` | `refuse` | `refuse` denies a wait the bus cannot confirm; `allow` fails open, logged |
+| Option              | Default | Description                                                                                                            |
+| ------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `window_minutes`    | `30`    | A notifying post older than this does not count (integer 1..1440)                                                      |
+| `on_unreadable_bus` | `auto`  | `auto` refuses where the adapter can read the flags, else allows with an advisory; `refuse` always; `allow` fails open |
 
 **Config example:**
 
@@ -4873,7 +4873,7 @@ handlers:
       enabled: true   # default
       priority: 3
       options:
-        on_unreadable_bus: refuse
+        on_unreadable_bus: auto   # default; refuse | allow
 ```
 
 ---

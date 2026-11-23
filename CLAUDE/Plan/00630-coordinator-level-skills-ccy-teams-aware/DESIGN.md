@@ -583,8 +583,8 @@ Test-first acceptance criteria (each red before the handler exists):
 
 - A stop with terminal-only status (no post anywhere) counts as unsent.
 
-- An unreadable bus writes a log line and, under the default
-  `on_unreadable_bus: refuse`, is refused once (passes under `allow`).
+- An unreadable bus writes a log line and is governed by
+  `on_unreadable_bus` (default `auto`; see 20.1).
 
 - A stop that does not wait on the owner is untouched.
 
@@ -623,14 +623,21 @@ Reconciliation with the rest of section 20:
 - Rule 3 (stop message is an echo) is tightened by item 5: it is a pointer.
 - The notifying-only filter and its fail-closed rule stand unchanged.
 - Unreadable bus (corrected by the coordinator, superseding "fail-open
-  stands"): `owner_wait_stop_guard.options.on_unreadable_bus` decides, and
-  its default is `refuse`. An unreadable bus or a raising adapter refuses the
-  waiting stop once, names the notifying-reply commands and says why nothing
-  could be confirmed; `allow` fails open. Either way a WARNING is logged.
-  OPEN for the coordinator and owner: on pingbus v1 the adapter cannot read
-  the notify flag or `m.thread`, so `refuse` refuses every waiting stop on a
-  coordinator seat once until a v2 adapter can read both; `allow` is the
-  escape hatch (00636 PLAN.md, open design point).
+  stands"): `owner_wait_stop_guard.options.on_unreadable_bus` decides. Its
+  default is `auto` (the coordinator's choice, settling the former open
+  point): where the adapter reports the notify flag and `m.thread` readable,
+  an unconfirmed wait is refused once, naming the notifying-reply commands and
+  saying why nothing could be confirmed; where it cannot (pingbus v1), the stop
+  is allowed with an advisory naming the team and the unchecked thread
+  classes. That is fail-open by design on v1, where a refusal could never be
+  satisfied, and the advisory costs one extra continue turn. `refuse` always
+  refuses an unconfirmed wait once; `allow` fails open. Either way a WARNING is
+  logged.
+- Armed when unsure (PR 226 review): an unknown role, an unresolved seat
+  probe or an unreadable stop message counts as an unconfirmed wait under
+  `on_unreadable_bus`; any fault while checking an armed coordinator's stop
+  refuses it once, whatever the policy. Only a stop re-entering after this
+  guard's own refusal passes. `goal-blocked` alone is not a wait on a human.
 
 Open item (Q18 second half, recorded 2026-11-23): whether pingbus v1 `history`
 can supply the notify flag. `pingbus history --help` (read-only) lists only
@@ -657,8 +664,9 @@ Additional test-first criteria (each red first):
 - The deny text names thread ids only and does not restate the awaited
   content; a stop text that restates the waits is not required to be rejected.
 - N is read from config; an invalid N falls back to the default and logs.
-- Unreadable bus: loud log line; refused once under the default
-  `on_unreadable_bus: refuse`, passes under `allow` (corrected, see above).
+- Unreadable bus: loud log line; refused once under `refuse` (and under the
+  default `auto` when the adapter reads the flags), allowed with an advisory
+  under `auto` on v1, passes under `allow` (corrected, see above).
 
 Owner-started threads (peer note relayed from the coordinator, who answered
 three such messages in other threads and the owner saw no response): a
