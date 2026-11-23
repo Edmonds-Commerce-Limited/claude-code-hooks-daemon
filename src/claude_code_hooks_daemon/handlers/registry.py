@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         PlanWorkflowConfig,
         ReferenceReposConfig,
         ScratchConfig,
+        TeamSeatConfig,
         WorktreeConfig,
     )
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -632,6 +633,7 @@ class HandlerRegistry:
         reference_repos: "ReferenceReposConfig | None" = None,
         branches: "BranchesConfig | None" = None,
         scratch: "ScratchConfig | None" = None,
+        team_seat: "TeamSeatConfig | None" = None,
         config_problems: Sequence[str] = (),
     ) -> int:
         """Register all discovered handlers with the router.
@@ -664,6 +666,8 @@ class HandlerRegistry:
                 selected the same way as ``reference_repos``
             scratch: Optional ScratchConfig (Plan 00627), injected as
                 ``_scratch`` onto handlers that DECLARE that attribute
+            team_seat: Optional TeamSeatConfig (Plan 00634), injected as
+                ``_team_seat`` onto handlers that DECLARE that attribute
             config_problems: ``DaemonConfig.config_problems`` (Plan 00466
                 round 3), injected as ``_config_problems`` onto handlers that
                 DECLARE that attribute, like ``_option_failures``
@@ -898,6 +902,11 @@ class HandlerRegistry:
                             scratch_attr_name = "_scratch"
                             if scratch is not None and hasattr(instance, scratch_attr_name):
                                 setattr(instance, scratch_attr_name, scratch)
+
+                            # The `team_seat:` block (Plan 00634), same selection.
+                            team_seat_attr_name = "_team_seat"
+                            if team_seat is not None and hasattr(instance, team_seat_attr_name):
+                                setattr(instance, team_seat_attr_name, team_seat)
 
                             # Pass-1 option failures (Plan 00466 N19), for the
                             # session-start alert. Same declared-attribute

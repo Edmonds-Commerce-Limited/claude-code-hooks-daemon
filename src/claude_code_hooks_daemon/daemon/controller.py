@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         ProjectHandlersConfig,
         ReferenceReposConfig,
         ScratchConfig,
+        TeamSeatConfig,
         WorktreeConfig,
     )
     from claude_code_hooks_daemon.core.handler import Handler
@@ -258,6 +259,7 @@ class DaemonController:
         reference_repos: "ReferenceReposConfig | None" = None,
         branches: "BranchesConfig | None" = None,
         scratch: "ScratchConfig | None" = None,
+        team_seat: "TeamSeatConfig | None" = None,
         chain_deadline_problems: list[str] | None = None,
         config_fingerprint: str | None = None,
         config_problems: list[str] | None = None,
@@ -383,6 +385,7 @@ class DaemonController:
             reference_repos=reference_repos,
             branches=branches,
             scratch=scratch,
+            team_seat=team_seat,
             config_problems=self._config_problems,
         )
 
