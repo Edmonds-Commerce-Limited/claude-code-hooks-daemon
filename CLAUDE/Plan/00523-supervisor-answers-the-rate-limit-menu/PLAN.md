@@ -75,9 +75,11 @@ writing the keystroke.
   clears only when the menu leaves the screen. Each press is logged to the
   decision log, and dry-run mode logs it without sending. As built, the latch
   is per reset window, and the keys are capped per occurrence and per window.
-- [ ] ⬜ **Task 2.4**: A readable armed state for Plan 00632's readiness check
+- [x] ✅ **Task 2.4** (as built: `rate_limit_armed_status`, in the startup banner and the second decision-log line, after `supervisor active`; the key is `CCY_RATE_LIMIT_DIALOG`): A readable armed state for Plan 00632's readiness check
   (Plan 00630 vet M-9): a config key that turns the answerer on, plus a
   supervisor status line saying whether it is armed in this session. TDD.
+  As built the key turns the answerer OFF (the feature is on by default), not
+  on as asked here; the line reads `INERT` when no hooks-screen binary resolves.
 - [x] ✅ **Task 2.5** (added): after the reset, clear the pre-filled box and
   send one `continue`. Two guards go with it:
   - every other family is held while the pre-fill may be in the box;
@@ -125,12 +127,18 @@ weekly limit · resets <time>", and the supervisor retried regardless.
 
 ### Follow-ups from the delta review (open)
 
-- [ ] ⬜ **F1**: the sweep deletes open key-capped state at anchor+48h, though
-  load keeps it.
-- [ ] ⬜ **F2**: a held Enter skips the host apply veto.
-- [ ] ⬜ **F3**: the empty-box re-check abandons the window instead of retrying.
-- [ ] ⬜ **F4**: a same-window re-answer after a D2 take-back, within the key
-  cap.
+- [x] ✅ **F1**: the sweep deletes open key-capped state at anchor+48h, though
+  load keeps it. Fixed: the sweep keeps it.
+- [x] ✅ **F2**: a held Enter skips the host apply veto. Fixed: a held send is
+  taken back (`_rate_limit_host_held`).
+- [x] ✅ **F3**: the empty-box re-check abandons the window instead of retrying.
+  Fixed: output within 5 s of a vetoed resume send is not a re-check trigger.
+- [x] ✅ **F4**: a same-window re-answer after a D2 take-back, within the key
+  cap. Fixed by a cap of 2 taken-back Enters per window.
+- Still open and blocked: Task 3.1 and Phase 1 (live capture) need a real
+  limit hit. Phase 2b (hold injections while a hard limit lasts) needs a design
+  ruling first: the `.usage-paused` record has no field to tell a hard limit
+  from a ceiling pause, and Plan 00630 Q16 may retire the ceiling pause.
 
 ## Success Criteria
 
@@ -179,4 +187,10 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   in /workspace.
 
   The host part (the screen dump and the apply veto) takes effect on the next
-  ccy relaunch. Phase 1 (live capture), Phase 2b and Task 2.4 are still open.
+  ccy relaunch. Phase 1 (live capture) is still open; Phase 2b and Task 2.4
+  are built.
+
+  F2, F3 and F4 (the held-Enter take-back, the retried resume and the take-back
+  cap) also need a ccy relaunch: the host writes the fields they read
+  (`enter_takebacks`, `resume_vetoed_at`). Only the sweep rule reloads with the
+  worker; under an older host F3 and F4 are inert and fail safe.
