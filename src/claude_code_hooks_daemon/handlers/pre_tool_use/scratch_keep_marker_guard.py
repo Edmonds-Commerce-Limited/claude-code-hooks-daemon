@@ -34,7 +34,6 @@ from claude_code_hooks_daemon.core.utils import (
     get_file_path,
     scan_bash_write_targets,
 )
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.scratch_dir_creation import (
@@ -118,15 +117,10 @@ def _bash_writes_marker(hook_input: dict[str, Any], *, depth: int) -> bool:
     try:
         return _statement_routes_write_marker(hook_input, command, cwd, depth=depth)
     except UnparseableCommand as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason=(
-                "keep-marker guard: the copy/interpreter/shell-body routes cannot read "
-                "unlexable text, so only the shared write scan above judged this command"
-            ),
-        )
-    return False
+        # Fail closed, like R-SCRATCH-CAP: the command names the marker and
+        # where it writes cannot be read, so it may touch one.
+        logger.info("keep-marker guard: unlexable command naming the marker, denied: %s", exc)
+        return True
 
 
 def _statement_routes_write_marker(
@@ -202,7 +196,8 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
             "redirect, `tee`, `cp`/`mv`/`install`, `ln`, `touch` or `rm` naming it, are "
             "denied (R-SCRATCH-KEEP-MARKER). A destination built from a variable that "
             "names the marker is denied too, as are `cp .scratch-keep DIR/`, a `sh -c` "
-            "body that writes it, and any `python3 -c`/`perl -e`/`node -e` code naming it. "
+            "body that writes it, any `python3 -c`/`perl -e`/`node -e` code naming it, "
+            "and command text the parser cannot read (an unbalanced quote) that names it. "
             "A script on disk that writes the marker, or a name assembled at run time, "
             "is not followed.\n\n"
             "**Instead**: file the work where git carries it (a plan folder, a test, "

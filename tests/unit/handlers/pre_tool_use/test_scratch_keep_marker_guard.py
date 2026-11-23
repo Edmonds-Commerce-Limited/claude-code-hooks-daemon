@@ -126,13 +126,13 @@ class TestDenied:
         assert handler.handle(_bash(command)).decision == Decision.DENY
 
 
-class TestUnlexableStatementRoutes:
-    """Characterisation: an unlexable command on the copy/interpreter routes.
+class TestUnlexableStatementRoutesFailClosed:
+    """An unlexable command naming the marker is denied, like R-SCRATCH-CAP.
 
-    The statement scan the copy and interpreter routes share with the cap
-    guard raises on text shlex cannot lex. This guard does not crash on it and
-    keeps its existing verdict (not matched); that open route is reported to
-    the plan owner rather than changed here.
+    The statement scan the copy, interpreter and shell-body routes share with
+    the cap guard cannot read text shlex cannot lex. Where it writes is then
+    unknown, and the command names the marker, so it is treated as possibly
+    touching one and denied with the standard message.
     """
 
     @pytest.mark.parametrize(
@@ -140,12 +140,25 @@ class TestUnlexableStatementRoutes:
         [
             f"echo $'it\\'s'; cp /tmp/.scratch-keep {_ENTRY}/",
             "echo $'it\\'s'; python3 -c 'open(\".scratch-keep\",\"w\")'",
+            # An unbalanced quote hiding a copy of the marker into a directory.
+            f"cp .scratch-keep {_ENTRY}/ && echo 'unbalanced",
+            f"sh -c 'touch {_ENTRY}/.scratch-keep",
         ],
     )
-    def test_does_not_crash_and_keeps_its_verdict(
+    def test_is_denied_with_the_standard_message(
         self, handler: ScratchKeepMarkerGuardHandler, command: str
     ) -> None:
-        assert not handler.matches(_bash(command))
+        assert handler.matches(_bash(command))
+        result = handler.handle(_bash(command))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert f"BLOCKED [{RuleID.SCRATCH_KEEP_MARKER}]" in result.reason
+        assert "human" in result.reason
+
+    def test_unlexable_text_not_naming_the_marker_is_allowed(
+        self, handler: ScratchKeepMarkerGuardHandler
+    ) -> None:
+        assert not handler.matches(_bash(f"echo 'unbalanced > {_ENTRY}/notes.txt"))
 
 
 class TestAllowed:
