@@ -64,7 +64,8 @@ not in this clone).
   calling `$TEAMCHAT_KIT/bin/teamchat whoami --json` with the stamped
   `TEAMCHAT_RUNTIME`, bounded timeout.
 - [x] ✅ **Task 2.2**: Stamp `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` onto the
-  payload (init.sh and server.py), never overwriting an existing value.
+  payload (init.sh and server.py), the pair from one source (see Review
+  fixes, F7).
 - [x] ✅ **Task 2.3**: Diagnostic CLI printing the resolved context or "absent"
   with the reason (`hooks-daemon team-seat`, `daemon/team_seat_cli.py`);
   `team_seat` config block (detection, TTL).
@@ -77,6 +78,34 @@ not in this clone).
 - [x] ✅ **Task 3.2**: Invariant tests (role never relaxes a guard; no file
   opened under the seat store, state root or run directory; no v1 path).
   Targeted QA green.
+
+### Review fixes (PR #222)
+
+The independent review's F1-F8 are fixed, each red then green:
+
+- F1: output over `MAX_OUTPUT_BYTES` or nested past `MAX_JSON_DEPTH` is
+  unknown; `parse_whoami` never raises (`RecursionError` included).
+- F2: rows for one team merge to the most restrictive reading; a coordinator
+  whose duty is host, unreadable or conflicting is unknown, never a
+  coordinator. Team, role and duty names are normalised (review F9).
+- F3: the probe environment is built from `PROBE_ENV_ALLOWLIST` plus
+  `TEAMCHAT_RUNTIME`; no other daemon `TEAMCHAT_*` reaches it.
+- F4: duplicate JSON keys and a non-int `v` are `shape_mismatch`; kit and
+  runtime must be plain absolute paths.
+- F5: the probe runs in its own session with stdin `/dev/null`; stdout is
+  read to `MAX_OUTPUT_BYTES`; on timeout or over-cap the whole process group
+  is killed (`output_too_large`).
+- F6: the real runner refuses a binary that is not inside the resolved kit,
+  or whose file, directory or kit is world-writable (`kit_untrusted`).
+- F7, signal-pair precedence (chosen): both values come from one source. A
+  readable session environment (the relay peer's, or init.sh's own) wins:
+  a non-blank value replaces the payload's, a blank or missing one removes
+  it. Only when that environment cannot be read is the payload's pair kept.
+- F8: the resolver cache holds at most `MAX_CACHE_ENTRIES` sessions; a new
+  session in a full cache evicts expired answers, then the oldest. Absent
+  answers keep the full TTL (a new seat lands within one TTL, tested).
+  `resolve` blocks for up to the `whoami` timeout, so the wiring plan must
+  not call it on the asyncio loop.
 
 ## Dependencies
 

@@ -152,9 +152,13 @@ byte-pump relay the daemon reads the connected hook process's environment
 (`_stamp_session_hostname` in `src/claude_code_hooks_daemon/daemon/server.py`,
 field `HookInputField.SESSION_HOSTNAME`).
 
-This plan reuses that route for `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` only. A
-value already on the payload is never overwritten; a peer whose environment
-cannot be read stamps nothing (absent).
+This plan reuses that route for `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` only.
+Precedence (chosen deliberately, Plan 00631 review F7): the pair comes from one
+source, never one field from each. A readable session environment (the relay
+peer's, or the init.sh forwarder's own) is authoritative: a non-blank value
+replaces the payload's, a blank or missing one removes it. Only when that
+environment cannot be read is the payload's pair kept as sent; with neither,
+the session reads as in no team (absent).
 
 Where `whoami` runs (M-7): the run directory is `/tmp/teamchat/<run>` inside a
 ccy container and `$XDG_RUNTIME_DIR/teamchat/run/<run>` on a host, and the
