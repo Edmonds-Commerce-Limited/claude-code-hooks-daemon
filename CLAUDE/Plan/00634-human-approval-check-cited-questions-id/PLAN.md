@@ -57,7 +57,7 @@ class it did not authorise.
 
 - [x] ✅ **Task 2.1**: Verifier module `utils/human_approval.py`. Targeted QA
   green.
-- [ ] ⬜ **Task 2.2**: Guard `human_approval_check`, mode off | advise | block
+- [x] ✅ **Task 2.2**: Guard `human_approval_check`, mode off | advise | block
   (advise by default). Targeted QA green.
 - [ ] ⬜ **Task 2.3**: Live verification once issue 369 lands; then swap the
   default verifier for `TeamchatVerifyCli` and confirm its argv and answer
@@ -76,6 +76,15 @@ class it did not authorise.
 - **Gap, replay**: one verified human line authorises any act of the cited
   classes until its in-memory approval record lapses (TTL 300s). Nothing
   binds the line's text to the specific act.
+- **Gap, deletes**: only forced branch deletes (`branch -D`/`-df`,
+  `update-ref -d`) are detected; a plain `git branch -d` is not an act.
+- **Gap, permission scope**: the permission act is the world-writable `chmod`
+  only (`dangerous_permissions.sets_world_writable`).
+- **Choice, `gh pr merge`**: always counts as a merge into main, because it
+  lands on the PR base on GitHub whatever the local checkout; an unreadable
+  current branch with a merge named also counts (fail closed).
+- **Mode `block`**: until issue 369 lands the default verifier refuses every
+  cite, so `block` denies every armed act; the shipped default is `advise`.
 - **Unverified here**: the `verify --json` flag, the answer shape, and the
   event id grammar (no `:` accepted; fails closed if real ids carry one).
 
@@ -86,10 +95,12 @@ class it did not authorise.
 
 ## Success Criteria
 
-- [ ] No path counts a peer line or a role as approval (tests).
-- [ ] An unverifiable questions-room cite denies (test).
-- [ ] Absent-team fixture passes.
-- [ ] Release-bound items recorded in the pending-release holding area.
+- [x] No path counts a peer line or a role as approval (tests).
+- [x] An unverifiable questions-room cite denies (test).
+- [x] Absent-team fixture passes.
+- [x] Release-bound items recorded in the pending-release holding area
+  (`CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml`,
+  `release-notes/087-human-approval-check.md`).
 
 ## Delivery & Milestones
 
