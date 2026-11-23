@@ -63,11 +63,12 @@ not in this clone).
 - [x] ✅ **Task 2.1**: GREEN (`src/claude_code_hooks_daemon/utils/teamchat_seat.py`). `SeatContext` and the single teamchat module,
   calling `$TEAMCHAT_KIT/bin/teamchat whoami --json` with the stamped
   `TEAMCHAT_RUNTIME`, bounded timeout.
-- [ ] ⬜ **Task 2.2**: Stamp `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` onto the
+- [x] ✅ **Task 2.2**: Stamp `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` onto the
   payload (init.sh and server.py), never overwriting an existing value.
-- [ ] ⬜ **Task 2.3**: Diagnostic CLI printing the resolved context or "absent"
-  with the reason; `team_seat` config block (detection, TTL).
-- [ ] ⬜ **Task 2.4**: Targeted QA green.
+- [x] ✅ **Task 2.3**: Diagnostic CLI printing the resolved context or "absent"
+  with the reason (`hooks-daemon team-seat`, `daemon/team_seat_cli.py`);
+  `team_seat` config block (detection, TTL).
+- [ ] 🔄 **Task 2.4**: Targeted QA green locally; the full pass is the PR's CI.
 
 ### Phase 3: Role gate primitive
 
@@ -84,12 +85,23 @@ not in this clone).
 
 ## Success Criteria
 
-- [ ] The absent fixtures produce no output, no error, no config need.
-- [ ] A multi-team fixture resolves different roles per team.
-- [ ] An unknown duty or `probe` role switches nothing on.
-- [ ] A role change takes effect within one TTL (test).
-- [ ] Release-bound items (config block, payload fields, CLI) recorded in the
-  pending-release holding area.
+- [x] The absent fixtures produce no output, no error, no config need.
+- [x] A multi-team fixture resolves different roles per team.
+- [x] An unknown duty or `probe` role switches nothing on.
+- [x] A role change takes effect within one TTL (test).
+- [x] Release-bound items (config block, payload fields, CLI) recorded in the
+  pending-release holding area: the `team_seat` block in
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml`, and the payload
+  fields and `team-seat` command in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/086-teamchat-role-probe-and-team-seat-command.md`.
+  No truth-change: nothing previously true becomes false.
+
+## Open items
+
+- Task 1.1: the F44 merge hash of the `whoami --json` contract, confirmation
+  of exit 65, and the proof that the daemon shares the session's mount
+  namespace and user. No teamchat source is readable here; until proved, the
+  probe degrades to role unknown (guards stay armed) when `whoami` cannot run.
 
 ## Delivery & Milestones
 
