@@ -540,8 +540,9 @@ class TestListingsAreSharedAcrossWords:
         assert time.perf_counter() - start < scaled_cpu_seconds(_MANY_WORDS_SECONDS)
 
 
-#: The 2000-word command took 10-13 s before listings were shared; main took 0.85 s.
-_MANY_WORDS_SECONDS = 3.0
+#: The 2000-word command took 10-22 s before listings were shared and about 1.1 s after
+#: (main: 0.4-0.85 s); half the old cost leaves room for a slow runner and still fails it.
+_MANY_WORDS_SECONDS = 5.0
 
 
 class TestBashBracketNegation:

@@ -72,7 +72,7 @@ All of these were written first and seen failing (15 failed), before the fix.
   - A repeated word charges nothing more.
   - The budget is shared across words, and once spent it stays spent.
 - **Finding 6, timing:** a `perf_sweep` test runs 2000 words over 300
-  directories within `scaled_cpu_seconds(3.0)`.
+  directories within `scaled_cpu_seconds(5.0)`.
 - **Over the cap:** the over-the-listing-cap test is re-pinned to
   `GLOB_LISTING_CAP` (still DENY). A frontier-cap test is new.
 - **Unreadable directory:** it stops every word that meets it within one
@@ -95,7 +95,19 @@ host):
 
 ## Targeted QA
 
-RESULTS_PLACEHOLDER
+- **Secret-guard suite:** 4466 passed, 11 skipped in 133 s. This covers:
+  - `tests/unit/handlers/pre_tool_use/test_secret_file_guard*.py`;
+  - `test_quarantine_artefact_read_guard*.py`;
+  - `tests/unit/utils/test_secret_file_matching*.py`;
+  - `test_protected_file_index.py`;
+  - `test_recursive_search*.py`.
+- **Performance sweeps, narrowed:** `pytest -m perf_sweep` over this test
+  file and `test_subagent_full_qa_blocker.py` (the file whose test failed on
+  CI): 12 passed in 4.3 s.
+  - The new 2000-word test took 1.11 s against a bound of
+    `scaled_cpu_seconds(5.0)`.
+  - The alias-chain test passed.
+- **Lint and types:** `ruff check`, `black` and `mypy` on the module are clean.
 
 ## Not fixed here (pre-existing on main): ledger N716
 
