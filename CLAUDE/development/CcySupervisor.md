@@ -466,6 +466,91 @@ still apply and are the only part that sees the input box.
 relaunch; a worker newer than its host receives `true_idle` False and does
 nothing.
 
+## The rate-limit dialog: answer it, then resume after the reset (Plan 00523)
+
+When Claude Code hits a usage limit it shows a `What do you want to do?` menu.
+Left alone, the session sits on it. The supervisor answers it with
+`Stop and wait for limit to reset`. After the reset time it sends one
+bot-prefixed `continue`. All of this lives in `_rate_limit_dialog_step`,
+`_rate_limit_resume_step` and `_rate_limit_prefill_blocks` in
+`.claude/ccy/claude-supervise.py`.
+
+| Variable                | Default | Meaning                                                                                     |
+| ----------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| `CCY_RATE_LIMIT_DIALOG` | on      | `off`, `0`, `false` or `no` disable the answer and the resume; any other value leaves it on |
+
+**What the screen must show.** The decision reads the host's
+`TickFacts.screen_dump`: the bottom 40 rows of `hooks-screen --dump`. The host
+sends it only when the screen check exists, the switch is on, and output has
+been quiet for 2 s; otherwise the field is `""` and the feature does nothing.
+The recogniser is strict: it needs the title, exactly one pointer, numbered
+rows and the target label. Anything less is left alone. A screen that only
+looks like the dialog is saved, as the latest near miss, to
+`supervise-rate-limit-unrecognised.txt` in the status directory.
+
+**Answering.** The supervisor presses one arrow per tick. It presses Enter only
+when the pointer has stayed on the target row for two ticks with the same
+rendering. It also needs an idle session, an empty box, confirmed main focus
+and 3 s of quiet output. Keys are capped per occurrence and per reset window. A
+reset window is answered once. If the human presses any key except a terminal
+focus or mouse report, the window is left to them. While the dialog is on the
+screen it decides the whole tick, so nothing else is typed into it.
+
+**The resume.** After `reset + 120 s`, Claude Code leaves `continue` pre-filled
+in the box. The supervisor clears it with backspaces (at most two tries) and
+then sends its own `continue`. It does this only when the session is idle and
+settled, the box is visible and no busy footer is shown. The reset time is the
+one STORED when the dialog was answered. If no reset time was parsed, no
+continue is ever sent.
+
+If output appears after the reset, the supervisor re-checks for at most
+`_RATE_LIMIT_RECHECK_SECONDS` (600 s). The output may be an idle redraw or the
+session moving on. Once the screen settles:
+
+- a box that still shows the pre-fill proves nothing was submitted, so the
+  resume goes ahead;
+- an empty box is ambiguous, because the human may already have continued. The
+  supervisor waits, and abandons the window at the deadline.
+
+Other text in the box abandons the window. That rule is a guess about live
+screens that nobody has checked.
+
+The resume needs the same gates as every other prompt. It does not run under a
+usage pause, while the session is BLOCKED, or while the supervisor's own line
+is unconfirmed. Once the continue is sent, the phase is `done`, so the resume
+happens once per window.
+
+**Nothing else is typed onto the pre-fill.** The host's `input_line_empty`
+counts typed keys only, so it cannot see Claude Code's pre-fill.
+`_rate_limit_prefill_blocks` folds into `can_inject` and into the usage-pause
+`/compact`. It blocks every family while a resume is pending (phase `answered`
+or `cleared`), even with no screen. After that it blocks only while the screen
+still shows the pre-fill. A model restore therefore waits until after the
+continue.
+
+**State.** The state file is `supervise-rate-limit-dialog.<child_pid>.json` in
+the status directory: one file per Claude child, dropped a day after its
+window.
+
+**Building the binary and relaunching.** The worker hot-reloads the decision
+code. The screen read is HOST code, however, so it takes effect only on the
+next ccy relaunch. Until then the worker receives `screen_dump=""` and the
+feature stays inert. The host also needs the `hooks-screen` binary, built
+without competing for the CPU:
+
+```bash
+nice -n 19 bash screen/build.sh
+```
+
+**Known limits.**
+
+- The in-process fallback (`_poll_once`, used while the worker is down) is
+  sent no dump, so the dialog is not answered then.
+- The screen fixtures in `tests/unit/supervise/test_rate_limit_dialog.py` were
+  reconstructed from Claude Code 2.1.330 strings, not captured live. Nothing
+  has been verified against a real dialog. The near-miss file exists so that a
+  real capture can replace the fixtures.
+
 ## Own-session identity: the child's process tree
 
 Sessions in one checkout share one `context-sidecar/` directory, so the
