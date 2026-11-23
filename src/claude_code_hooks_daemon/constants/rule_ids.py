@@ -223,6 +223,10 @@ class RuleID:
     #: recorded a one-shot approval for that branch.
     MERGE_TO_MAIN_APPROVAL: str = "R-MERGE-TO-MAIN-APPROVAL"
 
+    #: A coordinator team seat's push, delete, world-writable chmod or merge
+    #: into main with no cited questions-room line a declared human sent.
+    HUMAN_APPROVAL_MISSING: str = "R-HUMAN-APPROVAL-MISSING"
+
     # ------------------------------------------------------------------
     # docs_qa_edit / docs_qa_commit_gate handlers (gate-level granularity)
     # ------------------------------------------------------------------

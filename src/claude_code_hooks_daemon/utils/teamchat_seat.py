@@ -440,26 +440,38 @@ def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return document
 
 
-def parse_whoami(text: str) -> SeatContext:
-    """Parse ``teamchat whoami --json`` output (exit 0). Never raises.
+def decode_json_document(text: str) -> object | ProbeReason:
+    """Strictly decode one teamchat CLI JSON answer, or say why not. Never raises.
 
-    Oversized output, a document nested past :data:`MAX_JSON_DEPTH` and any
-    decoder failure (including ``RecursionError``) all read as unknown.
+    Oversized output, a document nested past :data:`MAX_JSON_DEPTH`, a
+    repeated key and any decoder failure (including ``RecursionError``) are
+    each a reason, never a partial document.
     """
     if len(text) > MAX_OUTPUT_BYTES:
-        return SeatContext.unresolved(ProbeReason.OUTPUT_TOO_LARGE)
+        return ProbeReason.OUTPUT_TOO_LARGE
     if _nesting_exceeds(text, MAX_JSON_DEPTH):
-        return SeatContext.unresolved(ProbeReason.NOT_JSON)
+        return ProbeReason.NOT_JSON
     try:
         document: object = json.loads(text, object_pairs_hook=_unique_keys)
     except _DuplicateKeyError:
-        # json keeps the LAST duplicate silently, so a repeated key could turn a
-        # seat into "no team"; a document that says two things is unknown.
-        return SeatContext.unresolved(ProbeReason.SHAPE_MISMATCH)
+        # json keeps the LAST duplicate silently, so a repeated key could change
+        # the answer; a document that says two things is no answer.
+        return ProbeReason.SHAPE_MISMATCH
     except (ValueError, RecursionError, MemoryError) as exc:
         # json.JSONDecodeError is a ValueError; the text itself is not logged.
-        _LOGGER.debug("teamchat seat probe: output not decodable (%s)", type(exc).__name__)
-        return SeatContext.unresolved(ProbeReason.NOT_JSON)
+        _LOGGER.debug("teamchat CLI: output not decodable (%s)", type(exc).__name__)
+        return ProbeReason.NOT_JSON
+    return document
+
+
+def parse_whoami(text: str) -> SeatContext:
+    """Parse ``teamchat whoami --json`` output (exit 0). Never raises.
+
+    Anything :func:`decode_json_document` refuses reads as unknown.
+    """
+    document = decode_json_document(text)
+    if isinstance(document, ProbeReason):
+        return SeatContext.unresolved(document)
     rows = _rows(document)
     if isinstance(rows, ProbeReason):
         return SeatContext.unresolved(rows)
@@ -616,9 +628,14 @@ def default_command_runner(
 # --- probe -----------------------------------------------------------------------
 
 
+def kit_argv(kit: str, args: Sequence[str]) -> tuple[str, ...]:
+    """The argv for a teamchat verb: the kit's own binary, never a bare name from PATH."""
+    return (f"{kit.rstrip('/')}/bin/teamchat", *args)
+
+
 def whoami_argv(kit: str) -> tuple[str, ...]:
-    """The argv for ``whoami``: the kit's own binary, never a bare name from PATH."""
-    return (f"{kit.rstrip('/')}/bin/teamchat", *WHOAMI_ARGS)
+    """The argv for ``whoami``."""
+    return kit_argv(kit, WHOAMI_ARGS)
 
 
 def _from_outcome(outcome: CommandOutcome) -> SeatContext:
@@ -650,12 +667,30 @@ def _is_plain_absolute(path: str) -> bool:
     return os.path.normpath(trimmed) == trimmed
 
 
-def _probe(signals: SessionSignals, runner: CommandRunner, timeout: float) -> SeatContext:
+def run_kit_command(
+    signals: SessionSignals,
+    args: Sequence[str],
+    *,
+    runner: CommandRunner,
+    timeout: float,
+) -> CommandOutcome | ProbeReason:
+    """Run ``$TEAMCHAT_KIT/bin/teamchat <args>`` for the session ``signals`` describe.
+
+    The only environment the command gets from the session is its
+    ``TEAMCHAT_RUNTIME``. A missing kit, or a runtime or kit that is not a
+    plain absolute path, runs nothing and answers the reason. Never raises.
+    """
     if not signals.kit:
-        return SeatContext.unresolved(ProbeReason.KIT_MISSING)
+        return ProbeReason.KIT_MISSING
     if not (_is_plain_absolute(signals.runtime) and _is_plain_absolute(signals.kit)):
-        return SeatContext.unresolved(ProbeReason.SIGNAL_NOT_A_PATH)
-    outcome = runner(whoami_argv(signals.kit), {RUNTIME_ENV_VAR: signals.runtime}, timeout)
+        return ProbeReason.SIGNAL_NOT_A_PATH
+    return runner(kit_argv(signals.kit, args), {RUNTIME_ENV_VAR: signals.runtime}, timeout)
+
+
+def _probe(signals: SessionSignals, runner: CommandRunner, timeout: float) -> SeatContext:
+    outcome = run_kit_command(signals, WHOAMI_ARGS, runner=runner, timeout=timeout)
+    if isinstance(outcome, ProbeReason):
+        return SeatContext.unresolved(outcome)
     return _from_outcome(outcome)
 
 

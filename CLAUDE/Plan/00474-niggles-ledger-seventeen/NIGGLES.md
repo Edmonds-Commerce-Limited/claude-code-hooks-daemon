@@ -8242,7 +8242,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Source**: fedora-desktop.1 dogfood report (peer account; the refusal itself is unverified here, the code reading below is verified read-only).
 
-**Evidence**: reported: linting a PLAN.md in a linked git worktree is refused unless `--project-root` is given; expected the worktree's own root (`git rev-parse --show-toplevel` from the file's directory). Reading `daemon/cli.py`: the plan-qa handler (`:10083`; `--lint` branch `:10146-10152`) calls `resolve_tree_root(args)` (`:357`) BEFORE it looks at the lint path. With no `--project-root` that is `get_project_path(None)` (`:273`), which walks up from the process CWD (`:295-322`), never from the lint file's directory, and needs a `.claude` dir plus a passing `_validate_installation`. So the root is the caller's CWD tree: run from the main checkout, a worktree file classifies OUTSIDE (exit 2, `Lint target is not a plan document`); run outside any install, it exits. No `git rev-parse` is on this path. The exact message the reporter saw is unverified.
+**Evidence**: reported: linting a PLAN.md in a linked git worktree is refused unless `--project-root` is given; expected the worktree's own root (`git rev-parse --show-toplevel` from the file's directory). Reading `daemon/cli.py`: the plan-qa handler (`cmd_plan_qa`; its `--lint` branch) calls `resolve_tree_root(args)` (`:357`) BEFORE it looks at the lint path. With no `--project-root` that is `get_project_path(None)` (`:273`), which walks up from the process CWD (`:295-322`), never from the lint file's directory, and needs a `.claude` dir plus a passing `_validate_installation`. So the root is the caller's CWD tree: run from the main checkout, a worktree file classifies OUTSIDE (exit 2, `Lint target is not a plan document`); run outside any install, it exits. No `git rev-parse` is on this path. The exact message the reporter saw is unverified.
 
 **Severity**: Low (workaround: pass `--project-root <worktree>`).
 
@@ -8319,3 +8319,41 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Residual (not fixed here, by design)**: a directory `scandir` really refuses, or an unfinished link scan, still denies every relative word after a computed `cd`, command names included. Exempting command-position words is a wider change (`./x`, `. x`, a PATH holding `.`) and is left for its own review.
 
 **Status**: 🔄 Fixed, pending merge (PR on `fix-n709-secret-guard-bootstrap`; independent security review before merge). `_listed_kind` classifies per entry: a loop is a link that is no directory (as `_link_kind` already says), an entry whose link-ness cannot be told counts as a link to a directory, and a refused `scandir` still counts for every word. Tests: `tests/unit/handlers/pre_tool_use/test_secret_file_guard_link_loop.py` (bootstrap from the Plan 00213 template on both routes, `cd "$D"`/`bash`/`mkdir` allowed; loop-link names, a link beside the loop to a protected dummy, a protected path and an unlistable directory still denied). Original brief: red tests (1) a script holding the standard bootstrap line (and the `cd "$VAR"` and `mkdir` shapes) authors cleanly under `*.secret*`; (2) a script that really names a protected path (`cat ./prod.secret.env`, a quoted path string, a glob that truly expands to a protected file via the index) is still denied; (3) a glob token such as `*.secret*` or a basename-overlap match is judged only against PATH operands (an argument of a path-taking verb, a redirect target, a `source`/`.` operand after expansion), never against arbitrary words, variable names or command names. Then restrict the overlap heuristics to path-operand tokens. See N696, N698.
+
+### N710 — secret-file guard treats a glob as a glob only in the FIRST path part: `cat kit/*/late` and `cat b?n/late` bypass the link check
+
+**Source**: independent Opus review of PR 228 (`subagent-reports/261123-opus-independent-review-pr228.md`, finding 1). The reviewer's claim, UNVERIFIED here. Pre-existing; NOT caused by PR 228.
+
+**Evidence (reviewer's)**: from the project root with no `cd`, `cat kit/*/late` and `cat b?n/late` are allowed, while the literal `cat kit/bin/late` (where `late` links to a protected dummy file) is denied. The guard only handles a glob in the first path part (`secret_file_matching.py`, the `could_be_link` function), so a glob in a later part skips the link/realpath check.
+
+**Severity**: HIGH (security): a protected file's contents can be read through a link by a glob the guard does not expand.
+
+**Status**: ⬜ Open. Needs an Opus fix plus independent review. Test-first fix proposal: red tests (1) a glob in ANY path part is expanded and each match judged by the link/realpath check, or the command fails closed; (2) literal paths behave unchanged; (3) a glob that matches nothing behaves unchanged. Then fix `secret_file_matching.py` to satisfy them.
+
+### N711 — a stand-in that declines with nothing changed commits a journal entry each time (about 47 times, 80 unpushable commits on one seat)
+
+**Source**: lts-infra.1 relay (peer note, authority none; the evidence is theirs and UNVERIFIED here). Seat: dc's hooks-daemon seat, 18-23 Nov, Plan 00616's stand-in.
+
+**Evidence (reported)**: while the seat was awaiting-human on a push-permission block, the stand-in fired about 47 times; each firing committed a "the Nth stand-in declined" journal entry. With hourly pull merges that left about 80 commits that could not be pushed.
+
+**Severity**: Medium (history noise, unbounded growth while blocked).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a stand-in whose ruling is "declined, nothing changed since the last decline" writes no journal entry (or one entry at most, then none until state changes) and backs off its own cadence; green by comparing against the last recorded decline.
+
+### N712 — a seat blocked on a push it cannot make says so only on its own screen
+
+**Source**: same relay as N711 (UNVERIFIED here).
+
+**Evidence (reported)**: the push-permission block on that seat for five days was visible only in the seat's own session, not on the bus or in the questions room.
+
+**Severity**: Medium (a blocked seat is invisible to the people who could unblock it).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Fix shape: when a push is denied by permission and the seat is awaiting-human, post one short bus report (through the coordinator, per the team's rules) naming the branch and the block, once per distinct block, not once per tick. Related to the Plan 00636 owner-wait Stop guard (owner notification on the bus).
+
+### N713 — acceptance probe `test_every_executable_probe_matches_its_expected_decision_and_reason` is INCONCLUSIVE when the Kotlin linter hits its 15 s wall-clock budget on a loaded CI runner
+
+**Source**: PR 228 CI, run 45216027109, py3.11 acceptance leg, failed twice on the same probe (`subagent-reports/261123-ci-fail-228-acceptance.md`); earlier PRs hit the same timeout. The PR changes nothing on the lint path.
+
+**Severity**: Medium (blocks merges until a re-run lands; costs a diagnosis each time).
+
+**Status**: ⬜ Open. Test-first: a probe whose only obstacle is a linter time-out should either use a budget scaled to the runner or be reported as skipped-with-reason rather than failing the leg; keep a probe that genuinely mis-decides failing.

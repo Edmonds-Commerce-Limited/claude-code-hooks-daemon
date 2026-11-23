@@ -197,7 +197,7 @@ the daemon's `constants/priority.py`, the source of truth):
   terminal Stop catch-all (`cron_stop_enforcer`, `cron_subagent_stop_enforcer`,
   `teammate_reap_advisor`) — a Stop handler placed after that catch-all never
   fires on an ordinary stop
-- **10-20**: Safety handlers (destructive operations)
+- **10-21**: Safety handlers (destructive operations)
 - **25-35**: Code quality (linting, QA suppression)
 - **36-55**: Workflow (planning, project-specific rules)
 - **56-73**: Advisory (non-blocking guidance)

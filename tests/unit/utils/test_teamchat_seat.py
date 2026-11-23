@@ -853,3 +853,59 @@ class TestInvariants:
         source = Path(teamchat_seat.__file__).read_text(encoding="utf-8").lower()
         assert "pingbus" not in source
         assert "teamchat_membership" not in source
+
+
+# --- shared seams (Plan 00634 reuses these for ``verify``) ------------------------
+
+
+class TestDecodeJsonDocument:
+    def test_decodes_an_object(self) -> None:
+        assert teamchat_seat.decode_json_document('{"a": 1}') == {"a": 1}
+
+    def test_duplicate_key_is_a_shape_mismatch(self) -> None:
+        assert teamchat_seat.decode_json_document('{"a": 1, "a": 2}') is (
+            ProbeReason.SHAPE_MISMATCH
+        )
+
+    def test_not_json(self) -> None:
+        assert teamchat_seat.decode_json_document("nope") is ProbeReason.NOT_JSON
+
+    def test_too_deep(self) -> None:
+        text = "[" * (teamchat_seat.MAX_JSON_DEPTH + 1) + "]" * (teamchat_seat.MAX_JSON_DEPTH + 1)
+        assert teamchat_seat.decode_json_document(text) is ProbeReason.NOT_JSON
+
+    def test_too_large(self) -> None:
+        text = " " * (teamchat_seat.MAX_OUTPUT_BYTES + 1)
+        assert teamchat_seat.decode_json_document(text) is ProbeReason.OUTPUT_TOO_LARGE
+
+
+class TestRunKitCommand:
+    def test_runs_the_kit_binary_with_only_the_runtime_overlay(self) -> None:
+        runner = ok("{}")
+        outcome = teamchat_seat.run_kit_command(
+            SIGNALS, ("verify", "x"), runner=runner, timeout=1.0
+        )
+        assert isinstance(outcome, CommandOutcome)
+        assert runner.calls == [
+            ((f"{KIT}/bin/teamchat", "verify", "x"), {RUNTIME_ENV_VAR: RUNTIME}, 1.0)
+        ]
+
+    def test_kit_missing_runs_nothing(self) -> None:
+        runner = ok("{}")
+        signals = SessionSignals(runtime=RUNTIME, kit="")
+        outcome = teamchat_seat.run_kit_command(signals, ("verify",), runner=runner, timeout=1.0)
+        assert outcome is ProbeReason.KIT_MISSING
+        assert runner.calls == []
+
+    @pytest.mark.parametrize(
+        "signals",
+        [
+            SessionSignals(runtime="relative/run", kit=KIT),
+            SessionSignals(runtime=RUNTIME, kit="/opt/../kit"),
+        ],
+    )
+    def test_signal_not_a_plain_path_runs_nothing(self, signals: SessionSignals) -> None:
+        runner = ok("{}")
+        outcome = teamchat_seat.run_kit_command(signals, ("verify",), runner=runner, timeout=1.0)
+        assert outcome is ProbeReason.SIGNAL_NOT_A_PATH
+        assert runner.calls == []
