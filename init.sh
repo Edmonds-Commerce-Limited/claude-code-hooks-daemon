@@ -4360,6 +4360,17 @@ if isinstance(hook_input, dict):
             hook_input['hooks_daemon_hostname'] = _v
             break
 
+# Forward the session's teamchat signals (Plan 00631 Task 2.2) for the role
+# probe, which runs the kit's whoami with the session's runtime: the daemon
+# never inherits either. Only a non-empty value is stamped, and a value already
+# on the payload is kept.
+if isinstance(hook_input, dict):
+    for _name, _field in (('TEAMCHAT_RUNTIME', 'teamchat_runtime'),
+                          ('TEAMCHAT_KIT', 'teamchat_kit')):
+        _v = os.environ.get(_name, '').strip()
+        if _v and _field not in hook_input:
+            hook_input[_field] = _v
+
 # Wrap into the daemon request envelope; newline-terminated as the daemon
 # expects. The envelope is one level deeper than the input, so input that
 # only just parsed can still be too deep to encode.

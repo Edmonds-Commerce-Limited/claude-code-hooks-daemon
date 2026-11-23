@@ -51,6 +51,7 @@ from enum import StrEnum
 from typing import Final
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,6 +144,21 @@ class SessionSignals:
         return cls(
             runtime=environ.get(RUNTIME_ENV_VAR, "").strip(),
             kit=environ.get(KIT_ENV_VAR, "").strip(),
+        )
+
+    @classmethod
+    def from_hook_input(cls, hook_input: object) -> SessionSignals:
+        """Read the signals the transport stamped on a payload; never raises.
+
+        A non-dict payload or a non-string value reads as unset.
+        """
+        if not isinstance(hook_input, dict):
+            return cls()
+        runtime = hook_input.get(HookInputField.TEAMCHAT_RUNTIME)
+        kit = hook_input.get(HookInputField.TEAMCHAT_KIT)
+        return cls(
+            runtime=runtime.strip() if isinstance(runtime, str) else "",
+            kit=kit.strip() if isinstance(kit, str) else "",
         )
 
 

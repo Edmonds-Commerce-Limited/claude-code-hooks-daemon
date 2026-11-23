@@ -56,6 +56,13 @@ class HookInputField:
     # connected process's environment. Absent when the session set neither.
     # Consumed via utils.cron_hosts.effective_hostname (Plan 00470 Task 6.1).
     SESSION_HOSTNAME = "hooks_daemon_hostname"
+    # NOT sent by Claude Code: the session's TEAMCHAT_RUNTIME and TEAMCHAT_KIT,
+    # stamped like SESSION_HOSTNAME (init.sh, or the daemon from the connected
+    # process's environment), never overwriting a value already present. Absent
+    # outside a teamchat session. Consumed via
+    # utils.teamchat_seat.SessionSignals.from_hook_input (Plan 00631 Task 2.2).
+    TEAMCHAT_RUNTIME = "teamchat_runtime"
+    TEAMCHAT_KIT = "teamchat_kit"
     # NOT sent by Claude Code: set by the generated status-line forwarder's fast
     # path (issue #131) to ask the Status per-event socket for the bare status
     # text instead of the JSON response. The daemon pops it before dispatch.

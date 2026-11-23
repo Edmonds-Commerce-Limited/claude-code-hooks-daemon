@@ -35,6 +35,22 @@ entries:
       read by utils/cron_hosts.effective_hostname to match persistent_crons
       hosts:. No vendored input_example can document a field the daemon adds.
     link: "CLAUDE/Plan/00470-persistent-session-optimisation/PLAN.md"
+  - id: "unknown-input-field:(shared):teamchat_runtime"
+    reason: >-
+      Not sent by Claude Code: the daemon's own transport stamps it. init.sh
+      writes the session's TEAMCHAT_RUNTIME onto the payload, and on the relay
+      the daemon reads it from the connected hook process's environment
+      (daemon/server.py _stamp_teamchat_signals). It is read by
+      utils/teamchat_seat.SessionSignals.from_hook_input for the teamchat role
+      probe. No vendored input_example can document a field the daemon adds.
+    link: "CLAUDE/Plan/00631-teamchat-role-probe-core/PLAN.md"
+  - id: "unknown-input-field:(shared):teamchat_kit"
+    reason: >-
+      Not sent by Claude Code: stamped beside teamchat_runtime, from the
+      session's TEAMCHAT_KIT, by the same two routes. It names the kit whose
+      bin/teamchat the role probe runs (utils/teamchat_seat). No vendored
+      input_example can document a field the daemon adds.
+    link: "CLAUDE/Plan/00631-teamchat-role-probe-core/PLAN.md"
   - id: "unknown-input-field:(shared):hooks_daemon_peer_pid"
     reason: >-
       Not sent by Claude Code: the daemon stamps the pid of the connected hook

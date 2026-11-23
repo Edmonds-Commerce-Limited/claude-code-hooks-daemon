@@ -143,6 +143,9 @@ def _run_wrapper(
     # assertions below.
     env.pop("HOOKS_DAEMON_HOSTNAME", None)
     env.pop("CCY_HOST_HOSTNAME", None)
+    # Likewise the teamchat signals (Plan 00631 Task 2.2), set in a teamed session.
+    env.pop("TEAMCHAT_RUNTIME", None)
+    env.pop("TEAMCHAT_KIT", None)
     env.update(extra_env or {})
     # ESTABLISH THE PREMISE the wrapper needs, rather than inheriting it.
     #
@@ -359,6 +362,53 @@ def test_session_hostname_override_is_forwarded(
     sent = json.loads(server.received)["hook_input"]
     assert sent["hooks_daemon_hostname"] == expected
     assert {k: v for k, v in sent.items() if k != "hooks_daemon_hostname"} == hook_input
+
+
+_TEAMCHAT_FIELDS = ("teamchat_runtime", "teamchat_kit")
+
+
+@pytest.mark.parametrize(
+    "env_vars,payload_extra,expected",
+    [
+        (
+            {"TEAMCHAT_RUNTIME": "/run/tc/a", "TEAMCHAT_KIT": "/opt/kit"},
+            {},
+            {"teamchat_runtime": "/run/tc/a", "teamchat_kit": "/opt/kit"},
+        ),
+        ({"TEAMCHAT_RUNTIME": "/run/tc/a"}, {}, {"teamchat_runtime": "/run/tc/a"}),
+        ({"TEAMCHAT_RUNTIME": "  ", "TEAMCHAT_KIT": ""}, {}, {}),
+        (
+            {"TEAMCHAT_RUNTIME": "/run/tc/a", "TEAMCHAT_KIT": "/opt/kit"},
+            {"teamchat_runtime": "/already/there"},
+            {"teamchat_runtime": "/already/there", "teamchat_kit": "/opt/kit"},
+        ),
+    ],
+    ids=["both", "runtime-only", "blank-stamps-nothing", "existing-value-kept"],
+)
+def test_teamchat_signals_are_forwarded(
+    env_vars: dict[str, str],
+    payload_extra: dict[str, str],
+    expected: dict[str, str],
+    sock_path: Path,
+    live_pid_file: Path,
+) -> None:
+    """Plan 00631 Task 2.2: the daemon never inherits the session's teamchat
+    environment, so the forwarder stamps it; a value already present is kept."""
+    server = _RecordingSocketServer(sock_path, b"{}\n")
+    server.start()
+    hook_input = {"hook_event_name": "Stop", **_MAIN_PROBE, **payload_extra}
+
+    result = _run_wrapper(
+        "stop", json.dumps(hook_input).encode(), sock_path, live_pid_file, extra_env=env_vars
+    )
+    server.join()
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert server.received is not None
+    sent = json.loads(server.received)["hook_input"]
+    assert {k: sent[k] for k in _TEAMCHAT_FIELDS if k in sent} == expected
+    rest = {k: v for k, v in sent.items() if k not in _TEAMCHAT_FIELDS}
+    assert rest == {k: v for k, v in hook_input.items() if k not in _TEAMCHAT_FIELDS}
 
 
 # ---------------------------------------------------------------------------

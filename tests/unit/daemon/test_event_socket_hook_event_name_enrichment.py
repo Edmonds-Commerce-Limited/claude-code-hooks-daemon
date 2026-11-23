@@ -75,6 +75,11 @@ def _no_session_hostname_override(monkeypatch: pytest.MonkeyPatch) -> None:
         "claude_code_hooks_daemon.daemon.server.hostname_override_of_process",
         lambda pid: PeerHostname(),
     )
+    # Same for the teamchat signals (Plan 00631 Task 2.2) in a teamed session.
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.daemon.server.process_environ",
+        lambda pid: ({}, None),
+    )
 
 
 @pytest.fixture

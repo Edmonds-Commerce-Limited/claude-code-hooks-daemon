@@ -121,6 +121,34 @@ class TestAbsent:
         environ = {RUNTIME_ENV_VAR: f" {RUNTIME} ", KIT_ENV_VAR: KIT, "OTHER": "x"}
         assert SessionSignals.from_environ(environ) == SIGNALS
 
+    def test_signals_from_hook_input(self) -> None:
+        """The daemon reads the SESSION's signals from the stamped payload fields."""
+        payload = {
+            "hook_event_name": "Stop",
+            "teamchat_runtime": f" {RUNTIME} ",
+            "teamchat_kit": KIT,
+        }
+        assert SessionSignals.from_hook_input(payload) == SIGNALS
+        assert SessionSignals.from_hook_input({"hook_event_name": "Stop"}) == SessionSignals()
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            None,
+            ["teamchat_runtime"],
+            "teamchat_runtime",
+            {"teamchat_runtime": 7, "teamchat_kit": KIT},
+            {"teamchat_runtime": RUNTIME, "teamchat_kit": ["x"]},
+        ],
+    )
+    def test_signals_from_a_malformed_payload_never_raise(self, payload: Any) -> None:
+        signals = SessionSignals.from_hook_input(payload)
+        assert isinstance(signals, SessionSignals)
+        if isinstance(payload, dict) and isinstance(payload.get("teamchat_runtime"), str):
+            assert signals == SessionSignals(runtime=RUNTIME)
+        else:
+            assert signals.runtime == ""
+
     def test_v2_only_ignores_pingbus_off(self) -> None:
         """A v2 launch sets PINGBUS_MEMBERSHIP=off; the answer comes from whoami alone."""
         environ = {"PINGBUS_MEMBERSHIP": "off", RUNTIME_ENV_VAR: RUNTIME, KIT_ENV_VAR: KIT}
