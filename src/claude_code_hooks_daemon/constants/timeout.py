@@ -169,6 +169,10 @@ class Timeout:
     # Short on purpose: a lookup that cannot answer in this time degrades to an
     # advisory, never a denial, so waiting longer buys nothing.
     GH_LOOKUP = 8
+    # Plan 00631: one `teamchat whoami --json` call. It can sit on a hook's hot
+    # path, and a probe that cannot answer in time degrades to "role unknown"
+    # (guards stay armed), so a longer wait buys nothing.
+    TEAMCHAT_WHOAMI = 2
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
     GIT_FETCH_BACKGROUND = 30  # 30 seconds (background git fetch in status line)

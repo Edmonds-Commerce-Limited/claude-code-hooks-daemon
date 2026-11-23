@@ -1,6 +1,6 @@
 # Plan 00631: teamchat role probe core
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: High
@@ -23,8 +23,10 @@ hard-coded pair. A role with no behaviour attached means no change.
 
 ## Goals
 
-- `SeatContext` with `role_in(team)` and `seat_kind_in(team)`; no session-wide
-  role exists in the API.
+- `SeatContext` with `role_for_team(team)` (the coordinator's name for the
+  design's `role_in`), answering a typed `TeamRoleAnswer` that carries the
+  declared `duty`; no session-wide role exists in the API. Whether `duty` is
+  the design's seat kind is open until the merged teamchat JSON is read.
 - Absent, degraded (`unknown`) and role-change behaviour as in DESIGN.md
   sections 4 and 11, with a short-TTL cache.
 - The session's teamchat membership reaches the daemon through the payload
@@ -41,16 +43,21 @@ hard-coded pair. A role with no behaviour attached means no change.
 
 ### Phase 1: Shape and RED fixtures
 
-- [ ] ⬜ **Task 1.1**: Record the teamchat state shape and declared-role set
+- [ ] 🔄 **Task 1.1**: Record the teamchat state shape and declared-role set
   (umbrella Phase 0 input from fedora-desktop Plan 00209) in the umbrella
-  DESIGN.md; settle Q1 (source A or C).
-- [ ] ⬜ **Task 1.2**: RED. Absent fixture first, then degradation, role,
-  multi-team (coordinator in one, worker in another), seat-kind, unknown-role,
-  role-change and sub-agent fixtures.
+  DESIGN.md; settle Q1 (source A or C). Coded against an ASSUMED shape
+  (option C, `teamchat whoami --json` = `{"v": 1, "seats": [{team, handle, role, duty}]}`, from the coordinator's summary); fixtures in
+  `tests/support/teamchat.py` say so. Reconcile with the merged JSON.
+- [x] ✅ **Task 1.2**: RED. Absent fixture first, then degradation, role,
+  multi-team, unknown-role and role-change fixtures
+  (`tests/unit/utils/test_teamchat_seat.py`). Seat-kind and sub-agent fixtures
+  move to Task 2.2 and Phase 3 (they need the payload and the gate).
 
 ### Phase 2: Resolver and payload stamp
 
-- [ ] ⬜ **Task 2.1**: GREEN. `SeatContext` and the single teamchat module.
+- [x] ✅ **Task 2.1**: GREEN. `SeatContext` and the single teamchat module
+  (`src/claude_code_hooks_daemon/utils/teamchat_seat.py`), with a TTL
+  `SeatContextResolver`.
 - [ ] ⬜ **Task 2.2**: Stamp the teamchat membership variable onto the payload
   (init.sh and server.py), never overwriting an existing value.
 - [ ] ⬜ **Task 2.3**: Diagnostic CLI printing the resolved context or "absent"
