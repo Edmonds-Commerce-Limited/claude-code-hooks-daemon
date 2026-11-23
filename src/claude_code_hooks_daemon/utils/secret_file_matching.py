@@ -31,6 +31,7 @@ import itertools
 import logging
 import os
 import re
+import stat
 import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -3494,7 +3495,10 @@ def _token_mention_judged(
     # shape any genuine alias uses, and skipping the `os.stat` syscall for
     # it is the single biggest per-token cost this scan pays at volume (a
     # 1 MB command built of ordinary glob-shaped tokens did one real
-    # syscall per token for no security benefit).
+    # syscall per token for no security benefit). A glob-shaped token is
+    # instead EXPANDED below, and each match that passes through a link is
+    # judged (Ledger 00474 N710): realpath-ing its spelling met "no such
+    # file" and judged a glob in a later part as no link at all.
     if not _is_glob_shaped(token):
         if realpath_cache is not None and token in realpath_cache:
             reals = realpath_cache[token]
@@ -3512,6 +3516,20 @@ def _token_mention_judged(
                     found = _link_mention(form, effective_cwds, patterns, project_root)
                     if found is not None:
                         return found
+        if context == "bash" and not is_quoted_literal():
+            # Ledger 00474 N710: a glob in ANY part is expanded and each match
+            # judged like the literal word naming it; one that cannot be
+            # expanded in full raises, and is denied. A quoted glob is a
+            # literal, already judged by its spelling.
+            found = _glob_link_mention(
+                token,
+                effective_cwds,
+                patterns,
+                project_root,
+                default_semantics=default_globs(),
+            )
+            if found is not None:
+                return found
         return _overflow_mention(token, effective_cwds, patterns)
     return None
 
@@ -3595,6 +3613,11 @@ def find_protected_mention_strict(
                 if match is not None:
                     return match
         matched = _link_mention(token, bases, patterns, project_root)
+        if matched is None and globbed:
+            # Ledger 00474 N710: a glob in any part reaches what each match reaches.
+            matched = _glob_link_mention(
+                token, bases, patterns, project_root, default_semantics=default_globs()
+            )
         if matched is not None:
             return matched
     return None
@@ -3916,6 +3939,10 @@ LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
 INDEXED_DIRECTORY_LINK_CAP: Final[int] = 512
 #: Past LINK_SCAN_DIRECTORY_CAP, at most this many link paths are judged by name.
 INDEXED_LINK_CAP: Final[int] = 65_536
+#: Ledger 00474 N710: the most directories one globbed word's expansion lists or probes.
+GLOB_WORD_LISTING_CAP: Final[int] = 512
+#: Ledger 00474 N710: the most matches of one globbed word that pass through a link.
+GLOB_WORD_MATCH_CAP: Final[int] = 4096
 _GIT_DIRECTORY: Final[str] = ".git"
 _PARENT: Final[str] = ".."
 #: A component holding one of these is matched as any name (extglob, brace, escape).
@@ -4153,6 +4180,233 @@ def expand_directory_glob(base: str, pattern: str) -> Bounded[list[str]]:
     return finished(current)
 
 
+#: Why :func:`expand_word_glob` stopped.
+_WORD_GLOB_TOO_WIDE: Final[str] = "a globbed word matches more than the guard follows"
+_WORD_GLOB_UNREADABLE: Final[str] = (
+    "a globbed word passes a directory or an entry that cannot be read"
+)
+#: What a stat or listing may answer for a path that is simply not there.
+_ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR})
+_GLOBSTAR: Final[str] = "**"
+
+
+class _WordGlobStopped(Exception):
+    """:func:`expand_word_glob` cannot finish; the message says why."""
+
+
+@dataclass(frozen=True)
+class _Reached:
+    """A path a globbed word reaches so far, and whether a link lies on it."""
+
+    path: str
+    via_link: bool
+
+
+@dataclass
+class _WordGlobWalk:
+    """One bounded expansion of a globbed word (Ledger 00474 N710)."""
+
+    default_semantics: bool
+    listed: int = 0
+    linked_matches: int = 0
+
+    def charge(self, count: int = 1) -> None:
+        """Count ``count`` more listings or probes; stop past the cap."""
+        self.listed += count
+        if self.listed > GLOB_WORD_LISTING_CAP:
+            raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+
+    def count_match(self, reached: _Reached) -> None:
+        """Count a match on a link; plain matches resolve to their spelling and cost nothing."""
+        if reached.via_link:
+            self.linked_matches += 1
+            if self.linked_matches > GLOB_WORD_MATCH_CAP:
+                raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+
+    def step(self, reached: _Reached, component: str, last: bool) -> list[_Reached]:
+        """What ``component`` matches under ``reached``: every entry when ``last``, else directories."""
+        if component == _GLOBSTAR and not self.default_semantics:
+            return self._globstar(reached, last)
+        if not any(char in _GLOB_CHARACTERS for char in component):
+            return self._literal(reached, component, last)
+        pattern = _fnmatch_component(component)
+        hidden = component.startswith(".") or not self.default_semantics
+        return [
+            found
+            for name, is_link, entry in self._entries(reached.path)
+            if (hidden or not name.startswith(".")) and fnmatch.fnmatchcase(name, pattern)
+            for found in self._keep(reached, name, is_link, entry, last)
+        ]
+
+    def _literal(self, reached: _Reached, component: str, last: bool) -> list[_Reached]:
+        """``component`` spelled out: one probe, physical ``..`` kept as written."""
+        self.charge()
+        joined = f"{reached.path.rstrip('/')}/{component}"
+        try:
+            is_link = stat.S_ISLNK(os.lstat(joined).st_mode) and component != _PARENT
+            if not last and not stat.S_ISDIR(Path(joined).stat().st_mode):
+                return []
+        except OSError as exc:
+            if exc.errno in _ABSENT_ERRNOS or exc.errno == errno.ELOOP:
+                return []
+            raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
+        return [_Reached(joined, reached.via_link or is_link)]
+
+    def _entries(self, directory: str) -> list[tuple[str, bool, os.DirEntry[str]]]:
+        """``(name, is a link, entry)`` for each entry of ``directory``; none when it is not there."""
+        self.charge()
+        try:
+            with os.scandir(directory) as listing:
+                return [(entry.name, entry.is_symlink(), entry) for entry in listing]
+        except OSError as exc:
+            if exc.errno in _ABSENT_ERRNOS:
+                return []
+            raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
+
+    def _keep(
+        self, reached: _Reached, name: str, is_link: bool, entry: os.DirEntry[str], last: bool
+    ) -> list[_Reached]:
+        """The match ``entry`` makes: any entry when ``last``, else only a directory."""
+        found = _Reached(f"{reached.path.rstrip('/')}/{name}", reached.via_link or is_link)
+        if not last and not _leads_to_directory(entry):
+            return []
+        return [found]
+
+    def _globstar(self, reached: _Reached, last: bool) -> list[_Reached]:
+        """``**`` with globstar on: ``reached`` and everything below it, never through a link."""
+        found = [reached]
+        pending = [reached]
+        while pending:
+            directory = pending.pop()
+            for name, is_link, entry in self._entries(directory.path):
+                if name.startswith(".") and self.default_semantics:
+                    continue
+                child = _Reached(
+                    f"{directory.path.rstrip('/')}/{name}", directory.via_link or is_link
+                )
+                is_directory = _leads_to_directory(entry)
+                if last or is_directory:
+                    found.append(child)
+                if is_directory and not is_link:
+                    pending.append(child)
+            if len(found) > GLOB_WORD_LISTING_CAP:
+                raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+        return found
+
+
+def _leads_to_directory(entry: os.DirEntry[str]) -> bool:
+    """Does ``entry`` lead to a directory (through a link too); a loop does not."""
+    try:
+        return entry.is_dir()
+    except OSError as exc:
+        if exc.errno == errno.ELOOP or exc.errno in _ABSENT_ERRNOS:
+            return False
+        raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
+
+
+def _fnmatch_component(component: str) -> str:
+    """``component`` as :func:`fnmatch.fnmatchcase` reads it, matching at least what bash would.
+
+    Bash negates a bracket with ``^`` as well as ``!``; a backslash escape is
+    dropped, which can only widen the match (``\\*`` then matches more than ``*``).
+    """
+    return component.replace("[^", "[!").replace("\\", "")
+
+
+def _component_spells(spelling: str, name: str) -> bool:
+    """Could word component ``spelling`` (a glob or not) name the entry ``name``?"""
+    if not any(char in _GLOB_CHARACTERS for char in spelling):
+        return spelling == name
+    return fnmatch.fnmatchcase(name, _fnmatch_component(spelling))
+
+
+def expand_word_glob(
+    base: str, pattern: str, *, default_semantics: bool = False
+) -> Bounded[list[str]]:
+    """Each path globbed word ``pattern`` matches from ``base`` that passes through a link.
+
+    Ledger 00474 N710: a glob in ANY part of a word is expanded, not only its
+    first, so a link it reaches is judged like the literal word reaching it.
+    A match on no link (and from a ``base`` reached through none) resolves to
+    its own spelling, which the spelling checks already judged, so it is
+    neither returned nor counted against :data:`GLOB_WORD_MATCH_CAP`.
+
+    ``default_semantics`` is bash's default globbing (no ``dotglob``, no
+    ``globstar``); anything else is read as the wider of the two, so a dot name
+    matches a wildcard and ``**`` descends. At most
+    :data:`GLOB_WORD_LISTING_CAP` directories are listed or probed. An
+    expansion that cannot finish (past a cap, a directory that cannot be
+    listed, an entry that cannot be classified) is a stopped walk, never "no
+    match": callers fail closed on it.
+    """
+    absolute = pattern.startswith("/")
+    start = "/" if absolute else base
+    linked_base = not absolute and os.path.realpath(start) != os.path.normpath(start)
+    walk = _WordGlobWalk(default_semantics=default_semantics)
+    current = [_Reached(start, linked_base)]
+    components = [part for part in pattern.split("/") if part not in ("", ".")]
+    try:
+        for depth, component in enumerate(components):
+            last = depth == len(components) - 1
+            following: list[_Reached] = []
+            for reached in current:
+                following.extend(walk.step(reached, component, last))
+                if not last and len(following) > GLOB_WORD_LISTING_CAP:
+                    raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+            current = following
+            if not current:
+                return finished([])
+        for reached in current:
+            walk.count_match(reached)
+    except _WordGlobStopped as stop:
+        log_and_continue(
+            logger,
+            stop,
+            reason="a globbed word whose expansion cannot finish is judged as reaching a link (fail closed)",
+            level=logging.DEBUG,
+        )
+        return stopped([], str(stop))
+    return finished([reached.path for reached in current if reached.via_link])
+
+
+def _glob_bases(form: str, cwds: tuple[str, ...]) -> list[str]:
+    """Where relative globbed ``form`` is expanded from: the cwds a link can be met in."""
+    if form.startswith("/"):
+        return ["/"]
+    bases: list[str] = list(cwds)
+    if isinstance(cwds, CwdSet):
+        bases = [*cwds.link_dirs, *cwds.bases_above_scanned(form)]
+    if not bases:
+        bases = [str(Path.cwd())]
+    return list(dict.fromkeys(base for base in bases if base))
+
+
+def _glob_link_mention(
+    token: str,
+    cwds: tuple[str, ...],
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    *,
+    default_semantics: bool,
+) -> str | None:
+    """The protected glob a match of globbed ``token`` reaches through a link (N710).
+
+    Each match is judged by :func:`_link_mention`, exactly as the literal word
+    naming it would be. An expansion that cannot finish raises
+    :class:`IncompleteScanError`, which the guard denies.
+    """
+    for form in _normalised_token_forms(token):
+        if not _is_glob_shaped(form) or "\0" in form or form.startswith("~"):
+            continue
+        for base in _glob_bases(form, cwds):
+            expanded = expand_word_glob(base, form, default_semantics=default_semantics)
+            for match in expanded.required():
+                found = _link_mention(match, cwds, patterns, project_root)
+                if found is not None:
+                    return found
+    return None
+
+
 #: Why :func:`scan_project_links` stopped.
 _SCAN_PAST_CAP: Final[str] = "the project link scan stopped at its directory cap"
 _SCAN_UNCLASSIFIED: Final[str] = "the project link scan met a link whose target cannot be told"
@@ -4388,11 +4642,27 @@ class CwdSet(tuple[str, ...]):
         """Each base from which ``spelled``'s first ``deepest`` components reach a scanned directory."""
         bases: list[str] = []
         for depth in range(1, deepest + 1):
-            for directory in self._by_name.get(spelled[depth - 1], ()):
+            # Ledger 00474 N710: a globbed component spells every scanned name it matches.
+            for directory in self._scanned_named(spelled[depth - 1]):
                 parts = directory.split("/")
-                if parts[-depth:] == spelled[:depth]:
+                if len(parts) > depth and all(
+                    _component_spells(spelling, name)
+                    for spelling, name in zip(spelled[:depth], parts[-depth:], strict=True)
+                ):
                     bases.append("/".join(parts[:-depth]) or "/")
         return list(dict.fromkeys(bases))
+
+    def _scanned_named(self, spelling: str) -> list[str]:
+        """The scanned directories whose own name ``spelling`` spells."""
+        if not any(char in _GLOB_CHARACTERS for char in spelling):
+            return self._by_name.get(spelling, [])
+        pattern = _fnmatch_component(spelling)
+        return [
+            directory
+            for name, directories in self._by_name.items()
+            if fnmatch.fnmatchcase(name, pattern)
+            for directory in directories
+        ]
 
     def collapsed_above_scanned(self, token: str) -> list[str]:
         """Where a ``token`` holding ``..`` lands past a scanned directory, read after a computed move.
@@ -4440,7 +4710,8 @@ class CwdSet(tuple[str, ...]):
 
         One listing per directory, not one call per word per directory. A first
         component that is ``..``, a link, or a glob matching a link counts; so does
-        a deeper path whose real location differs from its spelling. A directory
+        a deeper path whose real location differs from its spelling, a glob in a
+        later part being expanded (:func:`expand_word_glob`). A directory
         that cannot be listed counts for every word. Past the scan cap, a word
         that :meth:`LinkNames.reaches` a link counts too.
         """
@@ -4453,6 +4724,8 @@ class CwdSet(tuple[str, ...]):
         if first == "..":
             return True
         globbed = any(char in _GLOB_CHARACTERS for char in first)
+        # Ledger 00474 N710: a glob past the first part is expanded, never realpath-ed as text.
+        later_globbed = any(char in _GLOB_CHARACTERS for part in components[1:] for char in part)
         for directory in self._existing:
             listing = self._listing(directory)
             if listing is None:
@@ -4465,7 +4738,13 @@ class CwdSet(tuple[str, ...]):
                 if is_link:
                     return True
                 if is_dir and len(components) > 1:
-                    if globbed or _realpath_if_resolvable(f"{directory}/{token}") is not None:
+                    if globbed:
+                        return True
+                    if later_globbed:
+                        expanded = expand_word_glob(directory, "/".join(components))
+                        if not expanded.complete or expanded.value:
+                            return True
+                    elif _realpath_if_resolvable(f"{directory}/{token}") is not None:
                         return True
         return False
 
