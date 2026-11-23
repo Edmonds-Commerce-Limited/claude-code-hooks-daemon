@@ -10651,6 +10651,39 @@ def _apply_decision(
     return False
 
 
+def _rate_limit_apply_veto(
+    outcome: TickOutcome,
+    *,
+    stdin_pending: bool,
+    child_output_pending: bool,
+    shipped_dump: str,
+) -> str | None:
+    """Plan 00523 review I3/L4: why the host must not type a rate-limit send now, or None.
+
+    Read at APPLY time, after the worker round trip. Any rate-limit send is
+    vetoed while a human byte waits on stdin. An Enter (which confirms the
+    highlighted row, possibly a billing option) is also vetoed while child
+    output waits unread, and unless the dump shipped this tick shows the
+    pointer on ``Stop and wait for limit to reset``. A vetoed send is not
+    retried: the worker already recorded it, so the window fails closed.
+    """
+    if outcome.payload is None or outcome.decision_value not in (
+        Decision.WOULD_RATE_LIMIT_KEY.value,
+        Decision.WOULD_RATE_LIMIT_CONTINUE.value,
+    ):
+        return None
+    if stdin_pending:
+        return "a human key is waiting"
+    if outcome.payload != _RATE_LIMIT_ENTER:
+        return None
+    if child_output_pending:
+        return "the screen may have changed"
+    dialog = recognise_rate_limit_dialog(shipped_dump) if shipped_dump else None
+    if dialog is None or dialog.selected != dialog.target:
+        return "the highlighted row is not verified as the target"
+    return None
+
+
 def _apply_worker_outcome(
     outcome: TickOutcome,
     *,
@@ -10660,6 +10693,7 @@ def _apply_worker_outcome(
     log: DecisionLog | None,
     main_focus_confirmed: bool,
     now_wall: float,
+    apply_veto: Callable[[TickOutcome], str | None] | None = None,
 ) -> bool:
     """Perform a worker-decided outcome on the host and adopt what it decided.
 
@@ -10668,10 +10702,16 @@ def _apply_worker_outcome(
     worker's post-tick state is NOT adopted, nothing is booked and the box
     model is not cleared, so the held send is retried rather than recorded as
     sent -- a held `/compact` would otherwise leave the machine awaiting a
-    compaction that never started.
+    compaction that never started. ``apply_veto`` (Plan 00523) works the same
+    way: a reason from it types nothing and adopts nothing.
     """
     if outcome.payload is not None and not main_focus_confirmed:
         _apply_decision(outcome, master_writer=master_writer, log=log, main_focus_confirmed=False)
+        return False
+    veto = apply_veto(outcome) if apply_veto is not None else None
+    if veto is not None:
+        if log is not None:
+            log.write_noop(f"{_RATE_LIMIT_LOG}: {outcome.decision_value} not typed, {veto}")
         return False
     # Plan 00182: pass the host's authoritative PRE-tick state so a stale
     # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
@@ -12508,7 +12548,11 @@ def supervise(
             and activity.screen.quiet_prompt()
         )
         outcome = None
+        shipped_dump = ""
         if decider is not None:
+            shipped_dump = _rate_limit_screen_dump(
+                activity.screen, output_quiet_seconds=output_quiet_seconds
+            )
             outcome = decider(
                 _with_focus_hold(
                     TickFacts(
@@ -12526,9 +12570,7 @@ def supervise(
                         # Plan 00551: scopes the worker's identity scan.
                         child_pid=pid,
                         true_idle=true_idle,
-                        screen_dump=_rate_limit_screen_dump(
-                            activity.screen, output_quiet_seconds=output_quiet_seconds
-                        ),
+                        screen_dump=shipped_dump,
                     ),
                     focus_hold,
                 )
@@ -12563,6 +12605,15 @@ def supervise(
                 # Read now, not at tick start: the worker was waited on.
                 main_focus_confirmed=activity.focus_confirmed(),
                 now_wall=now_wall,
+                # Plan 00523 review I3: the select loop reads nothing during
+                # the worker round trip, so waiting bytes are new since the
+                # tick's facts were taken.
+                apply_veto=lambda decided: _rate_limit_apply_veto(
+                    decided,
+                    stdin_pending=_fd_readable(resolved_stdin_fd),
+                    child_output_pending=_fd_readable(master_fd),
+                    shipped_dump=shipped_dump,
+                ),
             )
             _handle_plugin_outcome(outcome)
         else:

@@ -1148,3 +1148,70 @@ class TestKeysBeforeTheFirstDump:
             for offset in range(3)
         ]
         assert all(outcome.payload is None for outcome in first)
+
+
+# ── Review I3/L4: the host checks again right before it types ────────────────
+
+
+def _key_outcome(payload: str, decision: str = _KEY) -> Any:
+    return _mod.TickOutcome(
+        decision_value=decision,
+        reason="rate-limit dialog -> test",
+        payload=payload,
+        submit=decision == _CONTINUE,
+        consume_signal_path=None,
+        deferred_log=None,
+        machine_state=None,
+    )
+
+
+class TestApplyVeto:
+    def _veto(self, payload: str, decision: str = _KEY, **kw: Any) -> Any:
+        fields: dict[str, Any] = {
+            "stdin_pending": False,
+            "child_output_pending": False,
+            "shipped_dump": _ON_TARGET,
+        }
+        fields.update(kw)
+        return _mod._rate_limit_apply_veto(_key_outcome(payload, decision), **fields)
+
+    def test_enter_on_a_verified_target_row_goes(self) -> None:
+        assert self._veto("\r") is None
+
+    def test_human_key_waiting_vetoes_every_rate_limit_send(self) -> None:
+        assert self._veto("\r", stdin_pending=True)
+        assert self._veto(_BACKSPACES, stdin_pending=True)
+        assert self._veto("[ccy] continue", _CONTINUE, stdin_pending=True)
+
+    def test_enter_vetoed_when_the_screen_may_have_changed(self) -> None:
+        assert self._veto("\r", child_output_pending=True)
+
+    def test_enter_vetoed_unless_the_dump_shows_the_target_highlighted(self) -> None:
+        assert self._veto("\r", shipped_dump=_dialog(_STANDARD, pointer=2))
+        assert self._veto("\r", shipped_dump="")
+        assert self._veto("\r", shipped_dump=_prompt_screen(""))
+
+    def test_arrows_need_no_dump_check(self) -> None:
+        assert self._veto("\x1b[B", shipped_dump="") is None
+
+    def test_other_families_are_never_vetoed(self) -> None:
+        assert self._veto("/compact", "would-compact", stdin_pending=True) is None
+
+    def test_a_vetoed_outcome_types_nothing_and_is_not_adopted(self) -> None:
+        typed: list[bytes] = []
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        before = machine.export_state()
+        outcome = _key_outcome("\r")
+        injected = _mod._apply_worker_outcome(
+            outcome,
+            machine=machine,
+            line=_mod.HumanInputLine(),
+            master_writer=typed.append,
+            log=None,
+            main_focus_confirmed=True,
+            now_wall=_NOW,
+            apply_veto=lambda _outcome: "a key is waiting",
+        )
+        assert injected is False
+        assert typed == []
+        assert machine.export_state() == before
