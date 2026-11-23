@@ -68,12 +68,15 @@ three. The tool was run on 2026-11-20 (Task 1.1); the design fails open on any b
 ## Success Criteria
 
 - [x] The strategy and the handler are covered by tests and pass targeted QA (`llm_qa.py changed`, 43/43).
+
 - [x] The design was settled before the build (done under the owner's delegation, DESIGN.md).
+
 - [x] The real linter was run once and its behaviour matches what the strategy assumes, or the strategy was changed to
   match (Task 1.1).
+
 - [x] The release-bound consequences are recorded in the pending-release holding area:
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-github-workflows-linted-on-edit-by-actions-qa.md` and a truth-change entry in
-  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.76.0.yaml`.
+  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.77.0.yaml` (staged as v3.76.0, missed by that release and renamed).
 
 - [x] `staged_lint_gate` applies the same exit-code contract, kept as built: the linter runs at commit, a findings exit
   is an advisory in `mode: warn` and a deny in `mode: block`, any other exit is only logged, and the log line names the
