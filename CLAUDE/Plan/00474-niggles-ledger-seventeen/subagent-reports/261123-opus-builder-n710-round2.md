@@ -108,6 +108,27 @@ host):
     `scaled_cpu_seconds(5.0)`.
   - The alias-chain test passed.
 - **Lint and types:** `ruff check`, `black` and `mypy` on the module are clean.
+- **`llm_qa.py changed` on 5db5a4339:** 42/43 passed.
+  - Every static check is green: error_hiding, magic_values, pyright, docs_qa
+    and plan_qa (advisories only), and the rest.
+  - changed_tests: 739 passed, 0 failed.
+  - The one red item is `secret_file_matching.py` classed as unmapped
+    **too-broad**: its own tests are 40+ files, "the suite by another name".
+    That needs `--allow-unmapped`, and the coordinator's full gate covers it.
+    The 4466-test secret-guard run above is the targeted substitute.
+- **CI "Performance sweeps" on 7dd64527d: pass.** 12 passed, including the new
+  2000-word test and the alias-chain test that failed before.
+
+## Round-2 follow-ups (5db5a4339)
+
+- `find_protected_mention_detail` opens a `link_scan_scope`. Callers outside
+  the guard's scope therefore share reads across a command's words too. Those
+  callers are `payload_capture`, `flaggable_content_channel_guard` and
+  `quarantine_artefact_read_guard`. A nested scope reuses the outer one.
+- The unreadable `stat` in `_GlobListings._probe` is logged
+  (`log_and_continue`).
+- The round-1 release note `089-...` now names the new caps instead of "512
+  directories".
 
 ## Not fixed here (pre-existing on main): ledger N716
 
