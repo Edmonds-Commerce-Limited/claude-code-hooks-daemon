@@ -148,6 +148,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "human's, so the agent reports the branch ready and stops rather "
         "than polls -- same shape as plan_close_approval's reason"
     ),
+    "HumanApprovalCheckHandler": (
+        "T1 denies a coordinator seat's uncited push, delete, chmod or merge into "
+        "main under mode: block, and the guidance carries the cite syntax the "
+        "agent must type before the act, which a deny can only teach after it"
+    ),
     "PipBreakSystemHandler": "T1 denies --break-system-packages",
     "PipeBlockerHandler": "T1 denies expensive pipes to head/tail",
     "DocsQaEditHandler": "T1 denies documentation writes that break the docs QA rules",

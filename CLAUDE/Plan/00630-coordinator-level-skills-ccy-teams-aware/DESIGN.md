@@ -499,7 +499,13 @@ anyway, DELIBERATELY", because `-n` and `-i` differ by one character, and names
 filed; reversing that is an owner call, not a defect.
 
 **Q17** (owner, s1): settled for branches, see section 21; the
-regenerable-ignored-glob part is still unruled.
+regenerable-ignored-glob part is covered by the Q66 ruling below.
+
+**Q66 ruling (relayed by the coordinator; confirm the verified HUMAN line before
+building)**: `scratch-sweep --apply` and `worktree-reap --reap` may run without a
+TTY, by an agent, when the daemon's machine proof shows nothing unregenerable is
+lost; the residue is listed and kept, and the typed confirmation stays for it.
+Tracked as Plan 00627 Phase 6B, queued behind Plans 00634 and 00636.
 
 ## 20. Owner directive: the team chat is the only human surface
 

@@ -4589,6 +4589,7 @@ def _build_initialised_controller(
         reference_repos=config.reference_repos,
         branches=config.branches,
         scratch=config.scratch,
+        team_seat=config.team_seat,
         config_fingerprint=config_fingerprint,
         loaded_config=config,
         defer_nonessential_startup=defer_nonessential_startup,

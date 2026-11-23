@@ -8190,6 +8190,8 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Recurrence 2 (2026-11-23)**: fedora-desktop.1 again: the same deny also fires on a word that follows an asterisk, e.g. `*assembled` (a markdown-emphasis or glob-like token), not only on a bare `*`/`**`. Unverified here which route (`has_name_agnostic_glob` or the per-token expansion) a `*word` token takes. Add `echo *assembled` and `*word` generally as red-test cases: such a glob can only match names ending in `word`, so it must be judged against the real index like any other pattern, not treated as name-agnostic.
 
+**See also N709**: the plain word `bash` in the standard plan-script bootstrap is denied under `*.secret*` (blocks authoring plan scripts).
+
 **What is already pinned (read before fixing)**: part of this deny is deliberate. The name-agnostic glob is judged against the protected-file index (`handlers/pre_tool_use/secret_file_guard.py:1668-1672`, `utils/secret_file_matching.py:3519` `has_name_agnostic_glob`; per-token expansion at `:3506-3515` falling to `_overflow_mention` at `:4992`). With NO index, the glob is allowed with an advisory (`_search_reach`, `secret_file_guard.py:1753-1758`). These are pinned: `ls **` is DENIED when no shell snapshot proves `globstar`/`dotglob` off, or a snapshot turns either on (`tests/unit/utils/test_secret_file_matching_default_globs.py:100-132`, the conservative reading), and allowed when a snapshot proves both off and the only protected file is hidden or two levels down (`:65-81`). `cat *` from a clean project cwd is allowed (`tests/unit/handlers/pre_tool_use/test_secret_file_guard_cwd_fail_closed.py:357`). `ls */*`, `ls **/*` are allowed while `cat dir/*`/`ls dir/*` over a directory holding a protected file are denied (`test_secret_file_guard_glob_operands.py:68-88`, N220). So "any glob" is overstated: the deny fires when a protected file is in the glob's real reach, or when the shell options that decide `**`/dot-entry reach cannot be proven. The likely real fault is the second case, a bare `*` or `**` in a cwd with no protected file the glob can match, denied because the options are unknown. That cannot be confirmed until the reporter's exact command and cwd are captured.
 
 **Severity**: Medium (the deny names nothing the agent can fix).
@@ -8240,8 +8242,106 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Source**: fedora-desktop.1 dogfood report (peer account; the refusal itself is unverified here, the code reading below is verified read-only).
 
-**Evidence**: reported: linting a PLAN.md in a linked git worktree is refused unless `--project-root` is given; expected the worktree's own root (`git rev-parse --show-toplevel` from the file's directory). Reading `daemon/cli.py`: the plan-qa handler (`:10083`; `--lint` branch `:10146-10152`) calls `resolve_tree_root(args)` (`:357`) BEFORE it looks at the lint path. With no `--project-root` that is `get_project_path(None)` (`:273`), which walks up from the process CWD (`:295-322`), never from the lint file's directory, and needs a `.claude` dir plus a passing `_validate_installation`. So the root is the caller's CWD tree: run from the main checkout, a worktree file classifies OUTSIDE (exit 2, `Lint target is not a plan document`); run outside any install, it exits. No `git rev-parse` is on this path. The exact message the reporter saw is unverified.
+**Evidence**: reported: linting a PLAN.md in a linked git worktree is refused unless `--project-root` is given; expected the worktree's own root (`git rev-parse --show-toplevel` from the file's directory). Reading `daemon/cli.py`: the plan-qa handler (`cmd_plan_qa`; its `--lint` branch) calls `resolve_tree_root(args)` (`:357`) BEFORE it looks at the lint path. With no `--project-root` that is `get_project_path(None)` (`:273`), which walks up from the process CWD (`:295-322`), never from the lint file's directory, and needs a `.claude` dir plus a passing `_validate_installation`. So the root is the caller's CWD tree: run from the main checkout, a worktree file classifies OUTSIDE (exit 2, `Lint target is not a plan document`); run outside any install, it exits. No `git rev-parse` is on this path. The exact message the reporter saw is unverified.
 
 **Severity**: Low (workaround: pass `--project-root <worktree>`).
 
 **Status**: ⬜ Open. TDD fix, red tests first on the plan-qa CLI: (1) a PLAN.md inside a linked worktree lints with no `--project-root`, whatever the CWD, using the worktree's own root (`git -C <file dir> rev-parse --show-toplevel`); (2) the main checkout behaves as today; (3) a path outside any repository still refuses with the existing error; (4) an explicit `--project-root` still wins. Derive the root from the lint file only when `--lint` is given and no override is set; fall back to the CWD walk when git reports none.
+
+### N704 — `project_containment` denies a relative redirect after `cd` inside a linked worktree (`cd src-go && ... > ../untracked/scratch/x`)
+
+**Source**: fedora-desktop.1 dogfood report (peer account; the denial itself is unverified here, the code reading below is verified read-only).
+
+**Evidence**: reported: a subagent ran a command that did `cd src-go` in a linked worktree and redirected to `../untracked/scratch/x`; it was denied as outside the root though the target is inside the worktree. Workaround: an absolute path. Reading `handlers/pre_tool_use/project_containment.py` on main: the report's premise (cwd-blind resolution) does not match current code. `_named_targets` (`:511-526`) already tracks `cd`/`pushd`: `_steps_after_a_cd` (`:583`, Plan 00587 / N403) reads each step where it runs via `_targets_after_cds` (`:594`), and `_is_outside` (`:912`) never denies a relative path. So an outside verdict needs an ABSOLUTE target, and the root is `ProjectContext.project_root().resolve()` (`_resolved_root`, `:881`). Likeliest causes, unverified: (a) the reporter's daemon predates Plan 00587; (b) the hook `cwd` was relative or missing, so `_steps_after_a_cd` returned `[]` and the whole-command join used the wrong base; (c) `ProjectContext.project_root()` returns the MAIN checkout (or the daemon's install root) rather than the linked worktree, so a correct `<worktree>/untracked/...` joins to a path outside it. (c) fits "denied though inside the worktree" best and is the one to check first. Not reproduced.
+
+**Severity**: Low (workaround: an absolute path).
+
+**Status**: ⬜ Open. Reproduce first from a linked worktree with the current daemon. TDD red tests on the handler: (1) `cd sub && echo > ../x` with the hook cwd at the root is allowed; (2) `cd sub && echo > ../../outside` is denied; (3) a `cd` target that cannot be read or placed fails closed (unresolved, per Plan 00483 A1); (4) no `cd` behaves unchanged; (5) with the hook cwd inside a linked worktree, the worktree root counts as the project root and `cd src-go && echo > ../untracked/scratch/x` is allowed. If (5) is the red one, fix root resolution (`ProjectContext.project_root()` vs the worktree toplevel), not the `cd` tracking.
+
+### N705 — `dangerous_permissions` octal mode pattern has no token-start anchor, so `chmod 644 v1.0.2026` and `chmod 640 report-2026.txt` are denied
+
+**Source**: Plan 00634 delta review of PR #225 (`CLAUDE/Plan/00634-human-approval-check-cited-questions-id/subagent-reports/261123-opus-delta-review-pr225.md`, lines 42-45). Pre-existing on the base commit, not introduced by the PR. Reported by the reviewer, unverified here.
+
+**Evidence**: reported: the octal-mode regex uses `\b`, which matches after `.` or `-`, so a filename ending in a number that reads as a world-writable octal (`2026`) is taken for a mode. One of the reviewer's own probe commands was denied by the live handler for containing that text.
+
+**Severity**: Low (false positive on a rare filename shape; workaround is to rename or quote differently).
+
+**Status**: ⬜ Open. TDD fix, red tests first: `chmod 644 v1.0.2026` and `chmod 640 report-2026.txt` allowed; `chmod 777 f` and `chmod 0777 f` still denied. Anchor the mode to a token start (whitespace before it) and require it to be an argument of `chmod`.
+
+### N706 — `dangerous_permissions` accepts `install` as a path segment of another command's argument
+
+**Source**: Plan 00634 delta review of PR #225 (same report, lines 33-40). Reported, unverified here.
+
+**Evidence**: reported: `dangerous_permissions.py:62` uses `(?:^|[\s/])install\s`, so `ls /usr/share/install -m 2026` is read as an `install -m` call. Contrived (the reviewer rates it not realistic); `chmod 644 a=wx` is the same class (a filename shaped like a mode).
+
+**Severity**: Low.
+
+**Status**: ⬜ Open. Anchor `install` to command position (start of the segment, or a path whose basename is `install` in command position). Red tests: `ls /usr/share/install -m 2026` allowed; `install -m 777 f` and `/usr/bin/install -m 777 f` denied.
+
+### N707 — open detector gaps in the PR #225 permission and merge-to-main detectors
+
+**Source**: Plan 00634 delta review of PR #225 (same report, lines 65-77). Reported, unverified here; reviewer probed each against the PR head.
+
+**Evidence**: still missed, in the reviewer's rank order:
+
+1. `git -C /workspace merge x` issued from a worktree cwd gives no verdict: the merge is judged against the hook's cwd, not `-C` (first review finding 3, last bullet).
+2. `install -m777` and `install -Dm777` (no space, or a combined short flag; pattern at `dangerous_permissions.py:62` needs `-m` as its own token start); `setfacl -m o::7` (numeric ACL perms, `:64`); `chmod 0o777`; `chmod o=u`; `chmod =rwx` (depends on umask).
+3. `gh --hostname h pr merge 5`: only `-R`/`--repo` are allowed between `gh` and `pr` (`merge_to_main_approval.py:70`).
+
+Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviour, not a gap.
+
+**Severity**: Low (evasion needs an unusual spelling; the handler ships `mode: advise`).
+
+**Status**: ⬜ Open. TDD: one red test per shape above, then widen the patterns; for `git -C`, resolve the target checkout from `-C` before judging the merge.
+
+### N708 — `moves_main` runs 1-3 git subprocesses per Bash call because `default_branch` is not computed lazily
+
+**Source**: Plan 00634 delta review of PR #225 (same report, lines 89-94). Reported, unverified here.
+
+**Evidence**: reported: after seat-before-classify, every Bash call in a teamchat-runtime session resolves the seat (TTL-cached); for an armed seat each call also runs `default_branch(cwd)`, 1-3 git subprocesses even for `ls`, because `moves_main` calls it unconditionally (`human_approval_check.py:249-250`). Also noted (LOW, advise-only today): `git fetch origin main:main` and `gh api repos/o/r/commits?merges=1` classify as MERGE_MAIN (`_GH_API_MERGE` matches `merges` anywhere after `api`, `:162-164`); fails closed.
+
+**Severity**: Low (latency per Bash call for armed seats only).
+
+**Status**: ⬜ Open. Compute `defaults` lazily, only once a run is a switcher, mover or ref-writer. Red test: `ls` for an armed seat makes no `default_branch` call. Tighten `_GH_API_MERGE` to the `pulls/N/merge` and `/merges` path segments.
+
+### N709 — `R-SECRET-SCRIPT-AUTHOR` denies any Write holding the standard plan-script bootstrap line (`*.secret*` "on token: bash")
+
+**Source**: fedora-desktop.1 (peer), via a subagent bisect; reported, code claims unverified here unless marked. Severity for them: BLOCKING (priority, raise it). Same defect family as N696 and N698 (the secret guard judging non-path text as a protected path) but a different trigger: those are an expanded `git ls-files` and a bare `*` glob operand; this is a plain WORD.
+
+**Evidence**: a `Write` of a script whose content holds this repo's standard bootstrap line, which sources `CLAUDE/Plan/_planlib.inc.bash` from the repo-root variable, is denied with matched glob `*.secret*`, "on token: bash". A 6-line file holding only that bootstrap is denied; the same file without it passes. So no new standard plan script can be authored with `Write`. Earlier denials from the same guard: commands holding a quoted `cd` of a variable, and commands holding the words `bash` and `mkdir`. Workaround in use: byte-copy the bootstrap from a committed plan script, then `Edit` the rest. Verified here (this session): an ordinary Bash heredoc carrying that bootstrap line was denied by `R-SECRET-BASH-MENTION` with `*.secret*`, so the Bash route has the same defect, not only Write.
+
+**Code reading (read-only, no protected file opened)**: `_script_content_mention` (`secret_file_guard.py:1782`) scans the whole content of a `.sh`/`.bash`/shebang file with `context="bash"` through `sfm.find_protected_mention_detail` (`utils/secret_file_matching.py`), which applies the aggressive glob-overlap heuristics (`_glob_token_overlaps_stem`, `_glob_intersection_mention`) to every shell word, not only words in a path-operand position. Which heuristic fires on the word `bash` or the `.inc.bash` basename is unverified here (a direct `find_protected_mention_detail` repro was itself denied by the guard); the first red test must pin it.
+
+**Severity**: BLOCKING for fedora-desktop.1 (cannot author plan scripts); High generally.
+
+**Status**: ⬜ Open. Test-first fix: red tests (1) a script holding the standard bootstrap line (and the `cd "$VAR"` and `mkdir` shapes) authors cleanly under `*.secret*`; (2) a script that really names a protected path (`cat ./prod.secret.env`, a quoted path string, a glob that truly expands to a protected file via the index) is still denied; (3) a glob token such as `*.secret*` or a basename-overlap match is judged only against PATH operands (an argument of a path-taking verb, a redirect target, a `source`/`.` operand after expansion), never against arbitrary words, variable names or command names. Then restrict the overlap heuristics to path-operand tokens. See N696, N698.
+
+### N710 — secret-file guard treats a glob as a glob only in the FIRST path part: `cat kit/*/late` and `cat b?n/late` bypass the link check
+
+**Source**: independent Opus review of PR 228 (`subagent-reports/261123-opus-independent-review-pr228.md`, finding 1). The reviewer's claim, UNVERIFIED here. Pre-existing; NOT caused by PR 228.
+
+**Evidence (reviewer's)**: from the project root with no `cd`, `cat kit/*/late` and `cat b?n/late` are allowed, while the literal `cat kit/bin/late` (where `late` links to a protected dummy file) is denied. The guard only handles a glob in the first path part (`secret_file_matching.py`, the `could_be_link` function), so a glob in a later part skips the link/realpath check.
+
+**Severity**: HIGH (security): a protected file's contents can be read through a link by a glob the guard does not expand.
+
+**Status**: ⬜ Open. Needs an Opus fix plus independent review. Test-first fix proposal: red tests (1) a glob in ANY path part is expanded and each match judged by the link/realpath check, or the command fails closed; (2) literal paths behave unchanged; (3) a glob that matches nothing behaves unchanged. Then fix `secret_file_matching.py` to satisfy them.
+
+### N711 — a stand-in that declines with nothing changed commits a journal entry each time (about 47 times, 80 unpushable commits on one seat)
+
+**Source**: lts-infra.1 relay (peer note, authority none; the evidence is theirs and UNVERIFIED here). Seat: dc's hooks-daemon seat, 18-23 Nov, Plan 00616's stand-in.
+
+**Evidence (reported)**: while the seat was awaiting-human on a push-permission block, the stand-in fired about 47 times; each firing committed a "the Nth stand-in declined" journal entry. With hourly pull merges that left about 80 commits that could not be pushed.
+
+**Severity**: Medium (history noise, unbounded growth while blocked).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a stand-in whose ruling is "declined, nothing changed since the last decline" writes no journal entry (or one entry at most, then none until state changes) and backs off its own cadence; green by comparing against the last recorded decline.
+
+### N712 — a seat blocked on a push it cannot make says so only on its own screen
+
+**Source**: same relay as N711 (UNVERIFIED here).
+
+**Evidence (reported)**: the push-permission block on that seat for five days was visible only in the seat's own session, not on the bus or in the questions room.
+
+**Severity**: Medium (a blocked seat is invisible to the people who could unblock it).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Fix shape: when a push is denied by permission and the seat is awaiting-human, post one short bus report (through the coordinator, per the team's rules) naming the branch and the block, once per distinct block, not once per tick. Related to the Plan 00636 owner-wait Stop guard (owner notification on the bus).

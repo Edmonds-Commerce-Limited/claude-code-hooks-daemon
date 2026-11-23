@@ -282,6 +282,31 @@ config_changes:
             owner_wait_stop_guard:
               options:
                 owner_names: [Joseph]
+    - key: handlers.pre_tool_use.human_approval_check
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00634). A coordinator teamchat seat's git push, branch, ref or
+        worktree delete, world-writable chmod or merge into main needs a cited
+        questions-room line a declared human of the team sent, as a trailing
+        `# human-approval team=<team> id=<$event-id>` comment on the command's
+        last line. mode: off | advise (default, allow with the refusal as
+        context) | block (deny). coordinator_seats_only (default true) arms only
+        coordinator seats and unreadable roles. A session with no team seat is
+        never affected.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            human_approval_check:
+              enabled: true
+              priority: 21
+              options:
+                mode: advise
+                coordinator_seats_only: true
+      migration_note: >-
+        Keep mode: advise for now. Until fedora-desktop issue 369 confirms the
+        teamchat verify contract, the shipped verifier refuses every cite, so
+        mode: block denies EVERY armed act, including every coordinator push.
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

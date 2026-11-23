@@ -287,7 +287,7 @@ ownership rules.
 
 These handlers run **before** Claude Code executes a tool call. They can block dangerous operations or inject advisory context.
 
-### Safety Handlers (Priority 10-20)
+### Safety Handlers (Priority 10-21)
 
 Safety handlers protect against destructive or dangerous operations. Most are blocking.
 
@@ -1234,6 +1234,38 @@ handlers:
     merge_to_main_approval:
       enabled: true
       priority: 20
+```
+
+---
+
+#### human_approval_check
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `human_approval_check` |
+| **Priority**   | 21                     |
+| **Type**       | Blocking (terminal)    |
+| **Event**      | PreToolUse             |
+
+**Description:** In a session holding a teamchat seat as coordinator, a `git push`, a branch, ref or worktree delete, a world-writable `chmod` or a merge into main needs a cited questions-room line a declared human of the team sent (Plan 00634, `R-HUMAN-APPROVAL-MISSING`). The cite is a trailing comment on the command's last line: `git push origin x  # human-approval team=<team> id=<$event-id>`. A peer agent's line never counts, and a sub-agent cannot carry an approval.
+
+**Fires when:** the mode is not `off`, the payload carries a teamchat runtime, the command names one of those acts, and the seat is armed: a main thread whose seat is coordinator in some team or whose role cannot be read (with `coordinator_seats_only: true`), or any main-thread seat (with it false). A session with no team seat never probes and never changes. A merge whose current branch cannot be read counts as a merge into main; `gh pr merge` always does. Only forced branch deletes are detected (`branch -D`, `update-ref -d`), and the permission act is the world-writable `chmod` only.
+
+**Options:** `mode` (`off` | `advise` | `block`, default `advise`): `advise` allows with the refusal as context, `block` denies. `coordinator_seats_only` (default `true`).
+
+**Until fedora-desktop issue 369 lands** the shipped verifier refuses every cite, so `block` denies every armed act, including every coordinator push.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    human_approval_check:
+      enabled: true
+      priority: 21
+      options:
+        mode: advise
+        coordinator_seats_only: true
 ```
 
 ---

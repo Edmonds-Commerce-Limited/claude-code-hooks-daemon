@@ -263,6 +263,10 @@ class Priority:
     # Shares 20 with GIT_BRANCH/GIT_STASH the way those two share it: the
     # command sets are disjoint.
     MERGE_TO_MAIN_APPROVAL = 20
+    # Plan 00634: after the safety guards (destructive_git 10,
+    # dangerous_permissions 15) and the merge approval gate (20), so a
+    # coordinator seat's act reaches it only when nothing denied it first.
+    HUMAN_APPROVAL_CHECK = 21
 
     # Plan 00275: safety-band guard on git messages, beside git_message_backtick
     # (20) and the git-workflow opinions at 19-20. Matches a disjoint hazard
@@ -731,7 +735,9 @@ class PriorityRange:
     TEST_MAX = 9
 
     SAFETY_MIN = 10
-    SAFETY_MAX = 20
+    # Plan 00634: 21 so human_approval_check runs after the merge gate (20)
+    # and still sits in the Safety band; a tie at 20 would sort it first.
+    SAFETY_MAX = 21
 
     QUALITY_MIN = 25
     QUALITY_MAX = 35

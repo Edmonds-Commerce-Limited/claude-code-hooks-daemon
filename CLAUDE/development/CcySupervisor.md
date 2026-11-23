@@ -360,6 +360,19 @@ up.
   CLI and exit codes are ours and sit behind a two-method `Screen` boundary.
 - Binary lookup: `CCY_HOOKS_SCREEN`, then `untracked/bin/hooks-screen`, then
   the built path.
+- Operator install (client seat): the release publishes the binary.
+  `.github/workflows/release-assets.yml` builds `hooks-screen-<triple>` for
+  x86_64 and aarch64 musl, smoke-tests `--dump`, and uploads each with
+  `SHA256SUMS` and provenance. Run
+  `gh release download vX.Y.Z --pattern 'hooks-screen-<triple>' --pattern SHA256SUMS`,
+  verify with `sha256sum -c` against only that file's line, install it as
+  `<project>/untracked/bin/hooks-screen` with mode 0755, then relaunch ccy. The
+  lookup order is `$CCY_HOOKS_SCREEN`, `untracked/bin/hooks-screen`, then
+  `untracked/screen-build/hooks-screen-<triple>`
+  (`resolve_screen_binary` in `.claude/ccy/claude-supervise.py`). A missing
+  binary currently fails open and is logged once per reason in `decision.log`;
+  whether it surfaces anywhere else is unverified. Plan 00638 automates the
+  install and surfaces the miss.
 - `CCY_SCREEN_CAPTURE=1` (with `CCY_FOCUS_HOLD=1`) writes each render's raw
   buffer, `--dump` rendering and verdict to `untracked/supervise/screen-capture/`
   (newest 20 kept). Open a sub-agent transcript once with it on to give the

@@ -206,6 +206,14 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "preserving_merge; this handler adds a review step, not a backstop "
         "against data loss."
     ),
+    "human_approval_check": (
+        "Plan 00634: a human-approval workflow gate for a coordinator team seat. "
+        "A chain-level crash or saturation must fail OPEN, because a session "
+        "with no team seat must see no change; inside the handler every failure "
+        "after arming is already the mode's refusal (deny under block). The "
+        "data-loss backstop for the same commands is the SAFETY-tagged "
+        "destructive_git/dangerous_permissions, which run first."
+    ),
     "plan_close_approval": "Approval workflow gate on closing a plan.",
     "plan_journal_guard": "Workflow integrity gate: only mkplan.bash --journal stamps a real timestamp.",
     "plan_number_helper": "Workflow integrity gate: prevents a plan-number collision, not a dangerous action.",
