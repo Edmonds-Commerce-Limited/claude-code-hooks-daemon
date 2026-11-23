@@ -3050,21 +3050,36 @@ def _extglob_words(command: str) -> list[str]:
     bash splits it: a quote or escape earlier in it, a quoted alternative and a
     nested group stay inside, and quotes are removed. Every quoted string and
     command substitution is read again as a command of its own (a ``bash -c``
-    or ``eval`` body), since the guard cannot tell which one a shell runs. A
-    group that never closes is a syntax error bash runs nothing for: skipped.
+    or ``eval`` body), since the guard cannot tell which one a shell runs. An
+    opener whose group never closes (a comment, a heredoc line) is read as a
+    literal and the scan goes on, so a later word is still taken.
+
+    The scan is linear in each text it reads. Rereading nested bodies is
+    bounded at :data:`EXTGLOB_SCAN_DEPTH` times the command's length; past
+    that it raises :class:`IncompleteScanError`, which the guard denies.
     """
     if "(" not in command:
         return []
     found: dict[str, None] = {}
     pending = [command]
+    budget = len(command) * EXTGLOB_SCAN_DEPTH
+    scanned = 0
     for text in pending:  # bodies are appended while iterating; each is shorter than its text
+        scanned += len(text)
+        if scanned > budget:
+            raise IncompleteScanError("the extglob scan of nested quoted bodies passed its bound")
         for word in _scan_extglob_words(text, pending):
             found[word] = None
     return list(found)
 
 
+#: How many times over its own length a command's nested bodies may be reread for extglob words.
+EXTGLOB_SCAN_DEPTH: int = 16
+
+
 def _scan_extglob_words(text: str, bodies: list[str]) -> list[str]:
     """The dequoted extglob words of ``text``; each quoted or substituted body holding ``(`` goes to ``bodies``."""
+    closes = _paren_closes(text)
     words: list[str] = []
     current: list[str] = []
     grouped = False
@@ -3077,17 +3092,13 @@ def _scan_extglob_words(text: str, bodies: list[str]) -> list[str]:
             current, grouped = [], False
             index += 1
             continue
-        if char in _EXTGLOB_OPERATORS and text.startswith("(", index + 1):
-            end = _group_end(text, index + 1)
-            if end is None:
-                # Never closes: bash refuses the line. The rest is judged by the ordinary stream.
-                current, grouped = [], False
-                break
-            current.append(_dequoted(text[index:end]))
+        end = closes.get(index + 1) if char in _EXTGLOB_OPERATORS else None
+        if end is not None:
+            current.append(_dequoted(text, index, end, closes))
             grouped = True
             index = end
             continue
-        piece, body, index = _word_piece(text, index)
+        piece, body, index = _word_piece(text, index, closes)
         current.append(piece)
         if body is not None and "(" in body:
             bodies.append(body)
@@ -3096,7 +3107,31 @@ def _scan_extglob_words(text: str, bodies: list[str]) -> list[str]:
     return words
 
 
-def _word_piece(text: str, index: int) -> tuple[str, str | None, int]:
+def _paren_closes(text: str) -> dict[int, int]:
+    """For each ``(`` of ``text`` that closes, the index just past its ``)``; quotes honoured.
+
+    One pass, so finding every group of a text costs no more than reading it.
+    """
+    closes: dict[int, int] = {}
+    opened: list[int] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char in "'\"`":
+            index = _quote_end(text, index + 1, char, escapes=char != "'") + 1
+            continue
+        if char == "(":
+            opened.append(index)
+        elif char == ")" and opened:
+            closes[opened.pop()] = index + 1
+        index += 1
+    return closes
+
+
+def _word_piece(text: str, index: int, closes: dict[int, int]) -> tuple[str, str | None, int]:
     """The dequoted piece of a word starting at ``text[index]``, any body it quotes, and where it ends."""
     char = text[index]
     if char == "\\":
@@ -3110,14 +3145,12 @@ def _word_piece(text: str, index: int) -> tuple[str, str | None, int]:
         close = _quote_end(text, index + 1, '"', escapes=True)
         body = _double_quoted(text[index + 1 : close])
         return body, body, close + 1
-    if text.startswith("$(", index) or text.startswith("`", index):
-        if char == "`":
-            close = _quote_end(text, index + 1, "`", escapes=True) + 1
-            inner = text[index + 1 : close - 1]
-        else:
-            close = _group_end(text, index + 1) or len(text)
-            inner = text[index + 2 : close - 1]
-        return text[index:close], inner, close
+    if char == "`":
+        close = _quote_end(text, index + 1, "`", escapes=True) + 1
+        return text[index:close], text[index + 1 : close - 1], close
+    if text.startswith("$(", index):
+        close = closes.get(index + 1, len(text))
+        return text[index:close], text[index + 2 : close - 1], close
     return char, None, index + 1
 
 
@@ -3134,28 +3167,6 @@ def _quote_end(text: str, start: int, quote: str, *, escapes: bool) -> int:
     return len(text)
 
 
-def _group_end(text: str, open_index: int) -> int | None:
-    """Index just past the ``)`` closing the ``(`` at ``open_index``, honouring quotes; None if none."""
-    depth = 0
-    index = open_index
-    while index < len(text):
-        char = text[index]
-        if char == "\\":
-            index += 2
-            continue
-        if char in "'\"`":
-            index = _quote_end(text, index + 1, char, escapes=char != "'") + 1
-            continue
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
-                return index + 1
-        index += 1
-    return None
-
-
 def _double_quoted(raw: str) -> str:
     """The text a double-quoted string ``raw`` holds once bash removes its escapes."""
     out: list[str] = []
@@ -3170,12 +3181,12 @@ def _double_quoted(raw: str) -> str:
     return "".join(out)
 
 
-def _dequoted(group: str) -> str:
-    """An extglob ``group`` with its quotes and escapes removed, the way bash matches it."""
+def _dequoted(text: str, start: int, end: int, closes: dict[int, int]) -> str:
+    """The extglob group ``text[start:end]`` with its quotes and escapes removed, as bash matches it."""
     out: list[str] = []
-    index = 0
-    while index < len(group):
-        piece, _body, index = _word_piece(group, index)
+    index = start
+    while index < end:
+        piece, _body, index = _word_piece(text, index, closes)
         out.append(piece)
     return "".join(out)
 
@@ -4706,16 +4717,6 @@ _EXTGLOB_REGEX: Final[dict[str, str]] = {
 _ANY_NAME_REGEX: Final[str] = ".*"
 
 
-def _glob_regex(fragment: str) -> str:
-    """Regex for a plain glob ``fragment`` (``*`` and ``?``); one holding a bracket is anything."""
-    if "[" in fragment:
-        return _ANY_NAME_REGEX
-    return "".join(
-        ".*" if char == "*" else "." if char == "?" else re.escape(char)
-        for char in fragment.replace("\\", "")
-    )
-
-
 def _extglob_regex(component: str) -> str | None:
     """Regex for a component holding extglob groups; None when a group does not close.
 
@@ -4731,7 +4732,7 @@ def _extglob_regex(component: str) -> str | None:
     while index < len(component):
         opener = _EXTGLOB_OPENER.match(component, index)
         if opener is None:
-            parts.append(_glob_regex(component[index]))
+            parts.append(_shell_glob_regex(component[index]))
             index += 1
             continue
         close = component.find(")", opener.end())
@@ -4740,7 +4741,7 @@ def _extglob_regex(component: str) -> str | None:
         body = component[opener.end() : close]
         if "(" in body:
             return _ANY_NAME_REGEX
-        alternatives = "|".join(_glob_regex(alternative) for alternative in body.split("|"))
+        alternatives = "|".join(_shell_glob_regex(alternative) for alternative in body.split("|"))
         parts.append(_EXTGLOB_REGEX[component[index]].format(alternatives))
         index = close + 1
     return "".join(parts)
@@ -4757,24 +4758,25 @@ def _component_regex(component: str, ignore_case: bool = True) -> re.Pattern[str
     Every shell pattern this module matches is read here (Ledger 00474 N716):
     a plain glob by :func:`_shell_glob_regex`, an extglob (``@(a|b)``) by
     :func:`_extglob_regex`; one whose group does not close in the component
-    cannot be read: None. ``ignore_case`` reads it as ``nocaseglob`` does, the
-    wide reading for any caller that cannot rule that option out.
+    cannot be read: None. ``ignore_case`` is for a caller that cannot rule
+    ``nocaseglob`` in or out: a name matches under EITHER reading, since a
+    case-blind negated bracket (``[!b]``) excludes ``B``, which bash's default matches.
     """
-    flags = re.IGNORECASE if ignore_case else 0
     if _EXTGLOB_OPENER.search(component) is not None:
         translated = _extglob_regex(component)
         if translated is None:
             return None
     else:
         translated = _shell_glob_regex(component)
+    either = f"(?:{translated})|(?i:{translated})" if ignore_case else translated
     try:
-        return re.compile(f"(?s:{translated})\\Z", flags)
+        return re.compile(f"(?s:{either})\\Z")
     except re.error as error:
         # A bracket regex cannot spell (a reversed range): read as anything (fail closed).
         log_and_continue(
             logger, error, reason="a glob the regex engine refuses is read as any name"
         )
-        return re.compile(f"(?s:{_ANY_NAME_REGEX})\\Z", flags)
+        return re.compile(f"(?s:{_ANY_NAME_REGEX})\\Z")
 
 
 def _shell_glob_regex(pattern: str) -> str:

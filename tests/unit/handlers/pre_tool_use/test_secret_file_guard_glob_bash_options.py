@@ -19,6 +19,7 @@ protected file is a dummy outside the project, its name assembled.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.indexed_project import index_project
+from tests.load_scaling import scaled_cpu_seconds
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -35,6 +37,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
 )
 from claude_code_hooks_daemon.utils import link_index, path_exclusion, protected_file_index
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.resolution_failure import IncompleteScanError
 from claude_code_hooks_daemon.utils.shell_snapshot import reset_snapshot_cache
 
 _PROTECTED = "id_" + "rsa"
@@ -132,6 +135,19 @@ def _every_route(command: str, cwd: Path) -> tuple[Decision, Decision, Decision]
     return _bash(command, cwd), _write(f"{_SHEBANG}{command}\n", cwd), unindexed
 
 
+_SCANNED = "scanned"
+_REFUSED = "refused"
+
+
+def _scan_outcome(command: str) -> str:
+    """Whether the extglob scan of ``command`` finished or refused (its fail-closed answer)."""
+    try:
+        sfm._extglob_words(command)
+    except IncompleteScanError:
+        return _REFUSED
+    return _SCANNED
+
+
 _DENIED_EVERYWHERE = (Decision.DENY, Decision.DENY, Decision.DENY)
 _ALLOWED_EVERYWHERE = (Decision.ALLOW, Decision.ALLOW, Decision.ALLOW)
 
@@ -202,6 +218,44 @@ class TestBracketExpressions:
         assert names.reaches("x[a[^z]/late")
         assert names.reaches("x[[^z]/late")
 
+    @pytest.mark.parametrize("word", ["[a[:lower:]]in/late", "[![:digit:]]in/late"])
+    def test_link_names_reaches_through_a_class_after_the_first_member(self, word: str) -> None:
+        """The over-the-cap route (``named is not None``) reads brackets with the same reader."""
+        assert sfm.LinkNames(["kit/bin/late"]).reaches(word)
+
+    def test_a_caret_inside_an_open_bracket_reaching_the_link_is_denied(
+        self, project: Project
+    ) -> None:
+        caret = project.kit / "x^"
+        caret.mkdir()
+        (caret / "late").symlink_to(project.outside / _PROTECTED)
+        assert _every_route("cat kit/x[b[^z]/late", project.root) == _DENIED_EVERYWHERE
+
+    @pytest.mark.parametrize(
+        ("pattern", "name"), [("[!b]", "B"), ("[!a-z]in", "Xin"), ("[^x]in", "Xin")]
+    )
+    def test_a_negated_bracket_read_without_case_matches_either_case(
+        self, pattern: str, name: str
+    ) -> None:
+        """Case unknown is BOTH readings: bash's default matches ``B`` against ``[!b]``."""
+        assert sfm._component_spells(pattern, name)
+
+    @pytest.mark.parametrize("word", ["kit/[!x]in/late", "kit/[!a-z]in/late", "kit/[^x]in/late"])
+    def test_a_negated_bracket_reaching_an_upper_case_link_is_denied(
+        self, project: Project, word: str
+    ) -> None:
+        upper = project.kit / "Xin"
+        upper.mkdir()
+        (upper / "late").symlink_to(project.outside / _PROTECTED)
+        assert _every_route(f"cat {word}", project.root) == _DENIED_EVERYWHERE
+
+    def test_a_negated_bracket_with_case_options_switched_is_denied(self, project: Project) -> None:
+        upper = project.kit / "Xin"
+        upper.mkdir()
+        (upper / "late").symlink_to(project.outside / _PROTECTED)
+        command = "source ./opts.sh; cat kit/[!x]in/late"
+        assert _every_route(command, project.root) == _DENIED_EVERYWHERE
+
 
 class TestNocaseglob:
     @pytest.mark.parametrize(
@@ -264,6 +318,39 @@ class TestExtglobWords:
     @pytest.mark.parametrize("word", ["kit/@(lib)/notes.txt", "kit/@(lib|zz)/notes.txt"])
     def test_an_extglob_reaching_no_link_is_allowed(self, project: Project, word: str) -> None:
         assert _every_route(f"shopt -s extglob\ncat {word}", project.root) == _ALLOWED_EVERYWHERE
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "shopt -s extglob\n: # @(\ncat kit/@(bin|zz)/late",
+            "shopt -s extglob\ncat <<'EOF'\n@(\nEOF\ncat kit/@(bin|zz)/late",
+            "echo '@(' ; cat kit/@(bin|zz)/late",
+        ],
+    )
+    def test_an_unclosed_group_earlier_does_not_hide_a_later_word(
+        self, project: Project, command: str
+    ) -> None:
+        assert "kit/@(bin|zz)/late" in sfm._extglob_words(command)
+        assert _every_route(command, project.root) == _DENIED_EVERYWHERE
+
+    @pytest.mark.parametrize(
+        "command",
+        ["$(" * 20000 + "x", "@(" * 20000 + "x", "'$(" * 5000 + "x", '"$(' * 5000, "(" * 40000],
+    )
+    def test_a_hostile_nesting_is_scanned_quickly_or_refused(self, command: str) -> None:
+        started = time.process_time()
+        outcome = _scan_outcome(command)
+        assert outcome in (_SCANNED, _REFUSED)
+        assert time.process_time() - started < scaled_cpu_seconds(1.0)
+
+    def test_nesting_past_the_scan_budget_is_refused(self) -> None:
+        """A refusal is an IncompleteScanError, which the guard denies (fail closed)."""
+        assert _scan_outcome("$(" * 20000 + "@(x)") == _REFUSED
+
+    def test_ordinary_nesting_is_scanned(self) -> None:
+        command = 'bash -c "echo $(cat $(ls kit/@(bin)/late))"'
+        assert _scan_outcome(command) == _SCANNED
+        assert "kit/@(bin)/late" in sfm._extglob_words(command)
 
     def test_the_whole_word_is_captured(self) -> None:
         words = sfm._extglob_words('cat "k"it/@(bin|zz)/late k\\it/@(b@(i)n)/x; ls @("a"|b)')
