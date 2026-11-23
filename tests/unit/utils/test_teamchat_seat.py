@@ -75,7 +75,8 @@ def _wait_until_not_running(pid: int, within: float = 5.0) -> bool:
     while time.monotonic() < deadline:
         try:
             state = stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # Reaped between the open and the read: /proc gives ENOENT or ESRCH.
             return True
         if state in ("Z", "X"):
             return True
