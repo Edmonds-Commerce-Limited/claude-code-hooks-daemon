@@ -267,6 +267,21 @@ config_changes:
             owner_wait_stop_guard:
               options:
                 on_unreadable_bus: auto
+    - key: handlers.stop.owner_wait_stop_guard.options.owner_names
+      recommended: false
+      dormant: false
+      description: >-
+        owner_names (list of names, default empty): the team humans a stop
+        may name as what it waits on ("waiting on Joseph", "need Joseph to
+        pick"). Without it only an owner, human, user or operator noun, or an
+        @handle, is a waiting target; a bare capitalised word is never one.
+        An invalid value names nobody, with a WARNING.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              options:
+                owner_names: [Joseph]
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

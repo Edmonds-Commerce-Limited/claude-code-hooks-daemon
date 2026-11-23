@@ -739,9 +739,7 @@ class TestWaitingDetection:
             # The independent review's probe rows (F2), each missed before.
             "STOPPING BECAUSE: blocked on the owner choosing A or B.",
             "STOPPING BECAUSE: pending the owner decision.",
-            "STOPPING BECAUSE: need Joseph to pick A or B.",
             "STOPPING BECAUSE: the owner must answer Q61 first.",
-            "STOPPING BECAUSE: waiting on Joseph.",
             "STOPPING BECAUSE: slice 1 is merged.\nWaiting on the owner to choose A or B.",
             "STOPPING BECAUSE:\nwaiting for the owner's ruling on Q61.",
             # Negation is clause-local and adjacent: these still wait.
@@ -749,11 +747,62 @@ class TestWaitingDetection:
             "STOPPING BECAUSE: not done: waiting on the owner.",
             "STOPPING BECAUSE: waiting on @joseph for Q61.",
             "STOPPING BECAUSE: needs a decision from the owner on Q61.",
+            "STOPPING BECAUSE: waiting on the operator to approve the deploy.",
+            "STOPPING BECAUSE: need the user to confirm the migration.",
         ],
     )
     def test_ordinary_waiting_wordings_are_detected(self, text: str, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question()))
         assert _run(_Handler(_seats(), bus), _stop(tmp_path, text)).decision is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A bare name counts only when options.owner_names names a team human (N2).
+            "STOPPING BECAUSE: need Joseph to pick A or B.",
+            "STOPPING BECAUSE: waiting on Joseph.",
+            "STOPPING BECAUSE: pending Joseph's answer on Q61.",
+            "STOPPING BECAUSE: until joseph decides, nothing moves.",
+        ],
+    )
+    def test_a_configured_team_human_name_is_a_waiting_target(
+        self, text: str, tmp_path: Path
+    ) -> None:
+        handler = _Handler(_seats(), _FakeBus(_snapshot(_question())))
+        handler._owner_names = ["Joseph"]
+        assert _run(handler, _stop(tmp_path, text)).decision is Decision.DENY
+
+    def test_an_unconfigured_name_is_not_a_waiting_target(self, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        assert _run(handler, _stop(tmp_path, "STOPPING BECAUSE: waiting on Joseph.")) is None
+
+    @pytest.mark.parametrize("bad", ["Joseph", 7, [7, ""], None])
+    def test_an_invalid_owner_names_value_names_nobody(self, bad: object, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        handler._owner_names = bad
+        assert _run(handler, _stop(tmp_path, "STOPPING BECAUSE: waiting on Joseph.")) is None
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # The delta review's N2 probe rows: none waits on a human.
+            "STOPPING BECAUSE: Tests should confirm the fix on CI.",
+            "STOPPING BECAUSE: Docker needs to pick up the new image.",
+            "STOPPING BECAUSE: waiting for Renovate to rebase.",
+            "STOPPING BECAUSE: blocked on Docker daemon restart.",
+            "STOPPING BECAUSE: pending CI response.",
+            "STOPPING BECAUSE: Next to review is Plan 00641.",
+            "STOPPING BECAUSE: finished, waiting for Monday cron.",
+            "STOPPING BECAUSE: Phase 3 needs a decision record written next.",
+            "STOPPING BECAUSE: waiting for the worker reply on Q12.",
+            "STOPPING BECAUSE: pending the release decision (not blocking).",
+            "STOPPING BECAUSE: Not blocked on anyone; Joseph to review later.",
+        ],
+    )
+    def test_ordinary_non_human_stops_are_not_waits(self, text: str, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        handler._owner_names = ["Joseph"]
+        assert _run(handler, _stop(tmp_path, text)) is None
 
     @pytest.mark.parametrize(
         "text",

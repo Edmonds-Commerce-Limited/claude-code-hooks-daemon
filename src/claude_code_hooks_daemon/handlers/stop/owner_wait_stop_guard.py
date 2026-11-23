@@ -13,7 +13,7 @@ judgement); every bus read and command goes through
 **Who it applies to.** A Stop on the main thread whose session carries a
 teamchat runtime, whose text (anywhere after ``STOPPING BECAUSE:``, outside
 fences and quotes, ordinary wordings such as "blocked on the owner", "need
-Joseph to pick", "the owner must answer"; a negated match like "not waiting on
+the user to pick", "the owner must answer"; a negated match like "not waiting on
 any user input" does not count) waits on a human or whose session is in the
 awaiting-human mode, and
 per held team only where the 00631 probe declares this seat ``coordinator``
@@ -62,6 +62,7 @@ auto_continue_stop's stand-in requirement (one shared gate,
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import time
@@ -141,31 +142,53 @@ _STOP_PREFIX: Final[str] = "STOPPING BECAUSE:"
 #: How far back a re-entered stop looks for this guard's own refusal: wide enough
 #: for the bump turn between the deny and the re-stop (the helper's own default is 20).
 _REENTRY_LOOKBACK_LINES: Final[int] = 200
-#: What a wait is ON: a human, or a human's answer. Object slots stay inside one clause.
-_HUMAN: Final[str] = (
-    r"(?:owner|human|user|answers?|repl(?:y|ies)|decision|input|approval|sign[- ]?off"
+#: Who a wait can be ON (N2): a human role noun. A bare capitalised word is NOT a
+#: person (``Docker``, ``Renovate``, ``Tests``); a name counts only as an ``@handle``
+#: or when ``options.owner_names`` lists it.
+_ROLE: Final[str] = r"(?:owners?|humans?|users?|operators?)"
+#: What a human gives. Only ``answers`` stands alone (``waiting for answers``);
+#: the rest need a human in the same clause (``pending CI response`` is no wait).
+_GIVES: Final[str] = (
+    r"(?:answers?|repl(?:y|ies)|decision|input|approval|sign[- ]?off"
     r"|ruling|go-ahead|choice|confirmation|response)"
 )
-#: A named person: an ``@handle`` or a capitalised name (``Joseph``, not ``CI`` or ``GitHub``).
-_PERSON: Final[str] = r"(?:@\w+|(?-i:[A-Z][a-z]+)\b)"
-_WHO: Final[str] = rf"(?:(?:the\s+)?(?:owner|human|user)|{_PERSON})"
-_ACTS: Final[str] = r"(?:answer|decide|choose|pick|confirm|approve|reply|respond|rule|review|sign)"
-_CLAUSE: Final[str] = r"[^.;:!?\n]*?"
-#: Ordinary waiting wordings (Plan 00636 F2), searched across the whole declaring
-#: text after ``STOPPING BECAUSE:``. ``[awaiting-human]`` and the frozen prose
-#: are matched by auto_continue_stop's own test first.
-_WAITING_RE: Final[re.Pattern[str]] = re.compile(
-    "|".join(
-        [
-            rf"\b(?:wait(?:ing)?\s+(?:on|for)|awaiting|blocked\s+(?:on|by)|pending)\b"
-            rf"(?:{_CLAUSE}\b{_HUMAN}\b|\s+{_PERSON})",
-            rf"\bneeds?\s+(?:{_WHO}\s+to\b|(?:an?\s+|the\s+|their\s+|your\s+)?{_HUMAN}\b)",
-            rf"\b{_WHO}\s+(?:must|has\s+to|needs\s+to|should|to)\s+{_ACTS}",
-            rf"\buntil\s+{_WHO}\s+{_ACTS}",
-        ]
-    ),
-    re.IGNORECASE,
+_DETERMINER: Final[str] = r"(?:(?:the|an?|their|your|my|any)\s+)?"
+_ACTS: Final[str] = (
+    r"(?:answer|decide|choose|pick(?!\s+up)|confirm|approve|reply|respond|rule|review|sign)"
 )
+_CLAUSE: Final[str] = r"[^.;:!?\n]*?"
+
+
+def _person(owner_names: tuple[str, ...]) -> str:
+    """A named waiting target: an ``@handle`` or a configured team human's name."""
+    names = "".join(f"|{re.escape(name)}" for name in owner_names)
+    return rf"(?:@\w+{names})"
+
+
+@functools.lru_cache(maxsize=8)
+def _waiting_re(owner_names: tuple[str, ...]) -> re.Pattern[str]:
+    """Ordinary waiting wordings (Plan 00636 F2, narrowed by N2), for these team names.
+
+    Searched across the whole declaring text after ``STOPPING BECAUSE:``.
+    ``[awaiting-human]`` and the frozen prose are matched by auto_continue_stop's
+    own test first. Every shape needs a human target: a role noun, an
+    ``@handle`` or a configured name, never a bare capitalised word.
+    """
+    who = rf"(?:{_DETERMINER}{_ROLE}\b|{_person(owner_names)}\b)"
+    return re.compile(
+        "|".join(
+            [
+                rf"\b(?:wait(?:ing)?\s+(?:on|for)|awaiting|blocked\s+(?:on|by)|pending)\b"
+                rf"(?:{_CLAUSE}{who}|\s+{_DETERMINER}answers?\b)",
+                rf"\bneeds?\s+(?:{who}\s+to\b|{_DETERMINER}{_GIVES}\b{_CLAUSE}{who})",
+                rf"{who}\s+(?:must|has\s+to|needs\s+to|should)\s+{_ACTS}",
+                rf"\buntil\s+{who}\s+{_ACTS}",
+            ]
+        ),
+        re.IGNORECASE,
+    )
+
+
 #: A negation that governs the match: adjacent to it, at the end of its clause prefix.
 _NEGATED_PREFIX_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:\b(?:not|no|never|nothing)|n't)"
@@ -274,6 +297,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         # Options, injected by the registry from ``options.<name>``; validated at use.
         self._window_minutes: object = DEFAULT_WINDOW_MINUTES
         self._on_unreadable_bus: object = DEFAULT_ON_UNREADABLE_BUS
+        self._owner_names: object = []
         # Seams, not config options.
         self._bus: OwnerWaitBus = TeamchatOwnerWaitBus()
         self._clock: Callable[[], float] = time.time
@@ -381,8 +405,21 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
 
     # -- matching ----------------------------------------------------------------
 
+    def _team_names(self) -> tuple[str, ...]:
+        """``options.owner_names``: team humans' names; an invalid value names nobody."""
+        value = self._owner_names
+        if isinstance(value, list) and all(isinstance(n, str) and n.strip() for n in value):
+            return tuple(n.strip() for n in value)
+        if value:
+            logger.warning(
+                "owner_wait_stop_guard: options.owner_names=%r is not a list of non-empty "
+                "names; only role nouns and @handles count as a waiting target",
+                value,
+            )
+        return ()
+
     @staticmethod
-    def _text_declares_waiting(text: str) -> bool:
+    def _text_declares_waiting(text: str, owner_names: tuple[str, ...] = ()) -> bool:
         """Whether the declaring text after ``STOPPING BECAUSE:`` waits on a human.
 
         Searches every declaring line after the first prefix (a wait on the next
@@ -398,7 +435,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             return False
         for start, end in _quoted_spans(body):
             body = body[:start] + " " * (end - start) + body[end:]
-        for match in _WAITING_RE.finditer(body):
+        for match in _waiting_re(owner_names).finditer(body):
             before = body[: match.start()]
             breaks = list(_CLAUSE_BREAK_RE.finditer(before))
             clause = before[breaks[-1].end() :] if breaks else before
@@ -426,7 +463,9 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         if reader is None:
             return _Waiting.UNREADABLE
         text = reader.get_last_assistant_text()
-        return _Waiting.YES if text and self._text_declares_waiting(text) else _Waiting.NO
+        if text and self._text_declares_waiting(text, self._team_names()):
+            return _Waiting.YES
+        return _Waiting.NO
 
     @staticmethod
     def _reenters_own_refusal(hook_input: dict[str, Any]) -> bool:
