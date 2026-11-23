@@ -57,6 +57,22 @@ _DANGEROUS_PERMISSIONS_PATTERN = (
 )
 
 
+def sets_world_writable(command: str) -> bool:
+    """Whether ``command`` runs a ``chmod`` that grants write to others/all.
+
+    One command at a time, in command position only: the pattern's `.*`
+    otherwise read a mode-shaped number from a LATER command
+    (`chmod 755 f; echo 1246`), and text an `echo`/`grep` merely prints is not
+    a chmod at all (ledger 00466 N58). Public so another handler can reuse the
+    detection without importing this handler class (discovery would register it
+    twice).
+    """
+    return any(
+        re.search(_DANGEROUS_PERMISSIONS_PATTERN, segment)
+        for segment in command_position_segments(command)
+    )
+
+
 class DangerousPermissionsHandler(PreToolUseHandlerBase):
     """Block chmod 777 and dangerous permission commands.
 
@@ -122,15 +138,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return False
-
-        # One command at a time, in command position only: the pattern's `.*`
-        # otherwise read a mode-shaped number from a LATER command
-        # (`chmod 755 f; echo 1246`), and text an `echo`/`grep` merely prints
-        # is not a chmod at all (ledger 00466 N58).
-        return any(
-            re.search(_DANGEROUS_PERMISSIONS_PATTERN, segment)
-            for segment in command_position_segments(command)
-        )
+        return sets_world_writable(command)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""

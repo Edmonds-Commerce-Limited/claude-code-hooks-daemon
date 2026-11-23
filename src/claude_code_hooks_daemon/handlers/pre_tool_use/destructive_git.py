@@ -866,6 +866,26 @@ def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
     return positional[0], refs
 
 
+def names_a_deletion(command: str) -> bool:
+    """Whether ``command`` names a branch, remote-ref or worktree deletion.
+
+    Covers forced branch deletes (``branch -D``, ``update-ref -d``), any push
+    that deletes a remote ref, and any ``git worktree remove``. A shape this
+    reading cannot establish counts as a deletion: fail closed. Public so
+    another handler can reuse it without importing this handler class.
+    """
+    try:
+        if _deleted_branches(command) or _worktree_removals(command):
+            return True
+        return any(
+            _remote_delete_targets(run) is not None
+            for run in git_invocations(command)
+            if run.subcommand == _PUSH
+        )
+    except _Unverifiable:
+        return True
+
+
 def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> str | None:
     """None when every remote ref ``command`` deletes is merged, else why not."""
     if _SUBSTITUTION.search(command):

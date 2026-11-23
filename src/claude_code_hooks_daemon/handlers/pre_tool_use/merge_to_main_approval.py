@@ -311,6 +311,32 @@ def merge_target(command: str) -> str | None:
     return None
 
 
+def is_pr_merge(command: str) -> bool:
+    """Whether ``command`` runs ``gh pr merge`` outside any inert span."""
+    if is_wholly_inert_command(command):
+        return False
+    return _GH_PR_MERGE_RE.search(strip_inert_spans(command)) is not None
+
+
+def merge_lands_on_main(cwd: Path, target: str) -> bool | None:
+    """Whether merging ``target`` in ``cwd`` lands on the main checkout's default branch.
+
+    None when the current branch cannot be read: the caller chooses which way
+    that falls. A linked worktree is a definite no, and merging the default
+    branch into itself (``git pull origin main`` on ``main``) brings in
+    nobody's work.
+    """
+    repo = GitRepo.resolve_for(cwd)
+    root = repo.root if repo is not None else cwd
+    if is_linked_worktree(root):
+        return False
+    branch = current_branch(cwd)
+    if branch is None:
+        return None
+    default = default_branch(cwd)
+    return branch == default and target != default
+
+
 class MergeToMainApprovalHandler(PreToolUseHandlerBase):
     """Deny a merge into the main checkout's default branch while the key is on."""
 
@@ -370,15 +396,7 @@ class MergeToMainApprovalHandler(PreToolUseHandlerBase):
         ``main``, the ordinary update -- brings in nobody's work, so there is
         nothing for a human to approve.
         """
-        repo = GitRepo.resolve_for(cwd)
-        root = repo.root if repo is not None else cwd
-        if is_linked_worktree(root):
-            return False
-        branch = current_branch(cwd)
-        if branch is None:
-            return False
-        default = default_branch(cwd)
-        return branch == default and target != default
+        return merge_lands_on_main(cwd, target) is True
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         target = merge_target(str(get_bash_command(hook_input)))
