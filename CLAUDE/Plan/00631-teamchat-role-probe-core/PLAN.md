@@ -66,8 +66,9 @@ hard-coded pair. A role with no behaviour attached means no change.
 
 ### Phase 3: Role gate primitive
 
-- [ ] ⬜ **Task 3.1**: TDD the handler role gate (per-team, main-thread only).
-- [ ] ⬜ **Task 3.2**: Invariant tests (role never relaxes a guard; `token` never
+- [x] ✅ **Task 3.1**: TDD the handler role gate (per-team, main-thread only):
+  `src/claude_code_hooks_daemon/utils/team_role_gate.py`.
+- [x] ✅ **Task 3.2**: Invariant tests (role never relaxes a guard; `token` never
   opened; no v1 path exists). Targeted QA green.
 
 ## Dependencies
