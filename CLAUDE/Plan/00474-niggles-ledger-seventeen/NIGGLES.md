@@ -8139,3 +8139,53 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `reap_worktree` prints `git branch -d {state.branch}` without `shlex.quote`. Git allows `;`, `$`, backtick and `|` in branch names, so the pasted line can split. Reachable only after a removal timeout. The `prune_branch` restore commands from `delete_branches` were not checked.
 
 **Status**: ⬜ Open. Quote every git or file name interpolated into a printed command line (both sites), with a test using a branch name containing a space and `;`.
+
+### N695 — `R-PLAN-NUMBER-DISCOVERY` fires on a `find` over a `CLAUDE/Plan/` inside ANOTHER repository's clone
+
+**Source**: fedora-desktop.1 dogfood report against v3.76.0. No earlier niggle covers it (N298 is the quoted-text and per-plan-listing false positive, a different fault).
+
+**Evidence**: a read-only `find` over a `CLAUDE/Plan/` directory inside a clone of another repository (under `untracked/scratch`) was denied. The rule exists to stop a scan that derives THIS project's next plan number. `PlanNumberHelperHandler.matches` (`handlers/pre_tool_use/plan_number_helper.py:504`) matches the relative plan-dir text (`find\s+{plan_dir}/?(\s|$)`, line 628, and the `ls`/`echo` rules beside it) and never resolves the operand against the hook `cwd` or the project root, so any path spelled `CLAUDE/Plan` reads as this project's. Only the `mkdir` branch resolves against `_workspace_root` (around lines 268 to 306). No test in `tests/unit/handlers/pre_tool_use/test_plan_number_helper*.py` mentions `cwd`, so the behaviour is unpinned rather than pinned.
+
+**Severity**: Low (false positive; the command is retried by another route, no data at risk).
+
+**Status**: ⬜ Open. TDD fix: red test that a `find`/`ls` of `<other-clone>/CLAUDE/Plan` (or after `cd` into one) is allowed while the same text rooted at the project is denied, then resolve the operand against `cwd` and `_workspace_root` before matching.
+
+### N696 — the secret-path guard denies `git ls-files | xargs wc` inside another repository's sparse clone, naming no protected path
+
+**Source**: fedora-desktop.1 dogfood report against v3.76.0. No earlier niggle covers it (the `ls-files` hits in this ledger concern index building, not this deny).
+
+**Evidence**: `git ls-files | xargs wc` run inside a sparse clone of another repository was denied under the `R-SECRET-BASH-MENTION` family although the command names no protected path. It looks as if the guard judges what the command EXPANDS to (the listed files, checked against the protected patterns or the index) rather than the command text. Likely site, unconfirmed: the bash route in `handlers/pre_tool_use/secret_file_guard.py` around lines 1665 to 1693 (`find_protected_mention_detail` with `index=`, then `_search_reach` at line 1731), where a command holding a search or glob is judged against an index built for THIS project; a foreign repo's `cwd` should leave that index out of the judgement. `xargs` fed by a listing is the reach case. Tests that exercise `xargs` here are `test_secret_file_guard_bare_dotted.py`, `_compound_grep.py` and `_directory_readers.py`; none uses a cwd in another repository, so no test pins the deny.
+
+**Severity**: Medium (a plain read-only command in a foreign clone is blocked, and the deny names nothing the agent can fix).
+
+**Status**: ⬜ Open. TDD fix: red test reproducing `git ls-files | xargs wc` with `cwd` inside a second git repository holding no protected file and asserting allow, then read `_search_reach` to confirm the cause and scope the index judgement to the project's own tree.
+
+### N697 — `R-BASH-SAFE-MODE-PRELUDE-MISSING` reported firing on chains the reporter calls read-only
+
+**Source**: lts-infra coordinator self-retrospective (lts-infra Plan 00158, situation 12), relayed on the bus for Plan 00630. No exact command was supplied.
+
+**Evidence**: by design the handler speaks only when a statement is in the shared mutator table (`_DEFAULT_ONLY_WITH_MUTATOR`, owner ruling A3 of Plan 00483, `handlers/pre_tool_use/bash_safe_mode.py:65-68`, gate at `:342`), and this project sets `only_with_mutator: true`. So a hit on a genuinely read-only chain means `statements_contain_mutator` classified one of its statements as a mutator. Which statement is unconfirmed until a reproducing command is captured.
+
+**Severity**: Low (false positive; retried by another route).
+
+**Status**: ⬜ Open. TDD fix: obtain one failing command from the lts-infra coordinator's transcripts; red test asserting it is allowed; then correct the mutator-table entry (or the statement splitter) that misclassified it, keeping a test that a real mutator chain still fires.
+
+### N698 — the secret-mention check denies a command holding a bare `*` token
+
+**Source**: lts-infra coordinator self-retrospective (lts-infra Plan 00158, situation 12). Related to, but not the same as, N696 (an expanded `git ls-files`).
+
+**Evidence**: a Bash command whose only "mention" is a bare `*` glob operand was denied under the `R-SECRET-BASH-MENTION` family. A bare `*` names no protected path; the guard appears to treat a glob as reaching every file in `cwd`, including protected ones (the `_search_reach` route in `handlers/pre_tool_use/secret_file_guard.py`, the same area N696 names). Whether the deny is correct depends on the verb: a reader such as `cat *` would genuinely read a protected file in that directory, while `ls *` or `wc -l *` in a directory holding none would not.
+
+**Severity**: Medium (the deny names nothing the agent can fix).
+
+**Status**: ⬜ Open. TDD fix: red tests for `ls *` and `wc -l *` in a directory holding no protected file (allow) and `cat *` in a directory holding one (deny); then make the glob reach judge the files the glob can actually match from `cwd`, not the whole index.
+
+### N699 — `sed_blocker` denies a bus message whose body contains the word `sed`, piped to the bus CLI
+
+**Source**: lts-infra coordinator self-retrospective (lts-infra Plan 00158, situation 12); the retrospective message itself was first refused this way, so it is a live example.
+
+**Evidence**: the Bash branch's exemptions cover a git or `gh` message (exemptions 2 and 3), a command holding `grep` or a plain `echo` (4), and a heredoc whose only write target is a `.md` file (5). A quoted-delimiter heredoc piped to a messaging CLI (`cat <<'EOF' | <bus-cli> send ...`) matches none of them, so the word in prose is treated as an executed `sed` (`handlers/pre_tool_use/sed_blocker.py`). The body is data the shell never runs, unless the receiving stage is an interpreter.
+
+**Severity**: Low (false positive; the agent rewords the message).
+
+**Status**: ⬜ Open. TDD fix: red test that a quoted-delimiter heredoc mentioning sed, piped to a non-interpreter receiver, is allowed, while the same body piped to `bash`/`sh` stays denied; then add the exemption using the pipe blocker's existing data-consumer allowlist for heredoc receivers rather than a second list.

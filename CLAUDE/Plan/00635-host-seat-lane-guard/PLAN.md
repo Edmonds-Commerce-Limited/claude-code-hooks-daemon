@@ -13,48 +13,53 @@ Child (e) of umbrella [Plan 00630](../00630-coordinator-level-skills-ccy-teams-a
 design in its [DESIGN.md](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md)
 section 15 (fedora-desktop Plan 00263 D3). Owner ruling (lts-infra Q62): host
 sessions should not run tests; host seats are for deployments or triage at
-desktop level, and they are not workers. Recommended design: a PreToolUse
-handler refusing QA, test and build commands in a host seat, reusing the
-existing command classification, with Claude Code deny rules only as a cheap
-second layer (they miss scripts and `sh -c`).
+desktop level, and they are not workers.
+
+This plan owns ONE layer: the dynamic, by-duty check. A PreToolUse handler
+refuses QA, test and build commands when any held team of the session has duty
+`host` (from `teamchat whoami --json`), reusing the existing command
+classification. The static layer is fedora-desktop's: `cc-run` writes
+`cc-deny.json` from the seat's duty and passes it on a host launch. This plan
+builds no deny rules.
 
 ## DECISION PENDING (owner, lts-infra Q64)
 
-Build the handler (recommended), or deny rules alone? Execution of Phase 2
-waits for the ruling. If deny rules alone, this plan reduces to documenting the
-rule set. Keyed on seat kind `host` and, if it lands, the `deployer` role
-(Plan 00207); roles come from teamchat per team, so the guard fires for acts
-concerning a team where the seat is host.
+Build the handler (recommended by fedora-desktop Plan 00263 and here)? Phase 2
+waits for the ruling. If the owner chooses the static layer alone, this plan is
+cancelled.
 
 ## Goals
 
-- A host-seat QA/test/build command is refused with a message naming the lane;
-  deployment and triage commands are untouched; advisory first.
+- In a session holding a team with duty `host`, a QA/test/build command
+  (including via `sh -c` and scripts) is refused with a message naming the
+  lane; deployment and triage commands are untouched; advisory first.
 
 ## Non-Goals
 
-- Blocking container seats, any non-host seat, or an unknown seat kind.
+- Deny rules (fedora-desktop's `cc-deny.json`). A host `cc` session with no
+  team (it has no duty; fedora-desktop's static layer covers it). Any session
+  with no `host` duty.
 
 ## Tasks
 
 ### Phase 1: Decision and RED
 
 - [ ] ⬜ **Task 1.1**: Record the Q64 ruling in the umbrella DESIGN.md.
-- [ ] ⬜ **Task 1.2**: RED fixtures: host denied for test/QA/build incl. `sh -c`
-  and scripts; deploy and triage allowed; container, unknown and absent seats
-  unchanged.
+- [ ] ⬜ **Task 1.2**: RED fixtures: duty `host` in any held team denies
+  test/QA/build incl. `sh -c` and scripts; deploy and triage allowed; worker,
+  coordinator, unknown duty and absent team unchanged; probe with no answer
+  reports once (Q9).
 
 ### Phase 2: Handler
 
-- [ ] ⬜ **Task 2.1**: Handler reusing command classification, advisory first.
+- [ ] ⬜ **Task 2.1**: Handler reusing command classification, advisory first;
+  live verification in a host-duty seat; promote to block when ruled.
   Targeted QA green.
-- [ ] ⬜ **Task 2.2**: Optional deny-rule second layer; live verification in a
-  host seat; promote to block when ruled.
 
 ## Dependencies
 
-- Plan 00631 (seat kind per team); the Q64 ruling. Related fedora-desktop
-  Plans 00263 and 00207.
+- Plan 00631 (`any_duty`); the Q64 ruling. Related fedora-desktop Plan 00263
+  (static layer).
 
 ## Success Criteria
 
@@ -63,4 +68,4 @@ concerning a team where the seat is host.
 
 ## Delivery & Milestones
 
-- Plan filed.
+- Plan filed; revised for the fedora-desktop vet (duty, layer ownership).
