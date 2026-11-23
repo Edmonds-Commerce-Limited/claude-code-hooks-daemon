@@ -8325,3 +8325,23 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: HIGH (security): a protected file's contents can be read through a link by a glob the guard does not expand.
 
 **Status**: ⬜ Open. Needs an Opus fix plus independent review. Test-first fix proposal: red tests (1) a glob in ANY path part is expanded and each match judged by the link/realpath check, or the command fails closed; (2) literal paths behave unchanged; (3) a glob that matches nothing behaves unchanged. Then fix `secret_file_matching.py` to satisfy them.
+
+### N711 — a stand-in that declines with nothing changed commits a journal entry each time (about 47 times, 80 unpushable commits on one seat)
+
+**Source**: lts-infra.1 relay (peer note, authority none; the evidence is theirs and UNVERIFIED here). Seat: dc's hooks-daemon seat, 18-23 Nov, Plan 00616's stand-in.
+
+**Evidence (reported)**: while the seat was awaiting-human on a push-permission block, the stand-in fired about 47 times; each firing committed a "the Nth stand-in declined" journal entry. With hourly pull merges that left about 80 commits that could not be pushed.
+
+**Severity**: Medium (history noise, unbounded growth while blocked).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a stand-in whose ruling is "declined, nothing changed since the last decline" writes no journal entry (or one entry at most, then none until state changes) and backs off its own cadence; green by comparing against the last recorded decline.
+
+### N712 — a seat blocked on a push it cannot make says so only on its own screen
+
+**Source**: same relay as N711 (UNVERIFIED here).
+
+**Evidence (reported)**: the push-permission block on that seat for five days was visible only in the seat's own session, not on the bus or in the questions room.
+
+**Severity**: Medium (a blocked seat is invisible to the people who could unblock it).
+
+**Status**: ⬜ Open, non-blocking, queued behind v2. Fix shape: when a push is denied by permission and the seat is awaiting-human, post one short bus report (through the coordinator, per the team's rules) naming the branch and the block, once per distinct block, not once per tick. Related to the Plan 00636 owner-wait Stop guard (owner notification on the bus).
