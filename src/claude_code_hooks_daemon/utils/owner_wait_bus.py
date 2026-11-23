@@ -32,8 +32,6 @@ from claude_code_hooks_daemon.utils.teamchat_seat import SessionSignals
 
 #: The R11 multi-thread bump (unverified: relayed, not yet seen in a teamchat build).
 BUMP_PROGRAM: Final[str] = "teamchat bump"
-#: R11's form that bumps every open thread the seat asked.
-BUMP_ALL_WAITING: Final[str] = f"{BUMP_PROGRAM} --waiting"
 #: v1's notifying thread post (``pingbus thread --help``: ``--ask`` mentions the humans).
 NOTIFY_PROGRAM: Final[str] = "pingbus thread"
 #: The team slot of a template when the seat probe named no team (left for the coordinator).
@@ -88,11 +86,16 @@ class TeamchatOwnerWaitBus:
         return False
 
     def bump_command(self, team: str, thread_ids: Sequence[str]) -> str:
-        """``teamchat bump <ids>``; ``--waiting`` when an id is not safe to print."""
+        """``teamchat bump --team <team> <ids>``; ``--waiting`` when an id is not safe to print.
+
+        ``--team`` is always named, so a seat coordinating two teams gets one
+        distinct command per team rather than two identical ones.
+        """
+        prefix = f"{BUMP_PROGRAM} --team {_shown_team(team)}"
         printable = [printable_thread_id(thread_id) for thread_id in thread_ids]
         if not printable or any(item is None for item in printable):
-            return BUMP_ALL_WAITING
-        return " ".join([BUMP_PROGRAM, *(item for item in printable if item is not None)])
+            return f"{prefix} --waiting"
+        return " ".join([prefix, *(item for item in printable if item is not None)])
 
     def notify_commands(self, team: str) -> tuple[str, str]:
         """v1 ``pingbus thread ... --ask`` (``--ask`` mentions the humans, so Element notifies).
@@ -100,6 +103,10 @@ class TeamchatOwnerWaitBus:
         Templates, not runnable lines: the guard could not read which threads
         are open, so ``Q<n>`` and ``<event id>`` are left for the coordinator.
         """
-        shown = team if team == TEAM_PLACEHOLDER else shlex.quote(team)
-        prefix = f"{NOTIFY_PROGRAM} --team {shown}"
+        prefix = f"{NOTIFY_PROGRAM} --team {_shown_team(team)}"
         return (f"{prefix} Q<n> --ask", f"{prefix} --re <event id> --ask")
+
+
+def _shown_team(team: str) -> str:
+    """``team`` shell-quoted, or the placeholder left as a template slot."""
+    return team if team == TEAM_PLACEHOLDER else shlex.quote(team)

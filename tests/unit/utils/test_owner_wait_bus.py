@@ -13,15 +13,33 @@ from claude_code_hooks_daemon.utils.teamchat_seat import SessionSignals
 class TestBumpCommand:
     def test_one_command_names_every_thread(self) -> None:
         bus = TeamchatOwnerWaitBus()
-        assert bus.bump_command("alpha", ("Q61", "Q64")) == "teamchat bump Q61 Q64"
+        assert bus.bump_command("alpha", ("Q61", "Q64")) == "teamchat bump --team alpha Q61 Q64"
 
     def test_event_ids_are_single_quoted(self) -> None:
         bus = TeamchatOwnerWaitBus()
-        assert bus.bump_command("alpha", ("Q61", "$abc")) == "teamchat bump Q61 '$abc'"
+        assert bus.bump_command("alpha", ("Q61", "$abc")) == "teamchat bump --team alpha Q61 '$abc'"
 
     def test_an_untrusted_id_falls_back_to_waiting(self) -> None:
         bus = TeamchatOwnerWaitBus()
-        assert bus.bump_command("alpha", ("Q61", "$x; rm -rf ~")) == "teamchat bump --waiting"
+        assert (
+            bus.bump_command("alpha", ("Q61", "$x; rm -rf ~"))
+            == "teamchat bump --team alpha --waiting"
+        )
+
+    def test_two_teams_get_two_distinct_commands(self) -> None:
+        # F6 (PR 226 review): a seat coordinating two teams must not be handed
+        # two identical commands that bump only one of them.
+        bus = TeamchatOwnerWaitBus()
+        assert bus.bump_command("alpha", ("Q61",)) != bus.bump_command("beta", ("Q61",))
+
+    def test_an_unsafe_team_name_is_shell_quoted(self) -> None:
+        assert (
+            TeamchatOwnerWaitBus().bump_command("a b", ("Q61",)) == "teamchat bump --team 'a b' Q61"
+        )
+
+    def test_the_team_placeholder_is_left_as_a_template_slot(self) -> None:
+        command = TeamchatOwnerWaitBus().bump_command(TEAM_PLACEHOLDER, ("Q61",))
+        assert command == "teamchat bump --team <team> Q61"
 
 
 class TestNotifyCommands:
