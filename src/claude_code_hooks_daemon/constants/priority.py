@@ -731,7 +731,9 @@ class PriorityRange:
     TEST_MAX = 9
 
     SAFETY_MIN = 10
-    SAFETY_MAX = 20
+    # Plan 00634: 21 so human_approval_check runs after the merge gate (20)
+    # and still sits in the Safety band; a tie at 20 would sort it first.
+    SAFETY_MAX = 21
 
     QUALITY_MIN = 25
     QUALITY_MAX = 35

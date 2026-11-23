@@ -287,7 +287,7 @@ ownership rules.
 
 These handlers run **before** Claude Code executes a tool call. They can block dangerous operations or inject advisory context.
 
-### Safety Handlers (Priority 10-20)
+### Safety Handlers (Priority 10-21)
 
 Safety handlers protect against destructive or dangerous operations. Most are blocking.
 
