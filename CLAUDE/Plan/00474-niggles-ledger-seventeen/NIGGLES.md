@@ -8223,3 +8223,13 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Severity**: Medium (correct Go source cannot be written without disguising a literal; the deny names no protected path).
 
 **Status**: ⬜ Open. TDD fix: red test that authoring a `.go`/`.py` file holding the self-exe link literal is allowed while one holding `/proc/self/cwd/<protected name>` still denies; then, for `context="content"` only, judge a process-view word whose tail is a single terminal link (`exe`, `fd/N`) as naming nothing, keeping the refusal for any word with a path after the view.
+
+### N702 — `branch-park` parks a local branch that is behind or diverged from its remote, then the push fails non-fast-forward
+
+**Source**: fedora-desktop.1 dogfood report (peer account; its sequence is unverified here, the code reading below is verified).
+
+**Evidence**: reported: a LOCAL branch far behind its remote (agents had pushed newer commits from detached worktrees); the park commit landed on the stale local tip, the push failed non-fast-forward, and the park stood locally only. Verified by reading `park_branch` (`core/branch_park.py:656-729`): it resolves `refs/heads/<name>`, writes the park commit on that tip (`_write_park_commit`), moves the ref, records the park, then runs a plain `git push`. It never fetches and never compares the local tip with `<remote>/<name>` (the only `remote_ref` use is the no-local-branch path, `:686-697`). A failed push returns a `ParkResult` carrying `push_error` and a retry line (`:727-728`), leaving the local park, which is the reported state.
+
+**Severity**: Low (not on the v2 path; recoverable by hand, and the failure is reported with a retry line).
+
+**Status**: ⬜ Open. TDD fix, red tests first on `park_branch`: (1) local strictly behind `<remote>/<name>` => `BranchParkError` naming `git branch -f <b> <remote>/<b>` after checking nothing local is lost, no commit, no record; (2) diverged => refuse, naming the divergence; (3) up to date or local ahead => park as today; (4) no upstream/tracking ref => unchanged. Decide whether the compare uses the existing tracking ref or fetches first (a stale tracking ref hides the fault); `commit=False` record-only parks stay out of scope.
