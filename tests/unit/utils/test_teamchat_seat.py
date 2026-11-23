@@ -20,6 +20,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import TeamSeatConfig
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.utils import teamchat_seat
+from claude_code_hooks_daemon.utils.safe_signal import RefusedSignalTarget
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     KIT_ENV_VAR,
     RUNTIME_ENV_VAR,
@@ -587,6 +588,25 @@ class TestDefaultRunner:
         assert outcome.status is CommandStatus.TIMEOUT
         grandchild = int(pid_file.read_text(encoding="utf-8").strip())
         assert _wait_until_not_running(grandchild)
+
+    def test_timeout_kills_grandchild_when_the_leader_exits_first(self, tmp_path: Path) -> None:
+        """Review delta: an exited, unreaped leader must not stop the group kill."""
+        pid_file = tmp_path / "grandchild.pid"
+        script = f'/bin/sleep 30 & echo $! > "{pid_file}"; exit 0'
+        outcome = default_command_runner(("/bin/sh", "-c", script), {}, 0.5)
+        assert outcome.status is CommandStatus.TIMEOUT
+        grandchild = int(pid_file.read_text(encoding="utf-8").strip())
+        assert _wait_until_not_running(grandchild)
+
+    def test_refused_signal_target_maps_to_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A refused group kill never escapes the probe: the answer is TIMEOUT."""
+
+        def refuse(process: Any, sig: int) -> None:
+            raise RefusedSignalTarget("forced")
+
+        monkeypatch.setattr(teamchat_seat, "signal_own_session_group", refuse)
+        outcome = default_command_runner(("/bin/sh", "-c", "sleep 0.6"), {}, 0.2)
+        assert outcome.status is CommandStatus.TIMEOUT
 
     def test_stdin_is_dev_null(self) -> None:
         """Review F5: a binary that reads stdin gets EOF at once, never the terminal."""

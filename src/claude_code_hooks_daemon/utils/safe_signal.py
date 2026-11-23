@@ -365,6 +365,46 @@ def signal_own_session_child(process: SpawnedChild, sig: int) -> None:
                 f"{process!r} is not a subprocess.Popen: poll() -> {status!r}"
             )
         raise ProcessLookupError(f"child pid {pid} has already exited with {status}")
+    _kill_led_group(pid, sig)
+
+
+class UnreapedChild(Protocol):
+    """What :func:`signal_own_session_group` reads of a ``subprocess.Popen``."""
+
+    @property
+    def pid(self) -> int: ...
+
+    @property
+    def returncode(self) -> int | None: ...
+
+
+def signal_own_session_group(process: UnreapedChild, sig: int) -> None:
+    """Like :func:`signal_own_session_child`, but never reaps the leader.
+
+    The leader may already have exited: while this code has not reaped it, its
+    pid is still ours (a zombie holds the pid and the group id), so the group
+    its grandchildren still occupy can be signalled. Only a leader this code
+    already reaped (``returncode`` set) is refused, because its pid may be
+    reused.
+
+    Raises:
+        RefusedSignalTarget: ``process`` has no plain pid, no ``returncode``
+            that is None or an int, or does not lead a group of its own.
+        ProcessLookupError: The leader was already reaped, or the group is gone.
+    """
+    pid = _plain_pid(process.pid)
+    status = process.returncode
+    if status is not None:
+        if type(status) is not int:
+            raise RefusedSignalTarget(
+                f"{process!r} is not a subprocess.Popen: returncode -> {status!r}"
+            )
+        raise ProcessLookupError(f"child pid {pid} was already reaped with {status}")
+    _kill_led_group(pid, sig)
+
+
+def _kill_led_group(pid: int, sig: int) -> None:
+    """Group-kill ``pid``'s group once it is proven to be its own and not ours."""
     _refuse_own_lineage(pid)
     group = os.getpgid(pid)
     if group != pid:

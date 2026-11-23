@@ -41,7 +41,6 @@ reason category only, never the command's output, which is untrusted.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
@@ -61,7 +60,10 @@ from typing import TYPE_CHECKING, Final
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
-from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
+from claude_code_hooks_daemon.utils.safe_signal import (
+    RefusedSignalTarget,
+    signal_own_session_group,
+)
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
@@ -520,10 +522,16 @@ def _binary_trust(binary: str) -> CommandStatus | None:
 def _kill_group(process: subprocess.Popen[bytes]) -> None:
     """SIGKILL ``process``'s whole group, then reap the leader.
 
-    Called only before the leader is reaped, so the group id is still its own.
+    Called only before the leader is reaped, so the group id is still its own
+    even when the leader has already exited and a grandchild holds the pipe.
+    A refused target is logged and the caller still answers TIMEOUT.
     """
-    with contextlib.suppress(ProcessLookupError):
-        signal_own_session_child(process, signal.SIGKILL)
+    try:
+        signal_own_session_group(process, signal.SIGKILL)
+    except ProcessLookupError:
+        _LOGGER.debug("teamchat seat probe: process group already gone")
+    except RefusedSignalTarget as exc:
+        _LOGGER.debug("teamchat seat probe: group kill refused (%s)", type(exc).__name__)
     process.wait()
 
 
