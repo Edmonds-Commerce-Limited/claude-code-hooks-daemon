@@ -1270,6 +1270,35 @@ handlers:
 
 ---
 
+#### host_seat_lane_guard
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `host_seat_lane_guard` |
+| **Priority**   | 21                     |
+| **Type**       | Blocking (terminal)    |
+| **Event**      | PreToolUse             |
+
+**Description:** In a session holding a teamchat seat whose duty is `host` in any team, a test, build, lint or QA command is refused with a message naming the lane: host seats are for deployment and triage, so run it in a worker seat (Plan 00635, owner ruling Q64 D3, `R-HOST-SEAT-LANE`). The classification is the shared long-running one (its test, build and QA groups, not installs, containers or watches) plus linters, `make` test/build targets and scripts named for tests, QA or lint.
+
+**Fires when:** the mode is not `off`, the payload carries a teamchat runtime, the main thread's seat has duty `host` in some team or a duty that cannot be read (the guard stays armed; the first refusal in a session says the probe gave no answer), and the command runs a lane command anywhere in it, including through `sh -c`, wrappers, `timeout` or a trailing `&`. A session with no team seat never probes and never changes; sub-agents, worker and coordinator seats are untouched.
+
+**Options:** `mode` (`off` | `advise` | `block`, default `advise`): `advise` allows with the refusal as context, `block` denies. `extra_lane_patterns` (list of regexes matched against the peeled `<program> <arguments>`).
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    host_seat_lane_guard:
+      enabled: true
+      priority: 21
+      options:
+        mode: advise
+```
+
+---
+
 #### project_containment
 
 | Property       | Value                 |

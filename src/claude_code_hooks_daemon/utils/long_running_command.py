@@ -111,6 +111,13 @@ _SIMPLE_WRAPPERS: Final[frozenset[str]] = frozenset(
     {"nohup", "nice", "command", "exec", "stdbuf", "sudo", "ionice", "setsid", "time"}
 )
 
+#: Wrapper options that take the NEXT word as their value (``nice -n 19 cmd``).
+_WRAPPER_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "nice": frozenset({"-n", "--adjustment"}),
+    "ionice": frozenset({"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"}),
+    "sudo": frozenset({"-u", "-g", "-U", "-C", "-p", "-D", "--user", "--group"}),
+}
+
 #: ``<runner> run <command>`` launchers.
 _RUN_LAUNCHERS: Final[frozenset[str]] = frozenset({"uv", "poetry", "pipenv"})
 
@@ -139,23 +146,52 @@ _GIT_SLOW_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 _GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "-c", "--git-dir", "--work-tree"})
 
 #: Known-slow programs, matched against ``<program> <arguments>`` with every
-#: wrapper (``timeout``, ``uv run``, ``python -m``, ...) already peeled.
-DEFAULT_SLOW_PATTERNS: Final[tuple[str, ...]] = (
+#: wrapper (``timeout``, ``uv run``, ``python -m``, ...) already peeled. Kept
+#: as named groups so a guard can take a subset (host_seat_lane_guard takes
+#: test, build and QA but not installs, containers or watches).
+TEST_PATTERNS: Final[tuple[str, ...]] = (
     r"^(?:pytest|py\.test|tox|nox)\b",
-    r"^(?:llm_qa\.py|run_all\.sh)\b",
-    r"^(?:jest|vitest|playwright|mocha|tsc|webpack|gradle|gradlew|mvn|ant|make|cmake|ninja|bazel)\b",
-    r"^(?:npm|yarn|pnpm|bun)\s+(?:ci|install|i|add|test|build|run\s+(?:build|test)\S*)\b",
+    r"^(?:jest|vitest|playwright|mocha)\b",
+    r"^(?:npm|yarn|pnpm|bun)\s+(?:test|run\s+test\S*)\b",
+    r"^cargo\s+(?:test|bench)\b",
+    r"^go\s+test\b",
+)
+BUILD_PATTERNS: Final[tuple[str, ...]] = (
+    r"^(?:tsc|webpack|gradle|gradlew|mvn|ant|cmake|ninja|bazel)\b",
+    r"^(?:npm|yarn|pnpm|bun)\s+(?:build|run\s+build\S*)\b",
+    r"^uv\s+build\b",
+    r"^cargo\s+(?:build|check|clippy)\b",
+    r"^go\s+(?:build|vet)\b",
+)
+#: Every ``make``: a target may build, test or deploy, so it is its own group.
+MAKE_PATTERNS: Final[tuple[str, ...]] = (r"^make\b",)
+QA_PATTERNS: Final[tuple[str, ...]] = (r"^(?:llm_qa\.py|run_all\.sh)\b",)
+INSTALL_PATTERNS: Final[tuple[str, ...]] = (
+    r"^(?:npm|yarn|pnpm|bun)\s+(?:ci|install|i|add)\b",
     r"^(?:pip|pip3)\s+install\b",
-    r"^uv\s+(?:sync|build|pip\s+install)\b",
-    r"^cargo\s+(?:build|test|install|check|clippy|bench)\b",
-    r"^go\s+(?:build|test|install|vet)\b",
-    r"^docker\s+(?:build|buildx|compose\s+(?:up|build))\b",
+    r"^uv\s+(?:sync|pip\s+install)\b",
+    r"^cargo\s+install\b",
+    r"^go\s+install\b",
     r"^(?:apt|apt-get|dnf|yum|brew)\s+install\b",
+)
+CONTAINER_PATTERNS: Final[tuple[str, ...]] = (
+    r"^docker\s+(?:build|buildx|compose\s+(?:up|build))\b",
+)
+WATCH_PATTERNS: Final[tuple[str, ...]] = (
     r"^gh\s+run\s+watch\b",
     r"^gh\s+pr\s+checks\b.*--watch\b",
     r"^watch\b",
     # `tail -f` / `-F` / `--follow` never ends on its own.
     r"^tail\b.*?\s(?:-[A-Za-z0-9]*[fF][A-Za-z0-9]*|--follow)(?=[=\s]|$)",
+)
+DEFAULT_SLOW_PATTERNS: Final[tuple[str, ...]] = (
+    *TEST_PATTERNS,
+    *BUILD_PATTERNS,
+    *MAKE_PATTERNS,
+    *QA_PATTERNS,
+    *INSTALL_PATTERNS,
+    *CONTAINER_PATTERNS,
+    *WATCH_PATTERNS,
 )
 
 
@@ -323,10 +359,16 @@ def _peel_wrapper(words: list[str]) -> list[str] | None:
         while index < len(rest) and (rest[index].startswith("-") or _ASSIGNMENT.match(rest[index])):
             index += 2 if rest[index] == "-u" else 1
         return rest[index:]
+    if head == "command" and any(
+        re.fullmatch(r"-[pP]*[vV][pP]*", option) for option in rest[:2] if option.startswith("-")
+    ):
+        # `command -v pytest` only looks the name up: it is `type pytest`, not a run.
+        return ["type", *rest]
     if head in _SIMPLE_WRAPPERS:
+        valued = _WRAPPER_VALUE_OPTIONS.get(head, frozenset())
         index = 0
         while index < len(rest) and rest[index].startswith("-"):
-            index += 1
+            index += 2 if rest[index] in valued else 1
         return rest[index:]
     if head in _RUN_LAUNCHERS and rest[:1] == ["run"]:
         index = 1
@@ -355,10 +397,22 @@ def _shell_command_string(arguments: list[str]) -> list[str] | None:
     return None
 
 
+def _dequote_program(word: str) -> str:
+    """``word`` as bash resolves a program name: quotes and backslashes removed.
+
+    ``"pytest"``, ``'pytest'`` and ``p\\ytest`` all run ``pytest``. Only the
+    program word is touched; a ``$``-expansion stays unresolved text.
+    """
+    if word == _UNRESOLVED_WORD or not any(char in word for char in "'\"\\"):
+        return word
+    return word.replace("'", "").replace('"', "").replace("\\", "")
+
+
 def _peel(segment: str) -> _Peeled:
     words, loop_head = _skip_prefix(_segment_words(segment))
     peeled = _Peeled(words=words, loop_head=loop_head)
     while peeled.words and peeled.words[0] != _UNRESOLVED_WORD:
+        peeled.words[0] = _dequote_program(peeled.words[0])
         if peeled.words[0].rsplit("/", 1)[-1] == _TIMEOUT:
             seconds, remainder = _peel_timeout(peeled.words)
             peeled.timeouts.append(seconds)
@@ -457,20 +511,27 @@ def _segment_findings(peeled: _Peeled, policy: LongRunningPolicy) -> list[Findin
     return findings
 
 
-def classify(command: str, policy: LongRunningPolicy | None = None) -> tuple[Finding, ...]:
+def classify(
+    command: str, policy: LongRunningPolicy | None = None, *, include_background: bool = False
+) -> tuple[Finding, ...]:
     """The reasons ``command`` looks long or unbounded; empty when it looks short.
 
     Judged on the command-position view, so text bash hands over as data is
     never read as a command. A statement followed by a lone ``&`` is background
     work and draws nothing; a trailing ``&`` backgrounds only the last statement
     (the ``&&``/``||``/``|`` list it ends), so ``sleep 300; echo x &`` still
-    blocks on the sleep.
+    blocks on the sleep. ``include_background`` judges backgrounded statements
+    like any other, for a guard that cares WHAT runs rather than how long.
     """
     policy = policy or LongRunningPolicy()
     if not command.strip() or any(pattern.search(command) for pattern in policy.exempt_patterns):
         return ()
     segments = command_position_code_segments_with_separators(command)
-    background_from = _background_unit_start(command_position_view(command), segments)
+    background_from = (
+        len(segments)
+        if include_background
+        else _background_unit_start(command_position_view(command), segments)
+    )
     findings: list[Finding] = []
     loop_seen = False
     sleep_seen = False
@@ -485,7 +546,8 @@ def classify(command: str, policy: LongRunningPolicy | None = None) -> tuple[Fin
             and _HEREDOC_DELIMITER.match(words[0]) is not None
         )
         previous_words = words
-        if following == _BACKGROUND_OPERATOR or index >= background_from or is_delimiter:
+        backgrounded = following == _BACKGROUND_OPERATOR and not include_background
+        if backgrounded or index >= background_from or is_delimiter:
             background_seen = background_seen or not is_delimiter
             continue
         peeled = _peel(segment)
