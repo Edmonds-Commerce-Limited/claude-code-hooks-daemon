@@ -233,7 +233,17 @@ and denies the write.
 test for a fixture under `pkg/x/testdata/src/a/a.go`. Check whether other languages' strategies have an equivalent
 never-built fixture convention.
 
-**Status**: ⬜ open.
+**Recurrence (fedora-desktop.1, bus `$zYs4vfhRHAEMK72DILdeDGu_eGoDGPn5ojtqs6_uhe8`)**: reported again on GOPATH-style
+analysistest trees (`testdata/<rule>/src/...`), where `go vet` says "package ... is not in std" and the hook reports a
+lint failure. Cause confirmed by reading: `GoLintStrategy.skip_paths` (`strategies/lint/go_strategy.py:85-86`) returns
+`COMMON_SKIP_PATHS` alone, which holds no `testdata/`, and `lint_on_edit` gates only on it (`lint_on_edit.py:258`,
+`:318`); the TDD Go strategy already skips it (`strategies/tdd/go_strategy.py:20`). No test pins the behaviour
+(`tests/unit/strategies/lint/test_go_strategy.py` checks only that `skip_paths` is a tuple). Same root as N601
+(`staged_lint_gate`), so one fix in the strategy should close both. Severity: Medium (a correct write is reported as a
+lint failure on every fixture edit).
+
+**Status**: ⬜ open. TDD fix: red test that `matches_skip_path("pkg/x/testdata/rule/src/a/a.go", GoLintStrategy().skip_paths)`
+is true and a sibling `pkg/x/a.go` is false, then add `testdata/` to the Go strategy's `skip_paths`.
 
 ### N594 — `lint_on_edit` reports "ruff not found" while ruff is on the session's PATH
 
@@ -8189,3 +8199,23 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Severity**: Low (false positive; the agent rewords the message).
 
 **Status**: ⬜ Open. TDD fix: red test that a quoted-delimiter heredoc mentioning sed, piped to a non-interpreter receiver, is allowed, while the same body piped to `bash`/`sh` stays denied; then add the exemption using the pipe blocker's existing data-consumer allowlist for heredoc receivers rather than a second list.
+
+### N700 — `R-ERROR-HIDING` denies `_, x, _ := strings.Cut(s, sep)`, whose discarded last value is a bool
+
+**Source**: fedora-desktop.1 dogfood report (bus `$zYs4vfhRHAEMK72DILdeDGu_eGoDGPn5ojtqs6_uhe8`). No earlier niggle covers it.
+
+**Evidence**: the Go "blank identifier discards error" pattern (`_BLANK_LAST_FROM_CALL`, `strategies/error_hiding/go_strategy.py:24-28`) denies any trailing `_` assigned from a call head, by position alone; its leading `(?:_\s*,\s*)*` admits `_, x, _ :=`, so the `strings.Cut` line matches (confirmed by reading the regex). `strings.Cut` returns `(before, after string, found bool)`; `strings.CutPrefix`/`CutSuffix` and the `bytes` equivalents return `(T, bool)`, so `s, _ := strings.CutPrefix(...)` is denied the same way. A regex cannot know an unknown call's return types, so the position rule is right for unknown calls: `a, b, _ := f()` is pinned as a deny (`tests/unit/handlers/pre_tool_use/test_error_hiding_blocker_go.py:61`) and must stay one. Nothing pins the stdlib bool-returning calls either way.
+
+**Severity**: Low (false positive; the agent names the bool, which is arguably clearer anyway).
+
+**Status**: ⬜ Open. TDD fix: red tests that `_, x, _ := strings.Cut(s, sep)`, `s, _ := strings.CutPrefix(a, b)` and the `bytes.Cut*` forms are allowed while `a, b, _ := f()` and `n, _ := strconv.Atoi(s)` still deny; then exclude a named table of known non-error-last stdlib calls from `_CALL_HEAD` in that pattern.
+
+### N701 — the secret guard denies authored Go source that names its own `/proc` self-exe link as a string literal
+
+**Source**: fedora-desktop.1 dogfood report (bus `$zYs4vfhRHAEMK72DILdeDGu_eGoDGPn5ojtqs6_uhe8`). Related to N668 (the refusal this is a side effect of); not a duplicate.
+
+**Evidence**: the reporter suggests the path is in the protected set; it is not. The deny is N668's fail-closed refusal. `refuse_process_view` (`utils/resolution_failure.py:110`) raises `ProcessViewRefusedError` for any path through the process's own view unless one `_PLAIN_PROCESS_FILES` entry follows (`:74`), and `exe` is not one (it is a link). `/proc/self/exe` is pinned as refused (`tests/unit/utils/test_resolution_failure.py:74`). The script-author scan (`_SCRIPT_EXTENSIONS` holds `.go`, `secret_file_guard.py:335`) runs `find_protected_mention_detail` with `context="content"` (`:1864`) in the default `REFUSE` mode, so the error reaches the `ResolutionFailedError` catch (`:1440`) and `_unresolved_finding` (`:1502`) denies under `R-SECRET-SCRIPT-AUTHOR`. In authored non-shell source the daemon is not placing a path the agent's shell will resolve; the program reading its OWN binary reads no protected file. Exempting the whole view would reopen N668 (`.../cwd/<protected>`). The guard denied this ledger's own `grep` for the literal while the entry was being researched, so the Bash route shows it too, in the shape N668 intends.
+
+**Severity**: Medium (correct Go source cannot be written without disguising a literal; the deny names no protected path).
+
+**Status**: ⬜ Open. TDD fix: red test that authoring a `.go`/`.py` file holding the self-exe link literal is allowed while one holding `/proc/self/cwd/<protected name>` still denies; then, for `context="content"` only, judge a process-view word whose tail is a single terminal link (`exe`, `fd/N`) as naming nothing, keeping the refusal for any word with a path after the view.
