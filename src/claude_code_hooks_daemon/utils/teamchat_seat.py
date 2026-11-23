@@ -70,6 +70,8 @@ KIT_ENV_VAR: Final[str] = "TEAMCHAT_KIT"
 WHOAMI_ARGS: Final[tuple[str, ...]] = ("whoami", "--json")
 SUPPORTED_VERSIONS: Final[frozenset[int]] = frozenset({1})
 DEFAULT_TTL_SECONDS: Final[float] = 60.0
+#: Most sessions :class:`SeatContextResolver` remembers at once (review F8).
+MAX_CACHE_ENTRIES: Final[int] = 256
 #: ``whoami`` exit code: no session here (outside one, or before the seat link).
 EXIT_NO_SESSION: Final[int] = 69
 #: ``whoami`` exit code: the seat could not be read or failed strict decode.
@@ -665,6 +667,9 @@ class SeatContextResolver:
     ``ttl_seconds``: a role change takes effect within one TTL. Every answer is
     cached, including no-answer and exit 69, so a missing binary costs one
     timeout per TTL, not one per hook call.
+
+    The cache holds at most ``max_entries`` sessions. Storing a new session in
+    a full cache first drops every expired answer, then the oldest live one.
     """
 
     def __init__(
@@ -674,7 +679,11 @@ class SeatContextResolver:
         clock: Callable[[], float] = time.monotonic,
         runner: CommandRunner = default_command_runner,
         timeout: float = Timeout.TEAMCHAT_WHOAMI,
+        max_entries: int = MAX_CACHE_ENTRIES,
     ) -> None:
+        if max_entries < 1:
+            raise ValueError(f"max_entries must be at least 1, got {max_entries}")
+        self._max_entries = max_entries
         self._ttl = ttl_seconds
         self._clock = clock
         self._runner = runner
@@ -710,5 +719,21 @@ class SeatContextResolver:
             return cached[1]
         context = probe_seat_context(signals, runner=self._runner, timeout=self._timeout)
         with self._lock:
-            self._cache[signals] = (now, context)
+            self._store(signals, now, context)
         return context
+
+    def cache_size(self) -> int:
+        """How many sessions the cache currently holds."""
+        with self._lock:
+            return len(self._cache)
+
+    def _store(self, signals: SessionSignals, now: float, context: SeatContext) -> None:
+        """Cache one answer, evicting to stay within ``max_entries``. Caller holds the lock."""
+        if signals not in self._cache and len(self._cache) >= self._max_entries:
+            expired = [key for key, (stamp, _) in self._cache.items() if now - stamp >= self._ttl]
+            for key in expired:
+                del self._cache[key]
+            while len(self._cache) >= self._max_entries:
+                oldest = min(self._cache, key=lambda key: self._cache[key][0])
+                del self._cache[oldest]
+        self._cache[signals] = (now, context)
