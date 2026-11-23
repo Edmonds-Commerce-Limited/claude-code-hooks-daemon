@@ -1027,6 +1027,27 @@ class TestPrefillHold:
         outcome = _tick(sidecar_dir, machine, self._facts(later, ""))
         assert outcome.payload is None
 
+    @pytest.mark.parametrize("age_after_reset", [3600.0, 25 * 3600.0])
+    def test_hold_expires_a_day_after_the_reset_even_with_the_occurrence_open(
+        self,
+        tmp_path: Path,
+        _child_starts: dict[int, tuple[int, float]],
+        age_after_reset: float,
+    ) -> None:
+        # Delta review D6: dumps stopped after the Enter (the occurrence never
+        # saw the dialog close), so `occurrence_open` stays True for ever; the
+        # day-after-reset expiry must still free every other family.
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        ticks, _ = _child_starts[_CHILD]
+        _child_starts[_CHILD] = (ticks, later - 40 * 3600.0)
+        reset = later - age_after_reset
+        state = _mod._new_rate_limit_window(reset, reset - 5 * 3600.0)
+        state.update(phase="answered", occurrence_open=True)
+        _mod._save_rate_limit_state(_mod._rate_limit_state_path(tmp_path, _CHILD), state)
+        outcome = _tick(sidecar_dir, machine, self._facts(later, ""))
+        held = age_after_reset < 86400.0
+        assert (outcome.decision_value != "would-model") is held
+
     def test_transcript_continue_above_an_empty_box_does_not_hold(self, tmp_path: Path) -> None:
         sidecar_dir, machine, later = self._ready(tmp_path)
         _prefill_state(tmp_path, phase="abandoned", reset=later - 600.0)
