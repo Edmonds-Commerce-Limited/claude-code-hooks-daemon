@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from claude_code_hooks_daemon.utils.owner_wait_bus import (
+    TEAM_PLACEHOLDER,
     BusUnreadable,
     TeamchatOwnerWaitBus,
 )
@@ -32,6 +33,10 @@ class TestNotifyCommands:
     def test_an_unsafe_team_name_is_shell_quoted(self) -> None:
         question, _ = TeamchatOwnerWaitBus().notify_commands("a b")
         assert question == "pingbus thread --team 'a b' Q<n> --ask"
+
+    def test_the_team_placeholder_is_left_as_a_template_slot(self) -> None:
+        question, _ = TeamchatOwnerWaitBus().notify_commands(TEAM_PLACEHOLDER)
+        assert question == "pingbus thread --team <team> Q<n> --ask"
 
 
 class TestRead:

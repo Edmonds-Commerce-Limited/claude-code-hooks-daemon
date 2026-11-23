@@ -36,6 +36,8 @@ BUMP_PROGRAM: Final[str] = "teamchat bump"
 BUMP_ALL_WAITING: Final[str] = f"{BUMP_PROGRAM} --waiting"
 #: v1's notifying thread post (``pingbus thread --help``: ``--ask`` mentions the humans).
 NOTIFY_PROGRAM: Final[str] = "pingbus thread"
+#: The team slot of a template when the seat probe named no team (left for the coordinator).
+TEAM_PLACEHOLDER: Final[str] = "<team>"
 NO_HISTORY_CONTRACT: Final[str] = (
     "no teamchat history contract exposing the notify flag and the m.thread relation "
     "is verified yet (Plan 00636 Task 1.2), so the questions history is unverified "
@@ -98,5 +100,6 @@ class TeamchatOwnerWaitBus:
         Templates, not runnable lines: the guard could not read which threads
         are open, so ``Q<n>`` and ``<event id>`` are left for the coordinator.
         """
-        prefix = f"{NOTIFY_PROGRAM} --team {shlex.quote(team)}"
+        shown = team if team == TEAM_PLACEHOLDER else shlex.quote(team)
+        prefix = f"{NOTIFY_PROGRAM} --team {shown}"
         return (f"{prefix} Q<n> --ask", f"{prefix} --re <event id> --ask")

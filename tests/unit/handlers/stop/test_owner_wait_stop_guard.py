@@ -250,17 +250,54 @@ class TestAllow:
         assert result.decision is Decision.ALLOW
         assert bus.reads == []
 
-    def test_unknown_role_is_untouched(self, tmp_path: Path) -> None:
+    def test_absent_seat_context_is_untouched(self, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question()))
-        result = _run(_Handler(_seats(None), bus), _stop(tmp_path))
+        context = SeatContext.absent(ProbeReason.RESOLVED)
+        result = _run(_Handler(context, bus), _stop(tmp_path))
         assert result.decision is Decision.ALLOW
+        assert result.context == []
         assert bus.reads == []
 
-    def test_unresolved_probe_is_untouched(self, tmp_path: Path) -> None:
+
+class TestUnknownRoleStaysArmed:
+    """F4: an unreadable role or an unresolved probe never disarms the guard (00631 guards_armed)."""
+
+    def test_unknown_role_is_unconfirmed_under_refuse(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        result = _run(_Handler(_seats(None), bus), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert "--team alpha" in result.reason
+        assert "role" in result.reason
+        assert bus.reads == []
+
+    def test_unknown_role_on_v1_auto_allows_with_an_advisory(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()), flags=False)
+        result = _run(_Handler(_seats(None), bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+        assert "team alpha" in _advisory(result)
+        assert bus.reads == []
+
+    def test_unresolved_probe_is_unconfirmed_under_refuse(self, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question()))
         context = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
-        assert _run(_Handler(context, bus), _stop(tmp_path)).decision is Decision.ALLOW
+        result = _run(_Handler(context, bus), _stop(tmp_path))
+        assert result.decision is Decision.DENY
+        assert "--team ''" not in result.reason
+        assert "--team <team>" in result.reason
         assert bus.reads == []
+
+    def test_unresolved_probe_on_v1_auto_allows_with_an_advisory(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()), flags=False)
+        context = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
+        result = _run(_Handler(context, bus, on_unreadable_bus="auto"), _stop(tmp_path))
+        assert result.decision is Decision.ALLOW
+        assert "--team <team>" in _advisory(result)
+
+    def test_unresolved_probe_for_a_subagent_is_untouched(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        context = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
+        result = _run(_Handler(context, bus), _stop(tmp_path, agent_id="agent-123"))
+        assert result is None or result.decision is Decision.ALLOW
 
     def test_no_team_runs_no_probe(self, tmp_path: Path) -> None:
         handler = _Handler(None, _FakeBus(_snapshot(_question())))

@@ -17,8 +17,11 @@ Joseph to pick", "the owner must answer"; a negated match like "not waiting on
 any user input" does not count) waits on a human or whose session is in the
 awaiting-human mode, and
 per held team only where the 00631 probe declares this seat ``coordinator``
-(:func:`role_gate` verdict APPLIES). A worker, an unknown role, an unresolved
-probe or no team leaves the stop untouched and reads nothing. A stop whose
+(:func:`role_gate` verdict APPLIES). A declared worker (any other role), no
+team or a sub-agent leaves the stop untouched and reads nothing. An unknown
+role or an unresolved probe stays ARMED (00631 ``guards_armed``: an unreadable
+state never disarms a seat): it is an unconfirmed wait under
+``options.on_unreadable_bus``, without a bus read. A stop whose
 message cannot be read is treated as an unconfirmed wait for each coordinator
 team, under ``options.on_unreadable_bus`` (the bus is not read).
 
@@ -83,6 +86,7 @@ from claude_code_hooks_daemon.utils.autonomy import session_policy
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.owner_wait_bus import (
+    TEAM_PLACEHOLDER,
     BusUnreadable,
     OwnerWaitBus,
     TeamchatOwnerWaitBus,
@@ -107,6 +111,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     ROLE_COORDINATOR,
     SeatContext,
     SeatContextResolver,
+    SeatState,
     SessionSignals,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
@@ -184,7 +189,8 @@ _RULE: Final[Rule] = Rule(
         "open question the seat asked or owns, and every owner-started thread, needs a\n"
         "NOTIFYING post from this seat with a real body within options.window_minutes;\n"
         "an unreadable notify flag or thread relation counts as not notifying. An\n"
-        "unreadable bus follows options.on_unreadable_bus: 'auto' (default) refuses where\n"
+        "unreadable bus, stop message or seat role (or an unresolved seat probe)\n"
+        "follows options.on_unreadable_bus: 'auto' (default) refuses where\n"
         "the adapter reads notify flags and otherwise allows with an advisory; 'refuse'\n"
         "always refuses; 'allow' fails open with a log line. The deny names thread ids\n"
         "only, never the waits.\n"
@@ -205,6 +211,18 @@ class _Waiting(Enum):
 #: The ``_Unconfirmed`` reason when the stop message itself could not be read.
 _UNREADABLE_STOP_REASON: Final[str] = (
     "the stop message could not be read, so whether it waits on a human is unknown"
+)
+
+#: ``_Unconfirmed`` reasons when this seat's role cannot be read (F4: these stay armed).
+_UNKNOWN_ROLE_REASON: Final[str] = (
+    "this seat's role in the team is unreadable, so it may be the coordinator"
+)
+_UNRESOLVED_PROBE_REASON: Final[str] = (
+    "the team seat probe gave no answer, so neither the team nor this seat's role is known"
+)
+#: Unconfirmed reasons that are not about the bus history, so the deny omits the bus note.
+_NOT_BUS_REASONS: Final[frozenset[str]] = frozenset(
+    {_UNKNOWN_ROLE_REASON, _UNRESOLVED_PROBE_REASON, _UNREADABLE_STOP_REASON}
 )
 
 
@@ -436,6 +454,32 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             )
             return BusUnreadable(f"the bus adapter raised {type(exc).__name__}")
 
+    @staticmethod
+    def _armed_teams(
+        hook_input: dict[str, Any], context: SeatContext
+    ) -> list[tuple[str, str | None]]:
+        """Each team this guard is armed for, with why its role is unknown (None: coordinator).
+
+        00631 ``guards_armed``: a declared coordinator is checked on the bus; an
+        unreadable role, or a probe that resolved no seats at all, is an
+        unconfirmed wait under ``options.on_unreadable_bus`` (the bus is not
+        read, the seat may be a worker). A declared other role, no team and a
+        sub-agent are untouched: :func:`role_gate` says NOT_APPLICABLE.
+        """
+        if context.state is SeatState.UNRESOLVED:
+            gate = role_gate(hook_input, context, team="", role=ROLE_COORDINATOR)
+            if gate.verdict is GateVerdict.ROLE_UNKNOWN:
+                return [(TEAM_PLACEHOLDER, _UNRESOLVED_PROBE_REASON)]
+            return []
+        armed: list[tuple[str, str | None]] = []
+        for team in context.teams_held():
+            gate = role_gate(hook_input, context, team=team, role=ROLE_COORDINATOR)
+            if gate.verdict is GateVerdict.APPLIES:
+                armed.append((gate.team, None))
+            elif gate.verdict is GateVerdict.ROLE_UNKNOWN:
+                armed.append((gate.team, _UNKNOWN_ROLE_REASON))
+        return armed
+
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Deny on stale threads or a refused unreadable bus; ``auto`` on v1 adds an advisory."""
         waiting = self._waiting(hook_input)
@@ -448,33 +492,31 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         stale: list[_Stale] = []
         unconfirmed: list[_Unconfirmed] = []
         unchecked: list[_Unconfirmed] = []
-        for team in context.teams_held():
-            gate = role_gate(hook_input, context, team=team, role=ROLE_COORDINATOR)
-            if gate.verdict is not GateVerdict.APPLIES:
-                continue
-            snapshot = (
-                BusUnreadable(_UNREADABLE_STOP_REASON)
-                if waiting is _Waiting.UNREADABLE
-                else self._read(gate.team, signals)
-            )
+        for team, role_unread in self._armed_teams(hook_input, context):
+            if role_unread is not None:
+                snapshot: BusSnapshot | BusUnreadable = BusUnreadable(role_unread)
+            elif waiting is _Waiting.UNREADABLE:
+                snapshot = BusUnreadable(_UNREADABLE_STOP_REASON)
+            else:
+                snapshot = self._read(team, signals)
             if isinstance(snapshot, BusUnreadable):
                 refused = self._refuses_unreadable(policy)
                 logger.warning(
-                    "owner_wait_stop_guard: team %s bus unreadable (%s); on_unreadable_bus=%s, "
+                    "owner_wait_stop_guard: team %s unconfirmed (%s); on_unreadable_bus=%s, "
                     "so the waiting stop is %s",
-                    gate.team,
+                    team,
                     snapshot.reason,
                     policy,
                     "refused" if refused else "allowed unverified",
                 )
                 if refused:
-                    unconfirmed.append(_Unconfirmed(gate.team, snapshot.reason))
+                    unconfirmed.append(_Unconfirmed(team, snapshot.reason))
                 elif policy == ON_UNREADABLE_AUTO:
-                    unchecked.append(_Unconfirmed(gate.team, snapshot.reason))
+                    unchecked.append(_Unconfirmed(team, snapshot.reason))
                 continue
             ids = stale_threads(snapshot, now=self._clock(), window_seconds=window)
             if ids:
-                stale.append(_Stale(gate.team, ids))
+                stale.append(_Stale(team, ids))
         # A re-entered stop never repeats the advisory: an ALLOW with context
         # continues the session one turn, and re-emitting it would loop.
         advisory = (
@@ -509,10 +551,15 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             )
         for gap in unconfirmed:
             question, owner_message = self._bus.notify_commands(gap.team)
+            bus_note = (
+                ""
+                if gap.reason in _NOT_BUS_REASONS
+                else "The bus history exposes no notify flag or m.thread relation this guard "
+                "can read (unverified here). "
+            )
             parts.append(
                 f"Team {gap.team}: the guard could not machine-confirm that the owner was told "
-                f"({gap.reason}). The bus history exposes no notify flag or m.thread relation "
-                "this guard can read (unverified here), so the wait is unconfirmed and the stop "
+                f"({gap.reason}). {bus_note}So the wait is unconfirmed and the stop "
                 "fails closed. Post a notifying reply in each owner-started thread "
                 f"(`{owner_message}`) and on each open question this seat asked "
                 f"(`{question}`), naming what is awaited."
@@ -556,7 +603,9 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             "thread (`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
             "owner-started message). `refuse` always refuses it once; `allow` lets it through "
             "with a log line only.\n\n"
-            "**Stands aside** for a worker or unknown role, no team, a sub-agent, a usage pause "
+            "An unreadable role or an unresolved seat probe stays armed and is treated like an "
+            "unreadable bus.\n\n"
+            "**Stands aside** for a declared worker, no team, a sub-agent, a usage pause "
             "and the re-stop after its own deny (a re-stop after another handler's deny is "
             "checked again). The stop text should point at thread "
             "ids, never restate the waits."
