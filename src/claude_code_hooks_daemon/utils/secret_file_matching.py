@@ -3475,7 +3475,7 @@ def _token_mention_judged(
                         not (has_leading_wildcard and has_trailing_wildcard)
                         or _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
                     )
-                    and fnmatch.fnmatch(stem_basename, basename)
+                    and fnmatch.fnmatchcase(stem_basename, _bash_bracket_negation(basename))
                 ):
                     return pattern
                 # Plan 00272 gap fix (G2), GATED to leading-wildcard
@@ -3645,6 +3645,20 @@ def find_protected_mention_strict(
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
+    # Review finding 6: this second opinion shares one set of reads across its words too.
+    with link_scan_scope():
+        return _strict_link_mention(command, tokens, patterns, project_root, cwd, index)
+
+
+def _strict_link_mention(
+    command: str,
+    tokens: list[tuple[str, int]],
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    cwd: str | None,
+    index: "ProtectedFileIndex | None",
+) -> str | None:
+    """:func:`find_protected_mention_strict` past the spellings: what each word reaches."""
     unquoted = mask_quoted(command, keep_double=False)
     bases = effective_cwds(command, cwd)
     default_globs = _default_globs_for(command)
@@ -3982,8 +3996,13 @@ LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
 INDEXED_DIRECTORY_LINK_CAP: Final[int] = 512
 #: Past LINK_SCAN_DIRECTORY_CAP, at most this many link paths are judged by name.
 INDEXED_LINK_CAP: Final[int] = 65_536
-#: Ledger 00474 N710: the most directories one globbed word's expansion lists or probes.
-GLOB_WORD_LISTING_CAP: Final[int] = 512
+#: Ledger 00474 N710: the most distinct directories one command's globbed words list or
+#: probe, shared by every word (a read already made is reused, not counted again).
+#: Measured: a listing costs about 40 us and a probe about 14 us warm, so the cap is
+#: about 0.2 s of reads; it is 8x the 527 plan folders an ordinary glob here walks.
+GLOB_LISTING_CAP: Final[int] = 4096
+#: Ledger 00474 N710: the most paths one step of one globbed word keeps (each is read next).
+GLOB_WORD_FRONTIER_CAP: Final[int] = 4096
 #: Ledger 00474 N710: the most matches of one globbed word that pass through a link.
 GLOB_WORD_MATCH_CAP: Final[int] = 4096
 _GIT_DIRECTORY: Final[str] = ".git"
@@ -4017,9 +4036,8 @@ class LinkNames:
             return True
         if any(char in _UNREADABLE_PATTERN_CHARACTERS for char in component):
             return True
-        return any(char in _GLOB_CHARACTERS for char in component) and fnmatch.fnmatchcase(
-            name, component
-        )
+        # Read as bash reads it ([^z] negates, POSIX classes widen), not as fnmatch does.
+        return _component_is_pattern(component) and _component_spells(component, name)
 
     def reaches(self, token: str) -> bool:
         """Could relative ``token``, read from any project directory, pass through a link?"""
@@ -4085,17 +4103,22 @@ def link_scan_scope() -> Iterator[None]:
         yield
         return
     token = _link_scan_scope.set({})
+    # Review finding 6: one listing per directory for all of this call's globbed words.
+    listings_token = _glob_listings_scope.set(_GlobListings())
     try:
         yield
     finally:
+        _glob_listings_scope.reset(listings_token)
         _link_scan_scope.reset(token)
 
 
 def reset_link_scans() -> None:
-    """Forget the scans held by the current scope (for tests that change the tree)."""
+    """Forget the scans and listings held by the current scope (for tests that change the tree)."""
     held = _link_scan_scope.get()
     if held is not None:
         held.clear()
+    if _glob_listings_scope.get() is not None:
+        _glob_listings_scope.set(_GlobListings())
 
 
 class _LinkKind(Enum):
@@ -4185,7 +4208,7 @@ def expand_directory_glob(base: str, pattern: str) -> Bounded[list[str]]:
                         entry
                         for entry in entries
                         if (not entry.name.startswith(".") or component.startswith("."))
-                        and fnmatch.fnmatchcase(entry.name, component)
+                        and _component_spells(component, entry.name)
                     ]
             except OSError as exc:
                 log_and_continue(
@@ -4252,18 +4275,151 @@ class _Reached:
 
 
 @dataclass
+class _ListedEntry:
+    """One entry of a directory listing, its directory question answered at most once."""
+
+    name: str
+    is_link: bool
+    entry: os.DirEntry[str]
+    leads_to_directory: bool | None = None
+
+
+#: What a probe of a spelled path found: absent, or (is a link, is a directory or None if
+#: that could not be told).
+_Probe = tuple[bool, bool | None] | None
+#: A step's result, keyed by (path, via a link, component, last component, default semantics).
+_StepKey = tuple[str, bool, str, bool, bool]
+
+
+@dataclass
+class _GlobListings:
+    """The reads every globbed word of one command shares (review finding 6).
+
+    Each directory is listed, and each spelled path probed, once per command;
+    only those first reads count against :data:`GLOB_LISTING_CAP`, so the cap
+    counts distinct directories, not words. A read that failed is kept as its
+    failure, and every later word that meets it stops too, never reading it as
+    an empty listing. A spent budget stays spent for the rest of the command.
+    """
+
+    listings: dict[str, list[_ListedEntry] | _WordGlobStopped] = field(default_factory=dict)
+    probes: dict[str, _Probe | _WordGlobStopped] = field(default_factory=dict)
+    links: dict[str, list[_ListedEntry]] = field(default_factory=dict)
+    steps: dict[_StepKey, list[_Reached]] = field(default_factory=dict)
+    linked_starts: dict[str, bool] = field(default_factory=dict)
+    charged: int = 0
+    exhausted: bool = False
+
+    def charge(self) -> None:
+        """Count one more distinct listing or probe; stop past the cap, and for good."""
+        if not self.exhausted:
+            self.charged += 1
+            self.exhausted = self.charged > GLOB_LISTING_CAP
+        if self.exhausted:
+            raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+
+    def entries(self, directory: str) -> list[_ListedEntry]:
+        """The entries of ``directory``, listed once; none when it is not there."""
+        if directory not in self.listings:
+            self.listings[directory] = self._list(directory)
+        held = self.listings[directory]
+        if isinstance(held, _WordGlobStopped):
+            raise held
+        return held
+
+    def link_entries(self, directory: str) -> list[_ListedEntry]:
+        """The links among the entries of ``directory``, picked out once."""
+        held = self.links.get(directory)
+        if held is None:
+            held = [listed for listed in self.entries(directory) if listed.is_link]
+            self.links[directory] = held
+        return held
+
+    def _list(self, directory: str) -> list[_ListedEntry] | _WordGlobStopped:
+        self.charge()
+        try:
+            with os.scandir(directory) as listing:
+                return [_ListedEntry(entry.name, entry.is_symlink(), entry) for entry in listing]
+        except OSError as exc:
+            if exc.errno in _ABSENT_ERRNOS:
+                return []
+            log_and_continue(
+                logger,
+                exc,
+                reason="a directory a globbed word passes cannot be listed (fail closed)",
+                level=logging.DEBUG,
+            )
+            return _WordGlobStopped(_WORD_GLOB_UNREADABLE)
+
+    def probe(self, joined: str) -> _Probe:
+        """Is spelled path ``joined`` there, a link, a directory; probed once."""
+        if joined not in self.probes:
+            self.probes[joined] = self._probe(joined)
+        held = self.probes[joined]
+        if isinstance(held, _WordGlobStopped):
+            raise held
+        return held
+
+    def _probe(self, joined: str) -> _Probe | _WordGlobStopped:
+        self.charge()
+        try:
+            is_link = stat.S_ISLNK(os.lstat(joined).st_mode)
+        except OSError as exc:
+            if exc.errno in _ABSENT_ERRNOS or exc.errno == errno.ELOOP:
+                return None
+            log_and_continue(
+                logger,
+                exc,
+                reason="a path a globbed word spells cannot be read (fail closed)",
+                level=logging.DEBUG,
+            )
+            return _WordGlobStopped(_WORD_GLOB_UNREADABLE)
+        try:
+            is_directory: bool | None = stat.S_ISDIR(Path(joined).stat().st_mode)
+        except OSError as exc:
+            # Only a path that must be passed through needs this answer; it raises there.
+            is_directory = (
+                False if exc.errno in _ABSENT_ERRNOS or exc.errno == errno.ELOOP else None
+            )
+        return is_link, is_directory
+
+    def starts_through_link(self, start: str) -> bool:
+        """Is relative base ``start`` reached through a link; resolved once."""
+        held = self.linked_starts.get(start)
+        if held is None:
+            held = os.path.realpath(start) != os.path.normpath(start)
+            self.linked_starts[start] = held
+        return held
+
+
+#: The current tool call's shared glob reads (:func:`link_scan_scope`); None outside one.
+_glob_listings_scope: contextvars.ContextVar[_GlobListings | None] = contextvars.ContextVar(
+    "glob_listings_scope", default=None
+)
+
+
+def _glob_listings() -> _GlobListings:
+    """The current scope's shared reads; outside any scope, a fresh set for one expansion."""
+    held = _glob_listings_scope.get()
+    return held if held is not None else _GlobListings()
+
+
+def glob_listings_charged() -> int:
+    """How many distinct listings and probes the current scope's globbed words have made."""
+    held = _glob_listings_scope.get()
+    return held.charged if held is not None else 0
+
+
+@dataclass
 class _WordGlobWalk:
     """One bounded expansion of a globbed word (Ledger 00474 N710)."""
 
     default_semantics: bool
-    listed: int = 0
+    listings: _GlobListings = field(default_factory=_GlobListings)
     linked_matches: int = 0
-
-    def charge(self, count: int = 1) -> None:
-        """Count ``count`` more listings or probes; stop past the cap."""
-        self.listed += count
-        if self.listed > GLOB_WORD_LISTING_CAP:
-            raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+    #: :meth:`_links_only` for the component last asked about (one word asks about one at a time).
+    _links_only_component: str = ""
+    _links_only_answer: bool = False
 
     def count_match(self, reached: _Reached) -> None:
         """Count a match on a link; plain matches resolve to their spelling and cost nothing."""
@@ -4273,7 +4429,26 @@ class _WordGlobWalk:
                 raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
 
     def step(self, reached: _Reached, component: str, last: bool) -> list[_Reached]:
-        """What ``component`` matches under ``reached``: every entry when ``last``, else directories."""
+        """What ``component`` matches under ``reached``: every entry when ``last``, else directories.
+
+        The same step met again in this command (another word, another base)
+        reuses its answer; only a step that finished is kept. A last step
+        under a path reached through no link returns only the links it
+        matches: a plain match there resolves to its own spelling, which
+        :func:`expand_word_glob` never returns, so the rest are not matched.
+        """
+        if last and not reached.via_link and self._links_only(component):
+            return self._linked_matches(reached, component)
+        if last:
+            return self._step(reached, component, last)
+        key = (reached.path, reached.via_link, component, last, self.default_semantics)
+        held = self.listings.steps.get(key)
+        if held is None:
+            held = self._step(reached, component, last)
+            self.listings.steps[key] = held
+        return held
+
+    def _step(self, reached: _Reached, component: str, last: bool) -> list[_Reached]:
         if component == _GLOBSTAR and not self.default_semantics:
             return self._globstar(reached, last)
         if not _component_is_pattern(component):
@@ -4284,42 +4459,57 @@ class _WordGlobWalk:
         hidden = component.startswith(".") or not self.default_semantics
         return [
             found
-            for name, is_link, entry in self._entries(reached.path)
-            if (hidden or not name.startswith(".")) and pattern.match(name) is not None
-            for found in self._keep(reached, name, is_link, entry, last)
+            for listed in self.listings.entries(reached.path)
+            if (hidden or not listed.name.startswith("."))
+            and pattern.match(listed.name) is not None
+            for found in self._keep(reached, listed, last)
+        ]
+
+    def _links_only(self, component: str) -> bool:
+        """Can last ``component`` be matched against a directory's links alone (a non-globstar pattern)?"""
+        if component != self._links_only_component:
+            self._links_only_component = component
+            self._links_only_answer = _component_is_pattern(component) and not (
+                component == _GLOBSTAR and not self.default_semantics
+            )
+        return self._links_only_answer
+
+    def _linked_matches(self, reached: _Reached, component: str) -> list[_Reached]:
+        """The links in ``reached`` that last pattern ``component`` matches."""
+        links = self.listings.link_entries(reached.path)
+        if not links:
+            return []
+        pattern = _component_regex(component)
+        if pattern is None:
+            raise _WordGlobStopped(_WORD_GLOB_UNREADABLE_PATTERN)
+        hidden = component.startswith(".") or not self.default_semantics
+        return [
+            _Reached(f"{reached.path.rstrip('/')}/{listed.name}", True)
+            for listed in links
+            if (hidden or not listed.name.startswith("."))
+            and pattern.match(listed.name) is not None
         ]
 
     def _literal(self, reached: _Reached, component: str, last: bool) -> list[_Reached]:
         """``component`` spelled out: one probe, physical ``..`` kept as written."""
-        self.charge()
         joined = f"{reached.path.rstrip('/')}/{component}"
-        try:
-            is_link = stat.S_ISLNK(os.lstat(joined).st_mode) and component != _PARENT
-            if not last and not stat.S_ISDIR(Path(joined).stat().st_mode):
+        probed = self.listings.probe(joined)
+        if probed is None:
+            return []
+        is_link, is_directory = probed
+        if not last:
+            if is_directory is None:
+                raise _WordGlobStopped(_WORD_GLOB_UNREADABLE)
+            if not is_directory:
                 return []
-        except OSError as exc:
-            if exc.errno in _ABSENT_ERRNOS or exc.errno == errno.ELOOP:
-                return []
-            raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
-        return [_Reached(joined, reached.via_link or is_link)]
+        return [_Reached(joined, reached.via_link or (is_link and component != _PARENT))]
 
-    def _entries(self, directory: str) -> list[tuple[str, bool, os.DirEntry[str]]]:
-        """``(name, is a link, entry)`` for each entry of ``directory``; none when it is not there."""
-        self.charge()
-        try:
-            with os.scandir(directory) as listing:
-                return [(entry.name, entry.is_symlink(), entry) for entry in listing]
-        except OSError as exc:
-            if exc.errno in _ABSENT_ERRNOS:
-                return []
-            raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
-
-    def _keep(
-        self, reached: _Reached, name: str, is_link: bool, entry: os.DirEntry[str], last: bool
-    ) -> list[_Reached]:
-        """The match ``entry`` makes: any entry when ``last``, else only a directory."""
-        found = _Reached(f"{reached.path.rstrip('/')}/{name}", reached.via_link or is_link)
-        if not last and not _leads_to_directory(entry):
+    def _keep(self, reached: _Reached, listed: _ListedEntry, last: bool) -> list[_Reached]:
+        """The match ``listed`` makes: any entry when ``last``, else only a directory."""
+        found = _Reached(
+            f"{reached.path.rstrip('/')}/{listed.name}", reached.via_link or listed.is_link
+        )
+        if not last and not _leads_to_directory(listed):
             return []
         return [found]
 
@@ -4329,28 +4519,35 @@ class _WordGlobWalk:
         pending = [reached]
         while pending:
             directory = pending.pop()
-            for name, is_link, entry in self._entries(directory.path):
+            for listed in self.listings.entries(directory.path):
                 child = _Reached(
-                    f"{directory.path.rstrip('/')}/{name}", directory.via_link or is_link
+                    f"{directory.path.rstrip('/')}/{listed.name}",
+                    directory.via_link or listed.is_link,
                 )
-                is_directory = _leads_to_directory(entry)
+                is_directory = _leads_to_directory(listed)
                 if last or is_directory:
                     found.append(child)
-                if is_directory and not is_link:
+                if is_directory and not listed.is_link:
                     pending.append(child)
-            if len(found) > GLOB_WORD_LISTING_CAP:
+            if len(found) > GLOB_WORD_FRONTIER_CAP:
                 raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
         return found
 
 
-def _leads_to_directory(entry: os.DirEntry[str]) -> bool:
-    """Does ``entry`` lead to a directory (through a link too); a loop does not."""
-    try:
-        return entry.is_dir()
-    except OSError as exc:
-        if exc.errno == errno.ELOOP or exc.errno in _ABSENT_ERRNOS:
-            return False
-        raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
+def _leads_to_directory(listed: _ListedEntry) -> bool:
+    """Does ``listed`` lead to a directory (through a link too); a loop does not.
+
+    The answer is kept on the entry; an entry whose answer cannot be read is
+    asked again, and stops the expansion, each time it is met.
+    """
+    if listed.leads_to_directory is None:
+        try:
+            listed.leads_to_directory = listed.entry.is_dir()
+        except OSError as exc:
+            if exc.errno != errno.ELOOP and exc.errno not in _ABSENT_ERRNOS:
+                raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
+            listed.leads_to_directory = False
+    return listed.leads_to_directory
 
 
 def _component_is_pattern(component: str) -> bool:
@@ -4410,6 +4607,11 @@ def _extglob_regex(component: str) -> str | None:
     return "".join(parts)
 
 
+#: Distinct word components whose translation is kept; a command repeats few of them.
+_COMPONENT_REGEX_CACHE_SIZE: Final[int] = 4096
+
+
+@functools.lru_cache(maxsize=_COMPONENT_REGEX_CACHE_SIZE)
 def _component_regex(component: str) -> re.Pattern[str] | None:
     """``component`` as a whole-name regex matching at least what bash would; None if unreadable.
 
@@ -4426,7 +4628,16 @@ def _component_regex(component: str) -> re.Pattern[str] | None:
         return re.compile(f"(?s:{translated})\\Z")
     if any(opener in component for opener in _POSIX_BRACKET_OPENERS):
         return re.compile(f"(?s:{_ANY_NAME_REGEX})\\Z")
-    return re.compile(fnmatch.translate(component.replace("[^", "[!").replace("\\", "")))
+    return re.compile(fnmatch.translate(_bash_bracket_negation(component).replace("\\", "")))
+
+
+def _bash_bracket_negation(pattern: str) -> str:
+    """Shell glob ``pattern`` spelled for fnmatch: bash negates a bracket with ``^`` as with ``!``.
+
+    Python's fnmatch reads ``[^z]`` as "``^`` or ``z``"; bash reads it as "not
+    ``z``". Every fnmatch of a shell word in this module goes through here.
+    """
+    return pattern.replace("[^", "[!")
 
 
 def _component_spells(spelling: str, name: str) -> bool:
@@ -4450,27 +4661,34 @@ def expand_word_glob(
 
     ``default_semantics`` is bash's default globbing (no ``dotglob``, no
     ``globstar``); anything else is read as the wider of the two, so a dot name
-    matches a wildcard and ``**`` descends. At most
-    :data:`GLOB_WORD_LISTING_CAP` directories are listed or probed. An
+    matches a wildcard and ``**`` descends. Reads are shared with every other
+    word of the command (:func:`link_scan_scope`): at most
+    :data:`GLOB_LISTING_CAP` distinct directories are listed or probed in all,
+    and one step keeps at most :data:`GLOB_WORD_FRONTIER_CAP` paths. An
     expansion that cannot finish (past a cap, a directory that cannot be
     listed, an entry that cannot be classified) is a stopped walk, never "no
     match": callers fail closed on it.
     """
     absolute = pattern.startswith("/")
     start = "/" if absolute else base
-    linked_base = not absolute and os.path.realpath(start) != os.path.normpath(start)
-    walk = _WordGlobWalk(default_semantics=default_semantics)
-    current = [_Reached(start, linked_base)]
+    walk = _WordGlobWalk(default_semantics=default_semantics, listings=_glob_listings())
     components = [part for part in pattern.split("/") if part not in ("", ".")]
     try:
+        if walk.listings.exhausted:
+            # Spent is spent: a later word is not judged on what the budget happened to cover.
+            raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
+        linked_base = not absolute and walk.listings.starts_through_link(start)
+        current = [_Reached(start, linked_base)]
         for depth, component in enumerate(components):
             last = depth == len(components) - 1
-            following: list[_Reached] = []
+            # One entry per path: a path met through a link on any route keeps that mark.
+            following: dict[str, bool] = {}
             for reached in current:
-                following.extend(walk.step(reached, component, last))
-                if not last and len(following) > GLOB_WORD_LISTING_CAP:
+                for found in walk.step(reached, component, last):
+                    following[found.path] = following.get(found.path, False) or found.via_link
+                if not last and len(following) > GLOB_WORD_FRONTIER_CAP:
                     raise _WordGlobStopped(_WORD_GLOB_TOO_WIDE)
-            current = following
+            current = [_Reached(path, via_link) for path, via_link in following.items()]
             if not current:
                 return finished([])
         for reached in current:

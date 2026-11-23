@@ -19,6 +19,7 @@ assembled too: this file is itself judged by the guard it tests.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.indexed_project import index_project
+from tests.load_scaling import scaled_cpu_seconds
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -266,8 +268,15 @@ class TestFailsClosed:
     def test_more_listings_than_the_cap_is_denied(self, project: Project) -> None:
         for number in range(4):
             (project.root / "wide" / f"d{number}").mkdir(parents=True)
-        with patch.object(sfm, "GLOB_WORD_LISTING_CAP", 2):
+        with patch.object(sfm, "GLOB_LISTING_CAP", 2):
             assert _both("cat wide/*/*/x", project.root) == (Decision.DENY, Decision.DENY)
+        assert _both("cat wide/*/*/x", project.root) == (Decision.ALLOW, Decision.ALLOW)
+
+    def test_more_paths_in_one_step_than_the_frontier_cap_is_denied(self, project: Project) -> None:
+        for number in range(4):
+            (project.root / "wide" / f"d{number}").mkdir(parents=True)
+        with patch.object(sfm, "GLOB_WORD_FRONTIER_CAP", 2):
+            assert _both("cat wide/*/x", project.root) == (Decision.DENY, Decision.DENY)
 
     def test_a_directory_that_cannot_be_listed_is_denied(self, project: Project) -> None:
         real_scandir = os.scandir
@@ -420,3 +429,139 @@ class TestUnreadableIsAFinding:
         with patch.object(os, "scandir", side_effect=scandir):
             assert not sfm.expand_word_glob(str(project.root), "kit/bin/n*").complete
             assert _write(f"{_SHEBANG}cat kit/bin/n*\n", project.root) is Decision.DENY
+
+    def test_an_unlistable_directory_stops_every_word_that_meets_it(self, project: Project) -> None:
+        """A refusal is remembered as a refusal for the command, never as an empty listing."""
+        real_scandir = os.scandir
+        refused = str(project.kit / "bin")
+
+        def scandir(path: Any = ".") -> Any:
+            if str(path) == refused:
+                raise PermissionError(13, "Permission denied", refused)
+            return real_scandir(path)
+
+        with patch.object(os, "scandir", side_effect=scandir), sfm.link_scan_scope():
+            assert not sfm.expand_word_glob(str(project.root), "kit/bin/l*").complete
+            assert not sfm.expand_word_glob(str(project.root), "kit/bin/n*").complete
+
+
+#: Plain directories past the old per-word listing cap of 512 (CLAUDE/Plan/Completed held 527).
+_MANY_PLAIN = 600
+
+
+@pytest.fixture()
+def many_plain(project: Project) -> Project:
+    """``done/dNNN/PLAN.md`` in more plain directories than one listing cap of 512 allowed."""
+    for number in range(_MANY_PLAIN):
+        folder = project.root / "done" / f"d{number:04d}"
+        folder.mkdir(parents=True)
+        (folder / "PLAN.md").write_bytes(b"plain\n")
+    return project
+
+
+class TestManyPlainDirectories:
+    """Review finding 5: an ordinary glob over hundreds of plain directories is allowed."""
+
+    def test_a_plain_glob_over_hundreds_of_directories_is_allowed(
+        self, many_plain: Project
+    ) -> None:
+        command = "grep -l Complete done/*/PLAN.md"
+        assert _both(command, many_plain.root) == (Decision.ALLOW, Decision.ALLOW)
+
+    def test_a_link_among_hundreds_of_plain_directories_is_still_denied(
+        self, many_plain: Project
+    ) -> None:
+        planted = many_plain.root / "done" / f"d{_MANY_PLAIN - 1:04d}" / "PLAN.md"
+        planted.unlink()
+        planted.symlink_to(many_plain.outside / _PROTECTED)
+        command = "grep -l Complete done/*/PLAN.md"
+        assert _both(command, many_plain.root) == (Decision.DENY, Decision.DENY)
+        with patch.object(SecretFileGuardHandler, "_index", return_value=None):
+            assert _bash(command, many_plain.root) is Decision.DENY
+
+
+class TestListingsAreSharedAcrossWords:
+    """Review finding 6: one listing per directory per command, and one budget for all words."""
+
+    def test_each_directory_is_listed_once_per_command(self, project: Project) -> None:
+        for number in range(20):
+            (project.root / "wide" / f"d{number}").mkdir(parents=True)
+        real_scandir = os.scandir
+        calls: dict[str, int] = {}
+
+        def scandir(path: Any = ".") -> Any:
+            calls[str(path)] = calls.get(str(path), 0) + 1
+            return real_scandir(path)
+
+        words = " ".join(f"wide/*/x{number}*" for number in range(50))
+        # Without the index: its own wildcard-link listing (main's code) is not this walk's.
+        with (
+            patch.object(os, "scandir", side_effect=scandir),
+            patch.object(SecretFileGuardHandler, "_index", return_value=None),
+        ):
+            assert _bash(f"ls {words}", project.root) is Decision.ALLOW
+        under_wide = {path: count for path, count in calls.items() if "/wide" in path}
+        assert under_wide
+        assert max(under_wide.values()) == 1, under_wide
+
+    def test_a_repeated_word_costs_nothing_more(self, project: Project) -> None:
+        for number in range(4):
+            (project.root / "wide" / f"d{number}").mkdir(parents=True)
+        with sfm.link_scan_scope():
+            first = sfm.expand_word_glob(str(project.root), "wide/*/x")
+            charged = sfm.glob_listings_charged()
+            again = sfm.expand_word_glob(str(project.root), "wide/*/x")
+            assert sfm.glob_listings_charged() == charged
+        assert first.complete
+        assert again.complete
+
+    def test_the_budget_is_shared_by_every_word_of_a_command(self, project: Project) -> None:
+        for tree in ("a", "b"):
+            for number in range(4):
+                (project.root / tree / f"d{number}").mkdir(parents=True)
+        with sfm.link_scan_scope():
+            assert sfm.expand_word_glob(str(project.root), "a/*/x").complete
+            one_word = sfm.glob_listings_charged()
+        with patch.object(sfm, "GLOB_LISTING_CAP", one_word + 1), sfm.link_scan_scope():
+            assert sfm.expand_word_glob(str(project.root), "a/*/x").complete
+            assert not sfm.expand_word_glob(str(project.root), "b/*/x").complete
+            # Spent is spent: a later word is stopped too, even one already listed.
+            assert not sfm.expand_word_glob(str(project.root), "a/*/x").complete
+
+    @pytest.mark.perf_sweep
+    def test_two_thousand_words_over_three_hundred_directories_are_judged_quickly(
+        self, project: Project
+    ) -> None:
+        for number in range(300):
+            (project.root / "wide" / f"d{number}").mkdir(parents=True)
+        words = " ".join(f"wide/*/x{number}*" for number in range(2000))
+        start = time.perf_counter()
+        assert _bash(f"ls {words}", project.root) is Decision.ALLOW
+        assert time.perf_counter() - start < scaled_cpu_seconds(_MANY_WORDS_SECONDS)
+
+
+#: The 2000-word command took 10-13 s before listings were shared; main took 0.85 s.
+_MANY_WORDS_SECONDS = 3.0
+
+
+class TestBashBracketNegation:
+    """Review finding 4: bash reads ``[^z]`` as "not z"; Python's fnmatch reads it as {^, z}."""
+
+    @pytest.mark.parametrize(
+        "word", ["[^z]in/late", "bin/[^z]ate", "[^z]ate", "[[:alpha:]]in/late", "kit/[^z]in/late"]
+    )
+    def test_link_names_reaches_through_a_negated_bracket(self, word: str) -> None:
+        assert sfm.LinkNames(["kit/bin/late"]).reaches(word)
+
+    @pytest.mark.parametrize("word", ["[^b]in/late", "bin/[^l]ate", "lib/late"])
+    def test_link_names_does_not_reach_what_the_bracket_excludes(self, word: str) -> None:
+        assert not sfm.LinkNames(["kit/bin/late"]).reaches(word)
+
+    def test_a_negated_bracket_in_a_directory_change_is_expanded(self, project: Project) -> None:
+        expanded = sfm.expand_directory_glob(str(project.kit), "[^z]in")
+        assert expanded.complete
+        assert str(project.kit / "bin") in expanded.value
+
+    def test_a_negated_bracket_move_then_a_plain_read_is_denied(self, project: Project) -> None:
+        command = "c" + "d kit/[^z]in && cat late"
+        assert _both(command, project.root) == (Decision.DENY, Decision.DENY)
