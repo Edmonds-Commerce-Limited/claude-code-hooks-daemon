@@ -14,8 +14,14 @@ Branch `scratch-keep-failclosed` (from origin/main ab326aad0), pushed. Not merge
 - Tests: `TestUnlexableStatementRoutes` (pinned "allows") became
   `TestUnlexableStatementRoutesFailClosed`: the two `$'...'` cases now deny,
   plus two unbalanced-quote cases (cp into a directory, `sh -c` body) and an
-  allow case for unlexable text that does not name the marker. RED confirmed
-  (2 failed) before the fix.
+  allow case for unlexable text that does not name the marker. RED: the two
+  `$'...'` rows failed before the fix; the two unbalanced-quote rows were
+  already denied by the shared write scan's unreadable-text check, so they
+  pin the outcome rather than exercise the new branch.
+- The fail-closed path runs only when the raw text contains `.scratch-keep`.
+  Probed: `touch X/.scratch-"keep"` is denied with or without an unlexable
+  `$'...'` before it (the shared scan resolves the quoting). A name assembled
+  at run time stays the documented limit.
 - Not changed: `scripts/qa/dangerous-invocation-corpus.yaml` has no rows for
   any scratch guard (only the typed-phrase gates), so no row added.
   `docs/guides/HANDLER_REFERENCE.md` and the module docstring already describe
