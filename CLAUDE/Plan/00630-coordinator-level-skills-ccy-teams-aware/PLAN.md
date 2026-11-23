@@ -23,8 +23,11 @@ codifies them as detection, skills, advisories and guards. The supervisor's
 auto-answer for Claude Code's rate-limit dialog is Plan 00523's. This plan
 references it and does not duplicate it.
 
-The order's source documents are in lts-infra and fedora-desktop, and neither
-is reachable from this container, so Phase 0 ingests them. The design, the
+The order's lts-infra inputs (the retro and the readiness checklist) and
+fedora-desktop Plan 00263 D3 could not be read from this seat, so Phase 0
+ingests them. fedora-desktop issue 367 was read, and so were Plans 00207
+(more roles, including a host-side `deployer`) and 00209 (bus v2 `teamchat`,
+which replaces v1 `pingbus`). Both shape the detection design. The design, the
 observed detection signals, the behaviour matrix and the open questions are in
 [DESIGN.md](DESIGN.md). The pre-filing dedupe check is in
 [subagent-reports/](subagent-reports/261123-hooks-daemon-plan-dedupe-scout-haiku.md).
@@ -32,7 +35,9 @@ observed detection signals, the behaviour matrix and the open questions are in
 ## Goals
 
 - One resolver answers "which teams, which role, which seat kind" for a
-  session, and returns absent on every failure without raising.
+  session. It never raises. It returns absent when no team is configured, and
+  `role: unknown` when a team is configured but its state cannot be read
+  (DESIGN.md section 4).
 - Each behaviour in DESIGN.md section 7 is gated on the detected role and is
   individually configurable.
 - A session with no team seat behaves exactly as it does today. An
@@ -53,10 +58,13 @@ observed detection signals, the behaviour matrix and the open questions are in
 
 - [ ] ⬜ **Task 0.1**: Ingest lts-infra Plan 00158 retro sections 2-3 and its
   readiness checklist. Record the owner GO and what it covers in JOURNAL/ (Q8).
-- [ ] ⬜ **Task 0.2**: Ingest fedora-desktop Plan 00263 D3 and issue 367. Fill
-  in the "(spec from Phase 0)" rows of DESIGN.md section 7.
-- [ ] ⬜ **Task 0.3**: Get the owner's rulings on Q1-Q7 (DESIGN.md section 12)
+- [ ] ⬜ **Task 0.2**: Ingest fedora-desktop Plan 00263 D3 (not on that
+  repository's default branch at filing). Fill in the "(spec from Phase 0)"
+  rows of DESIGN.md section 7.
+- [ ] ⬜ **Task 0.3**: Get the owner's rulings on Q1-Q11 (DESIGN.md section 12)
   and record them in DESIGN.md.
+- [ ] ⬜ **Task 0.4**: Confirm that Plan 00523 is the rate-limit auto-answer
+  build the order calls "already requested". The mapping was inferred.
 
 ### Phase 1: Detection core (no behaviour)
 
@@ -64,7 +72,8 @@ observed detection signals, the behaviour matrix and the open questions are in
   role, multi-team, seat-kind, role-change and sub-agent fixtures (DESIGN.md
   section 11).
 - [ ] ⬜ **Task 1.2**: GREEN. Implement `SeatContext` and the resolver behind
-  one adapter for the Q1 source, with a short-TTL cache.
+  a per-bus-generation adapter (v1 `pingbus` now, v2 `teamchat` later) for
+  the Q1 source, with a short-TTL cache.
 - [ ] ⬜ **Task 1.3**: Stamp the three `PINGBUS_*` variables onto the payload
   the same way `SESSION_HOSTNAME` is stamped (init.sh and server.py).
 - [ ] ⬜ **Task 1.4**: Add a diagnostic CLI that prints the resolved
@@ -90,7 +99,8 @@ observed detection signals, the behaviour matrix and the open questions are in
 
 ### Phase 4: Enforcement (B2, B8, then B5)
 
-- [ ] ⬜ **Task 4.1**: Thread-hygiene guard (B8), advisory first. Run targeted QA.
+- [ ] ⬜ **Task 4.1**: Thread-hygiene advisory (B8), if Q10 keeps it in the
+  daemon. Run targeted QA.
 - [ ] ⬜ **Task 4.2**: HUMAN-id verification guard (B2), built on the Q4
   mechanism, advisory first. Run targeted QA.
 - [ ] ⬜ **Task 4.3**: Seat-liveness advisory (B5). Run targeted QA.
@@ -117,8 +127,10 @@ observed detection signals, the behaviour matrix and the open questions are in
 - Related: Plan 00501 (Blocked), session modes (Q7).
 - Related: Plan 00502 (Not Started), the merge gate, related to B3.
 - Related: Plan 00487 (Complete), the supervisor plugin API (Q6).
-- Phases 3-6 are blocked on Phase 0. Phases 1-2 can start once Q1 and Q2 are
-  ruled.
+- Related: fedora-desktop Plans 00207 (team roles) and 00209 (bus v2). The
+  resolver needs one adapter per bus generation.
+- Phases 3-6 are blocked on Phase 0. Phases 1-2 can start once Q1, Q2 and Q9
+  are ruled.
 
 ## Success Criteria
 

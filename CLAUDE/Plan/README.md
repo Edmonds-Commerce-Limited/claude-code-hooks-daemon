@@ -32,7 +32,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in this order:
 
-- [00630: coordinator-level skills, ccy-teams aware](00630-coordinator-level-skills-ccy-teams-aware/PLAN.md) - Not Started (owner order via the lts-infra coordinator: detect a pingbus team seat's role and seat kind, and switch on coordinator skills, advisories and guards only there; absent teams change nothing; Phase 0 ingests the unreachable lts-infra/fedora-desktop inputs and needs owner rulings Q1-Q8 in DESIGN.md)
+- [00630: coordinator-level skills, ccy-teams aware](00630-coordinator-level-skills-ccy-teams-aware/PLAN.md) - Not Started (owner order via the lts-infra coordinator: detect a pingbus team seat's role and seat kind, and switch on coordinator skills, advisories and guards only there; absent teams change nothing; Phase 0 ingests the lts-infra inputs and fedora-desktop 00263 D3, unreadable at filing, and needs owner rulings Q1-Q11 in DESIGN.md)
 
 - [00464: commit gates judge the checkout the command runs in](00464-commit-gates-judge-the-checkout-the-command-runs-in/PLAN.md) - Not Started (from 00422 N23: commit gates pick their repo from the payload `cwd`, which for a teammate is the main checkout, so a worktree commit is judged on main's staged tree — false denies, and its own content, secret terms included, never checked)
 

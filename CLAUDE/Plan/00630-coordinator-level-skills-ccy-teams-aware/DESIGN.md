@@ -13,26 +13,50 @@ questions.
   nothing in this plan reads the Claude Code one.
 - **Seat**: one ccy session's membership of one team. A session can hold seats
   in several teams.
-- **Role**: what the team record says a member is. Pingbus knows exactly two
-  agent roles, `coordinator` and `worker` (at most one coordinator per team),
-  plus humans.
+- **Role**: what the team record says a member is. pingbus v1 has exactly two
+  agent roles today, `coordinator` and `worker` (at most one coordinator per
+  team), plus humans. fedora-desktop Plan 00207 plans more (outside
+  collaborator, deployer). So role is an OPEN set: a role this daemon does not
+  know switches nothing on.
 - **Seat kind**: where the seat runs, `host` or `container`. The order's
   "host" is a seat kind, not a third role: a host seat can be a worker or the
-  coordinator. Role and seat kind are two independent axes.
+  coordinator. Role and seat kind are two independent axes. Under Plan 00207
+  the host-side job may become the `deployer` ROLE. B7 is therefore keyed on
+  whichever the Phase 0 spec names, and the resolver exposes both.
+- **Bus generation**: v1 `pingbus` today, v2 `teamchat` planned (fedora-desktop
+  Plan 00209). Detection sits behind one adapter per generation, so v1's
+  retirement does not reach any handler.
 
 ## 2. Inputs and their provenance
 
-The order named inputs in two other repositories. Neither is reachable from
-this container (no checkout under `/workspace`, `/mnt`, `/srv` or `/opt`):
+The order named inputs in two other repositories. Neither has a local checkout
+in this container (none under `/workspace`, `/mnt`, `/srv` or `/opt`). Over
+`gh`:
 
-- lts-infra Plan 00158 `reports/retro-2026-11-23-unattended-weekend.md`,
-  sections 2-3, and its readiness checklist with an explicit owner GO;
-- fedora-desktop Plan 00263 decision D3 (the host-seat lane guard);
-- fedora-desktop issue 367 (thread hygiene: answer inside the question's thread).
+- **lts-infra** Plan 00158 `reports/retro-2026-11-23-unattended-weekend.md`
+  (sections 2-3) and its readiness checklist with the owner GO: NOT READ. The
+  repository's contents API answers 404 to this seat.
+- **fedora-desktop** Plan 00263 decision D3 (the host-seat lane guard): NOT
+  READ. No `00263` folder exists on the default branch's `CLAUDE/Plan/`, and
+  it is probably still on a work branch.
+- **fedora-desktop issue 367**: READ. A human posts a top-level follow-up in
+  the questions room, and the envelope suggests `pingbus thread --re <id>`,
+  which also posts at the top level. So the coordinator scatters the
+  conversation out of its `Q<n>` thread. The issue's expected fix is in pingbus
+  itself: the envelope names the likely open `Q<n>`, and
+  `thread --re` on a top-level message needs an explicit `--top-level`. It is
+  a v2 (`teamchat`) acceptance item. v1 gets the fix only if it is nearly free.
+- **fedora-desktop Plans 00207 and 00209**: READ for context, not named by the
+  order. 00207 (team roles, Not Started, awaiting owner decisions) adds roles
+  beyond coordinator and worker. They are an outside collaborator and a
+  **deployer**, which is "a host desktop session with the owner's permissions".
+  00209 (agent bus v2, `teamchat`, In Progress) is the planned replacement for
+  v1 `pingbus`. It uses a `TEAMCHAT_MEMBERSHIP` variable, and v1 retires once no
+  team is v1-live.
 
-So this plan is drafted from the order's own summary. Nothing here claims what
-those documents say beyond that summary; reading them is Phase 0, and any
-behaviour below whose spec depends on them is marked **(spec from Phase 0)**.
+So rows that depend on the unread documents are marked
+**(spec from Phase 0)**. Nothing here claims what they say beyond the order's
+summary.
 
 What WAS read, and grounds the detection design:
 
@@ -63,6 +87,11 @@ tracker is public. Shapes only.
 | `$PINGBUS_HOME/<team>/member.json`     | file           | `user_id` of form `@<repo>.<n>+local.<kind>:<server>`                                       | `<kind>` is `host` or `podman` -> seat kind. A sibling `token` file is a credential: never read, never named in a command |
 | `$PINGBUS_HOME/<team>/state/team.json` | file           | `roles: {user_id: "coordinator" or "worker"}`, `humans: [...]`                              | pingbus-private cache; no versioned contract                                                                              |
 | `pingbus status`                       | CLI, offline   | tab-separated `TEAM`, `MEMBER <team> <handle> <role> <liveness>`, `ROOM`, `SEAT` lines      | Public surface; costs a subprocess                                                                                        |
+| `TEAMCHAT_MEMBERSHIP`                  | session env    | v2's membership signal (fedora-desktop Plan 00209)                                          | Not yet live here; the v2 adapter's entry point                                                                           |
+
+No pingbus subcommand prints role as machine-readable output today: `status`,
+`seat` (`exec`, `keep`, `retire`, `farewell`, `disconnected`) and `config`
+(`check`) were checked.
 
 Role is not fixed for the session: the pingbus skill says the owner can change
 a seat's role while it runs, and pingbus tells the session once. So detection
@@ -75,13 +104,22 @@ SeatContext
   teams: tuple[TeamSeat, ...]      # empty == absent; the only "no teams" value
 TeamSeat
   team: str
-  role: coordinator | worker | unknown
+  role: str                        # coordinator | worker | a later role | unknown
   seat_kind: host | container | unknown
 ```
 
-- `SeatContext.absent()` is the result of EVERY failure: unset env, missing or
-  malformed file, unreadable directory, `pingbus` not on PATH, timeout, non-zero
-  exit. It logs once at debug and never raises, never advises, never denies.
+Two degradation cases, kept apart:
+
+- **No team configured** (no `PINGBUS_MEMBERSHIP`/`TEAMCHAT_MEMBERSHIP`, or
+  `team_seat.detection: off`): `SeatContext.absent()`. Silent, zero behaviour
+  change, no advisory, no error. This is the "not dependent" promise.
+- **Team configured, role unresolvable** (malformed or missing state, unknown
+  `v`, `pingbus` not on PATH, timeout, non-zero exit): the seat is present with
+  `role: unknown`. Nothing raises. Guidance stays off. Whether a guard (B2, B7,
+  B8) stays on, so a broken state file cannot silently disarm a coordinator,
+  or turns off, is owner question Q9. Recommendation: B2 stays on for any seat
+  with a team, because the pingbus HUMAN rule binds every seat. B7 and B8 turn
+  off, and one advisory per session names the cause.
 - `is_coordinator(team=None)`: true when any (or the named) team says
   coordinator. Multi-team: a seat may coordinate one team and work in another;
   behaviours that act on a specific team (thread hygiene, peer gate) take the
@@ -114,7 +152,8 @@ cannot be read stamps nothing (absent).
 | B. Parse `pingbus status` (offline)                                                              | A subprocess per resolve, bounded timeout | Human-oriented text, not declared stable | Parse drift; slower                                 |
 | C. Ask the ccy kit for `pingbus whoami --json` (team, handle, role, seat kind, protocol version) | One subprocess                            | Versioned, owned by pingbus              | Needs an upstream change in the ccy kit             |
 
-**Recommendation**: C, requested upstream; B behind the same adapter until C
+**Recommendation**: C, requested upstream for v1 and as a v2 (`teamchat`)
+requirement, since v1 is retiring; B behind the same adapter until C
 ships; A only if the owner rules subprocess cost unacceptable, and then gated
 on the `v` field. Whichever is chosen, results are cached per session for a
 short TTL (a role change lands within one TTL) and the resolver is the ONLY
@@ -125,17 +164,17 @@ code that knows the source.
 Every row is OFF unless detection says the seat holds the named role. "Mode"
 is the shipped default once the owner gives GO; guards ship advisory first.
 
-| #   | Behaviour                                                                                       | Role / kind              | Surface                                                                                                                     | Ships as             | Spec source                                      |
-| --- | ----------------------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------ |
-| B1  | Coordinator conduct on the bus (dispatch, track, report, ask, close)                            | coordinator              | skill + SessionStart context naming it                                                                                      | guidance             | pingbus skill + (spec from Phase 0)              |
-| B2  | HUMAN-id verification before a destructive act (push, delete, permission change, merge to main) | coordinator, also worker | PreToolUse guard on the destructive command set                                                                             | advisory, then block | pingbus skill rule; enforcement mechanism is Q4  |
-| B3  | Gating a peer's branch: merge, Layer 1+2 QA, push only if green                                 | coordinator              | skill (a procedure) + reuse of the merge-QA advisory                                                                        | guidance             | (spec from Phase 0); relate to Plan 00502        |
-| B4  | Departure and return (handing off, re-establishing on return)                                   | coordinator              | skill + Stop/SessionStart advisory                                                                                          | guidance             | (spec from Phase 0)                              |
-| B5  | Seat liveness (noticing stale or silent seats, own seat's liveness)                             | coordinator              | advisory from `pingbus status` liveness; supervisor action is Q6                                                            | advisory             | (spec from Phase 0); relate to Plan 00470        |
-| B6  | Usage-limit response (what the coordinator tells the team and itself)                           | coordinator              | advisory keyed on the usage-pause signal                                                                                    | guidance             | (spec from Phase 0); relate to Plan 00479        |
-| B7  | Host-seat lane guard                                                                            | seat kind host           | PreToolUse guard                                                                                                            | advisory, then block | fedora-desktop Plan 00263 D3 (spec from Phase 0) |
-| B8  | Thread hygiene: answer a human's question inside its thread, never a fresh `ask-human`          | coordinator              | PreToolUse on `pingbus ask-human --re <id>` where `<id>` is a `questions:Q<n>` HUMAN line: deny, name `pingbus thread Q<n>` | advisory, then block | fedora-desktop issue 367 (spec from Phase 0)     |
-| B9  | Auto-answer of Claude Code's rate-limit dialog                                                  | any                      | supervisor                                                                                                                  | n/a here             | Plan 00523 owns it; this plan only references it |
+| #   | Behaviour                                                                                       | Role / kind               | Surface                                                                                                                      | Ships as             | Spec source                                      |
+| --- | ----------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------ |
+| B1  | Coordinator conduct on the bus (dispatch, track, report, ask, close)                            | coordinator               | skill + SessionStart context naming it                                                                                       | guidance             | pingbus skill + (spec from Phase 0)              |
+| B2  | HUMAN-id verification before a destructive act (push, delete, permission change, merge to main) | coordinator (workers: Q5) | PreToolUse guard on the destructive command set                                                                              | advisory, then block | pingbus skill rule; enforcement mechanism is Q4  |
+| B3  | Gating a peer's branch: merge, Layer 1+2 QA, push only if green                                 | coordinator               | skill (a procedure) + reuse of the merge-QA advisory                                                                         | guidance             | (spec from Phase 0); relate to Plan 00502        |
+| B4  | Departure and return (handing off, re-establishing on return)                                   | coordinator               | skill + Stop/SessionStart advisory                                                                                           | guidance             | (spec from Phase 0)                              |
+| B5  | Seat liveness (noticing stale or silent seats, own seat's liveness)                             | coordinator               | advisory from `pingbus status` liveness; supervisor action is Q6                                                             | advisory             | (spec from Phase 0); relate to Plan 00470        |
+| B6  | Usage-limit response (what the coordinator tells the team and itself)                           | coordinator               | advisory keyed on the usage-pause signal                                                                                     | guidance             | (spec from Phase 0); relate to Plan 00479        |
+| B7  | Host-seat lane guard                                                                            | seat kind host            | PreToolUse guard                                                                                                             | advisory, then block | fedora-desktop Plan 00263 D3 (spec from Phase 0) |
+| B8  | Thread hygiene: keep a human's conversation inside its `Q<n>` thread                            | coordinator               | PreToolUse on `pingbus thread --re <id>` (a top-level reply) while open questions exist: advise naming `pingbus thread Q<n>` | advisory only (Q10)  | fedora-desktop issue 367 (read)                  |
+| B9  | Auto-answer of Claude Code's rate-limit dialog                                                  | any                       | supervisor                                                                                                                   | n/a here             | Plan 00523 owns it; this plan only references it |
 
 What the daemon ADDS over the pingbus skill: the skill already TELLS every
 seat the rules. The daemon's part is (a) enforcement where a command is
@@ -192,7 +231,9 @@ procedures such as B3 here).
   output and no error. This fixture lands in Phase 1 before any resolver code.
 - Degradation fixtures: malformed JSON, unknown `v`, unreadable directory,
   subprocess timeout and non-zero exit, a team in `PINGBUS_TEAMS` with no
-  directory. All resolve to absent.
+  directory. All resolve to `role: unknown` without raising, and the guards
+  follow the Q9 ruling. An unknown role name (for example `deployer` before
+  this daemon knows it) switches nothing on.
 - Role fixtures: worker, coordinator, multi-team (coordinator in one, worker in
   another), host vs container seat kind, a role change between two resolves.
 - Scope fixture: a sub-agent payload from a coordinator seat is not a
@@ -219,4 +260,12 @@ procedures such as B3 here).
 - **Q7** Should a coordinator seat be a session mode (Plan 00501), so the
   status line and mode machinery show it?
 - **Q8** Confirm the owner GO named in the lts-infra readiness checklist covers
-  this build, and which checklist items gate which phase.
+  this build, and which checklist items gate which phase. (The checklist was
+  unreadable from this seat.)
+- **Q9** A seat that has a team but whose role cannot be resolved: do the
+  guards stay armed, or go quiet? (Section 4 gives the recommendation.)
+- **Q10** B8 overlaps the pingbus-side fix that issue 367 asks for (envelope
+  names the thread; `--top-level` required). Should the daemon ship an interim
+  advisory for v1, or leave thread hygiene to pingbus/teamchat entirely?
+- **Q11** Is the host-seat lane guard (B7) keyed on seat kind `host`, or on
+  the `deployer` role from fedora-desktop Plan 00207 once that lands?
