@@ -1,4 +1,7 @@
-"""Per-team role gate for handlers (Plan 00631 Phase 3).
+"""Per-team role gate and any-team duty gate for handlers (Plan 00631 Phase 3).
+
+Acts that NAME a team use :func:`role_gate`; acts that concern no team use
+:func:`duty_gate` (``any_duty``). Both return the same three verdicts.
 
 A handler that adds role-specific conduct asks one question: does role R, in
 the team T this action concerns, apply on this thread? The answer is one of
@@ -68,3 +71,24 @@ def role_gate(
     if answer.holds_role(role):
         return RoleGateDecision(GateVerdict.APPLIES, team, f"declared {role} in this team")
     return RoleGateDecision(GateVerdict.NOT_APPLICABLE, team, f"not {role} in this team")
+
+
+def duty_gate(
+    hook_input: Mapping[str, Any], context: SeatContext, *, duty: str
+) -> RoleGateDecision:
+    """Whether ``duty`` in ANY held team applies to this event, for acts that name no team.
+
+    ``APPLIES`` when some held team declares ``duty``; otherwise
+    ``ROLE_UNKNOWN`` when some duty could not be read (it might have been
+    this one), else ``NOT_APPLICABLE``. The decision's ``team`` is ``""``.
+    Never raises.
+    """
+    if context.state is SeatState.ABSENT:
+        return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", "session holds no team seat")
+    if not acts_as_main_thread(hook_input):
+        return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", "sub-agent: duties are per seat")
+    if context.any_duty(duty):
+        return RoleGateDecision(GateVerdict.APPLIES, "", f"declared duty {duty} in a held team")
+    if context.duty_unknown():
+        return RoleGateDecision(GateVerdict.ROLE_UNKNOWN, "", "a held team's duty is unreadable")
+    return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", f"no held team has duty {duty}")

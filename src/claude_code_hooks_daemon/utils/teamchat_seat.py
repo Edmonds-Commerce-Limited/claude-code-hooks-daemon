@@ -1,35 +1,39 @@
-"""Which teamchat teams this session holds a seat in, and its role in each (Plan 00631).
+"""Which teamchat teams this session holds a seat in, and its role and duty in each (Plan 00631).
 
-The ONE module that knows where seat and role facts come from. Every
-role-aware behaviour (umbrella Plan 00630) asks this module and nothing else,
-so a change in teamchat's layout touches this file only. teamchat v2 is the
-only source: there is no other bus generation, adapter or fallback here.
+The ONE module that knows where seat facts come from. Every role-aware
+behaviour (umbrella Plan 00630) asks this module and nothing else, so a change
+in teamchat's contract touches this file only. teamchat v2 is the only source:
+there is no other bus generation, adapter or fallback here.
+
+The source is ``$TEAMCHAT_KIT/bin/teamchat whoami --json`` run with the
+session's ``TEAMCHAT_RUNTIME`` (DESIGN.md sections 3-6). The contract::
+
+    {"v": 1, "teams": [{"team", "handle", "role", "duty"}]}
+
+``v`` is required; unknown keys are ignored and never stored. Exit 69 means
+"no session here" (outside a session, or before the seat link exists).
 
 Three states, kept apart in the types because they mean different things:
 
-- ``ABSENT``: no membership signal (or detection is off). The session is not
-  in a team and nothing changes: no subprocess, no file probe, no log line.
-- ``UNRESOLVED``: a membership signal is set but the facts could not be read
-  (path missing or unreadable, ``teamchat`` missing, timeout, non-zero exit,
-  bad JSON, unknown version or shape, no seats). Every team answers
-  ``RoleKind.UNKNOWN`` and guards stay armed, so a broken state file can never
-  silently disarm a seat.
-- ``RESOLVED``: the per-team seats ``teamchat whoami --json`` declared.
+- ``ABSENT``: no team. No ``TEAMCHAT_RUNTIME`` (nothing runs, nothing is
+  logged), detection off, ``whoami`` exit 69, or an empty ``teams`` list.
+  Today's behaviour, unchanged.
+- ``UNRESOLVED``: a team is signalled but the probe gave no answer
+  (``TEAMCHAT_KIT`` unset, binary missing, timeout, exit 65 or any other
+  non-zero, malformed JSON, unknown ``v``). Role and duty are unknown and
+  guards stay armed, so a broken probe can never silently disarm a seat.
+- ``RESOLVED``: the per-team seats ``whoami`` declared.
 
-Roles are PER TEAM and an OPEN set: a role is passed through as declared, and a
-role this daemon attaches no behaviour to switches nothing on. There is no
-session-wide role; callers ask :meth:`SeatContext.role_for_team` for the team
-the action concerns.
+Role and duty are PER TEAM; there is no session-wide role. Role is the wire
+set ``coordinator | worker | probe`` (``null`` is unknown); a well-formed role
+outside it is carried as declared and switches nothing on. Duty is an open set
+(``null`` is unknown). A seat declaring role ``coordinator`` with duty ``host``
+is a contradiction teamchat itself refuses, so its role reads as unknown: a
+host seat is never a coordinator here.
 
-The whoami JSON shape is ASSUMED (``{"v": 1, "seats": [{"team", "handle",
-"role", "duty"}]}``) until fedora-desktop's merged shape is read; the fixtures in
-``tests/support/teamchat.py`` carry the same caveat. Parsing is tolerant:
-unknown fields are ignored and never stored, and a version or shape this parser
-does not know answers ``UNRESOLVED`` rather than raising.
-
-Secrets: the member credential file is never opened, and the probe refuses a
-membership path naming it. Log lines carry a reason category only, never the
-command's output, which is untrusted and could carry anything.
+Invariant 5: nothing under teamchat's seat store, state root or run directory
+is opened or statted; the only act is running the binary. Log lines carry a
+reason category only, never the command's output, which is untrusted.
 """
 
 from __future__ import annotations
@@ -44,20 +48,25 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 _LOGGER = logging.getLogger(__name__)
 
-MEMBERSHIP_ENV_VAR: Final[str] = "TEAMCHAT_MEMBERSHIP"
-WHOAMI_COMMAND: Final[tuple[str, ...]] = ("teamchat", "whoami", "--json")
+RUNTIME_ENV_VAR: Final[str] = "TEAMCHAT_RUNTIME"
+KIT_ENV_VAR: Final[str] = "TEAMCHAT_KIT"
+WHOAMI_ARGS: Final[tuple[str, ...]] = ("whoami", "--json")
 SUPPORTED_VERSIONS: Final[frozenset[int]] = frozenset({1})
 DEFAULT_TTL_SECONDS: Final[float] = 60.0
-#: The member credential file's name. Named only so the probe can refuse it.
-_CREDENTIAL_FILE_NAME: Final[str] = "token"
+#: ``whoami`` exit code: no session here (outside one, or before the seat link).
+EXIT_NO_SESSION: Final[int] = 69
+#: ``whoami`` exit code: the seat could not be read or failed strict decode.
+EXIT_UNREADABLE: Final[int] = 65
+#: The value :meth:`SeatContext.role_in` / ``duty_in`` give when unreadable.
+UNKNOWN: Final[str] = "unknown"
+ROLE_COORDINATOR: Final[str] = "coordinator"
+DUTY_HOST: Final[str] = "host"
 
 #: Team, role and duty names: untrusted text bounded to a plain token grammar.
 _NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -75,19 +84,19 @@ class ProbeReason(StrEnum):
     """Why a :class:`SeatContext` is in its state. A category, never data."""
 
     RESOLVED = "resolved"
-    NO_MEMBERSHIP_SIGNAL = "no_membership_signal"
+    NO_RUNTIME_SIGNAL = "no_runtime_signal"
     DETECTION_OFF = "detection_off"
-    MEMBERSHIP_NOT_A_PATH = "membership_not_a_path"
-    MEMBERSHIP_MISSING = "membership_missing"
-    MEMBERSHIP_UNREADABLE = "membership_unreadable"
-    CREDENTIAL_PATH_REFUSED = "credential_path_refused"
+    NO_SESSION = "no_session"
+    NO_TEAMS = "no_teams"
+    KIT_MISSING = "kit_missing"
+    SIGNAL_NOT_A_PATH = "signal_not_a_path"
     COMMAND_NOT_FOUND = "command_not_found"
     COMMAND_TIMEOUT = "command_timeout"
+    SEAT_UNREADABLE = "seat_unreadable"
     COMMAND_FAILED = "command_failed"
     NOT_JSON = "not_json"
     VERSION_MISMATCH = "version_mismatch"
     SHAPE_MISMATCH = "shape_mismatch"
-    NO_SEATS = "no_seats"
 
 
 class RoleKind(StrEnum):
@@ -95,38 +104,51 @@ class RoleKind(StrEnum):
 
     NO_TEAM = "no_team"  # session is in no team: no behaviour change
     NO_SEAT = "no_seat"  # resolved, and this team is not one of the session's
-    UNKNOWN = "unknown"  # a team is configured but this role could not be read
-    DECLARED = "declared"  # teamchat declared a role (any string, open set)
+    UNKNOWN = "unknown"  # a team is signalled but this role could not be read
+    DECLARED = "declared"  # teamchat declared a role
 
 
 class CommandStatus(StrEnum):
     OK = "ok"
     NOT_FOUND = "not_found"
     TIMEOUT = "timeout"
-    FAILED = "failed"
-
-
-class PathState(StrEnum):
-    PRESENT = "present"
-    MISSING = "missing"
-    UNREADABLE = "unreadable"
+    EXITED = "exited"  # ran and exited non-zero; ``exit_code`` says how
 
 
 @dataclass(frozen=True)
 class CommandOutcome:
     status: CommandStatus
     stdout: str = ""
+    exit_code: int | None = None
 
 
 #: ``(argv, env_overlay, timeout_seconds) -> outcome``. Never raises.
 CommandRunner = Callable[[Sequence[str], Mapping[str, str], float], CommandOutcome]
-#: ``path -> state``. Never raises; EACCES is ``UNREADABLE``, never ``MISSING``.
-PathProbe = Callable[[Path], PathState]
+
+
+@dataclass(frozen=True)
+class SessionSignals:
+    """The session's teamchat environment, as stamped on the payload or read in-session.
+
+    ``runtime`` is passed to the subprocess only, never opened. An empty
+    ``runtime`` means no team.
+    """
+
+    runtime: str = ""
+    kit: str = ""
+
+    @classmethod
+    def from_environ(cls, environ: Mapping[str, str]) -> SessionSignals:
+        """Read the signals from ``environ`` (the SESSION's, never the daemon's own)."""
+        return cls(
+            runtime=environ.get(RUNTIME_ENV_VAR, "").strip(),
+            kit=environ.get(KIT_ENV_VAR, "").strip(),
+        )
 
 
 @dataclass(frozen=True)
 class TeamSeat:
-    """One seat as declared. ``role`` is ``""`` when ``role_kind`` is UNKNOWN."""
+    """One team as declared. ``role``/``duty`` are ``""`` when unreadable."""
 
     team: str
     role_kind: RoleKind
@@ -164,6 +186,8 @@ class SeatContext:
     state: SeatState
     reason: ProbeReason
     seats: tuple[TeamSeat, ...] = ()
+    #: Teams ``whoami`` listed more than once (an advisory condition).
+    duplicate_teams: tuple[str, ...] = ()
 
     @classmethod
     def absent(cls, reason: ProbeReason) -> SeatContext:
@@ -176,22 +200,59 @@ class SeatContext:
     def teams_held(self) -> tuple[str, ...]:
         return tuple(seat.team for seat in self.seats)
 
+    def _seat(self, team: str) -> TeamSeat | None:
+        for seat in self.seats:
+            if seat.team == team:
+                return seat
+        return None
+
     def role_for_team(self, team: str) -> TeamRoleAnswer:
         if self.state is SeatState.ABSENT:
             return TeamRoleAnswer(team, RoleKind.NO_TEAM)
         if self.state is SeatState.UNRESOLVED:
             return TeamRoleAnswer(team, RoleKind.UNKNOWN)
-        for seat in self.seats:
-            if seat.team == team:
-                return TeamRoleAnswer(team, seat.role_kind, seat.role, seat.duty)
-        return TeamRoleAnswer(team, RoleKind.NO_SEAT)
+        seat = self._seat(team)
+        if seat is None:
+            return TeamRoleAnswer(team, RoleKind.NO_SEAT)
+        return TeamRoleAnswer(team, seat.role_kind, seat.role, seat.duty)
+
+    def role_in(self, team: str) -> str | None:
+        """The role in ``team``: a name, :data:`UNKNOWN`, or None when no seat there."""
+        answer = self.role_for_team(team)
+        if answer.kind is RoleKind.DECLARED:
+            return answer.role
+        if answer.kind is RoleKind.UNKNOWN:
+            return UNKNOWN
+        return None
+
+    def duty_in(self, team: str) -> str | None:
+        """The duty in ``team``: a name, :data:`UNKNOWN`, or None when no seat there."""
+        if self.state is SeatState.ABSENT:
+            return None
+        if self.state is SeatState.UNRESOLVED:
+            return UNKNOWN
+        seat = self._seat(team)
+        if seat is None:
+            return None
+        return seat.duty or UNKNOWN
+
+    def any_duty(self, value: str) -> bool:
+        """Whether any held team declares duty ``value``. Unknown is never a match."""
+        wanted = value.casefold()
+        return any(seat.duty and seat.duty.casefold() == wanted for seat in self.seats)
+
+    def duty_unknown(self) -> bool:
+        """Whether a team is signalled but some duty could not be read."""
+        if self.state is SeatState.UNRESOLVED:
+            return True
+        return any(not seat.duty for seat in self.seats)
 
 
 # --- parsing -----------------------------------------------------------------
 
 
 def _name(value: object) -> str:
-    """``value`` if it is a well-formed name, else ``""``."""
+    """``value`` if it is a well-formed name, else ``""`` (null included)."""
     if isinstance(value, str) and _NAME.fullmatch(value):
         return value
     return ""
@@ -206,25 +267,22 @@ def _handle(value: object) -> str:
 @dataclass(frozen=True)
 class _Row:
     team: str
-    role: str  # "" == unreadable
+    role: str  # "" == unknown
     handle: str
-    duty: str
+    duty: str  # "" == unknown
 
 
 def _rows(document: object) -> list[object] | ProbeReason:
     """The seat rows of ``document``, or why there are none we can trust."""
-    if isinstance(document, list):
-        return document
     if not isinstance(document, dict):
         return ProbeReason.SHAPE_MISMATCH
-    if "v" in document:
-        version = document["v"]
-        if isinstance(version, bool) or version not in SUPPORTED_VERSIONS:
-            return ProbeReason.VERSION_MISMATCH
-    seats = document.get("seats")
-    if not isinstance(seats, list):
+    version = document.get("v")
+    if isinstance(version, bool) or version not in SUPPORTED_VERSIONS:
+        return ProbeReason.VERSION_MISMATCH
+    teams = document.get("teams")
+    if not isinstance(teams, list):
         return ProbeReason.SHAPE_MISMATCH
-    return seats
+    return teams
 
 
 def _row(raw: object) -> _Row | ProbeReason:
@@ -239,19 +297,21 @@ def _row(raw: object) -> _Row | ProbeReason:
 
 
 def _merge(team: str, rows: list[_Row]) -> TeamSeat:
-    """One team's rows -> one seat. Disagreement on the role is UNKNOWN."""
+    """One team's rows -> one seat. Disagreement is unknown."""
     roles = {row.role for row in rows}
     duties = {row.duty for row in rows}
     handles = {row.handle for row in rows}
     duty = duties.pop() if len(duties) == 1 else ""
     handle = handles.pop() if len(handles) == 1 else ""
-    if len(roles) != 1 or "" in roles:
+    role = roles.pop() if len(roles) == 1 else ""
+    host_as_coordinator = role.casefold() == ROLE_COORDINATOR and duty.casefold() == DUTY_HOST
+    if not role or host_as_coordinator:
         return TeamSeat(team, RoleKind.UNKNOWN, "", handle, duty)
-    return TeamSeat(team, RoleKind.DECLARED, roles.pop(), handle, duty)
+    return TeamSeat(team, RoleKind.DECLARED, role, handle, duty)
 
 
 def parse_whoami(text: str) -> SeatContext:
-    """Parse ``teamchat whoami --json`` output. Never raises."""
+    """Parse ``teamchat whoami --json`` output (exit 0). Never raises."""
     try:
         document: object = json.loads(text)
     except ValueError:
@@ -267,12 +327,13 @@ def parse_whoami(text: str) -> SeatContext:
             return SeatContext.unresolved(row)
         by_team.setdefault(row.team, []).append(row)
     if not by_team:
-        return SeatContext.unresolved(ProbeReason.NO_SEATS)
+        return SeatContext.absent(ProbeReason.NO_TEAMS)
     seats = tuple(_merge(team, team_rows) for team, team_rows in by_team.items())
-    return SeatContext(SeatState.RESOLVED, ProbeReason.RESOLVED, seats)
+    duplicates = tuple(team for team, team_rows in by_team.items() if len(team_rows) > 1)
+    return SeatContext(SeatState.RESOLVED, ProbeReason.RESOLVED, seats, duplicates)
 
 
-# --- default seams -------------------------------------------------------------
+# --- default runner --------------------------------------------------------------
 
 
 def default_command_runner(
@@ -296,89 +357,71 @@ def default_command_runner(
         return CommandOutcome(CommandStatus.TIMEOUT)
     except OSError as exc:
         _LOGGER.debug("teamchat seat probe: command could not start (%s)", type(exc).__name__)
-        return CommandOutcome(CommandStatus.FAILED)
+        return CommandOutcome(CommandStatus.NOT_FOUND)
     if completed.returncode != 0:
-        return CommandOutcome(CommandStatus.FAILED)
-    return CommandOutcome(CommandStatus.OK, completed.stdout)
-
-
-def default_path_probe(path: Path) -> PathState:
-    """EACCES-safe existence probe: an unstattable path is UNREADABLE, not MISSING."""
-    answer = path_exists(path, unreadable_means=PathState.UNREADABLE)
-    if isinstance(answer, PathState):
-        return answer
-    return PathState.PRESENT if answer else PathState.MISSING
+        return CommandOutcome(CommandStatus.EXITED, exit_code=completed.returncode)
+    return CommandOutcome(CommandStatus.OK, completed.stdout, 0)
 
 
 # --- probe -----------------------------------------------------------------------
 
-_COMMAND_REASONS: Final[Mapping[CommandStatus, ProbeReason]] = {
-    CommandStatus.NOT_FOUND: ProbeReason.COMMAND_NOT_FOUND,
-    CommandStatus.TIMEOUT: ProbeReason.COMMAND_TIMEOUT,
-    CommandStatus.FAILED: ProbeReason.COMMAND_FAILED,
-}
-_PATH_REASONS: Final[Mapping[PathState, ProbeReason]] = {
-    PathState.MISSING: ProbeReason.MEMBERSHIP_MISSING,
-    PathState.UNREADABLE: ProbeReason.MEMBERSHIP_UNREADABLE,
-}
+
+def whoami_argv(kit: str) -> tuple[str, ...]:
+    """The argv for ``whoami``: the kit's own binary, never a bare name from PATH."""
+    return (f"{kit.rstrip('/')}/bin/teamchat", *WHOAMI_ARGS)
 
 
-def membership_from_environ(environ: Mapping[str, str]) -> str:
-    """The membership signal in ``environ`` (``""`` when unset).
+def _from_outcome(outcome: CommandOutcome) -> SeatContext:
+    if outcome.status is CommandStatus.OK:
+        return parse_whoami(outcome.stdout)
+    if outcome.status is CommandStatus.NOT_FOUND:
+        return SeatContext.unresolved(ProbeReason.COMMAND_NOT_FOUND)
+    if outcome.status is CommandStatus.TIMEOUT:
+        return SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
+    if outcome.exit_code == EXIT_NO_SESSION:
+        return SeatContext.absent(ProbeReason.NO_SESSION)
+    if outcome.exit_code == EXIT_UNREADABLE:
+        return SeatContext.unresolved(ProbeReason.SEAT_UNREADABLE)
+    return SeatContext.unresolved(ProbeReason.COMMAND_FAILED)
 
-    The daemon's own environment is not the session's: pass the environment
-    of the session being asked about (the payload stamp), not ``os.environ``.
-    """
-    return environ.get(MEMBERSHIP_ENV_VAR, "")
 
-
-def _probe(
-    membership: str, runner: CommandRunner, path_probe: PathProbe, timeout: float
-) -> SeatContext:
-    path = Path(membership)
-    if not path.is_absolute():
-        return SeatContext.unresolved(ProbeReason.MEMBERSHIP_NOT_A_PATH)
-    if _CREDENTIAL_FILE_NAME in path.parts:
-        return SeatContext.unresolved(ProbeReason.CREDENTIAL_PATH_REFUSED)
-    path_state = path_probe(path)
-    if path_state is not PathState.PRESENT:
-        return SeatContext.unresolved(_PATH_REASONS[path_state])
-    outcome = runner(WHOAMI_COMMAND, {MEMBERSHIP_ENV_VAR: membership}, timeout)
-    if outcome.status is not CommandStatus.OK:
-        return SeatContext.unresolved(_COMMAND_REASONS[outcome.status])
-    return parse_whoami(outcome.stdout)
+def _probe(signals: SessionSignals, runner: CommandRunner, timeout: float) -> SeatContext:
+    if not signals.kit:
+        return SeatContext.unresolved(ProbeReason.KIT_MISSING)
+    if not (signals.runtime.startswith("/") and signals.kit.startswith("/")):
+        return SeatContext.unresolved(ProbeReason.SIGNAL_NOT_A_PATH)
+    outcome = runner(whoami_argv(signals.kit), {RUNTIME_ENV_VAR: signals.runtime}, timeout)
+    return _from_outcome(outcome)
 
 
 def probe_seat_context(
-    membership: str,
+    signals: SessionSignals,
     *,
     detection_enabled: bool = True,
     runner: CommandRunner = default_command_runner,
-    path_probe: PathProbe = default_path_probe,
     timeout: float = Timeout.TEAMCHAT_WHOAMI,
 ) -> SeatContext:
-    """Resolve the seat context for the session whose membership signal is ``membership``.
+    """Resolve the seat context for the session whose signals are ``signals``.
 
-    Never raises. Absent costs one string check and logs nothing.
+    Never raises. No ``TEAMCHAT_RUNTIME`` costs one string check and logs nothing.
     """
-    membership = membership.strip()
-    if not membership:
-        return SeatContext.absent(ProbeReason.NO_MEMBERSHIP_SIGNAL)
+    if not signals.runtime:
+        return SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)
     if not detection_enabled:
         return SeatContext.absent(ProbeReason.DETECTION_OFF)
-    context = _probe(membership, runner, path_probe, timeout)
+    context = _probe(signals, runner, timeout)
     if context.state is SeatState.UNRESOLVED:
         _LOGGER.info("teamchat seat probe: role unknown (%s)", context.reason.value)
     return context
 
 
 class SeatContextResolver:
-    """:func:`probe_seat_context` behind a short per-membership TTL cache.
+    """:func:`probe_seat_context` behind a short per-session TTL cache.
 
     Roles can change while a session runs, so an answer is reused for at most
-    ``ttl_seconds``: a role change takes effect within one TTL. An unresolved
-    answer is cached too, so a missing ``teamchat`` costs one timeout per TTL,
-    not one per hook call.
+    ``ttl_seconds``: a role change takes effect within one TTL. Every answer is
+    cached, including no-answer and exit 69, so a missing binary costs one
+    timeout per TTL, not one per hook call.
     """
 
     def __init__(
@@ -387,29 +430,24 @@ class SeatContextResolver:
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         runner: CommandRunner = default_command_runner,
-        path_probe: PathProbe = default_path_probe,
         timeout: float = Timeout.TEAMCHAT_WHOAMI,
     ) -> None:
         self._ttl = ttl_seconds
         self._clock = clock
         self._runner = runner
-        self._path_probe = path_probe
         self._timeout = timeout
         self._lock = threading.Lock()
-        self._cache: dict[str, tuple[float, SeatContext]] = {}
+        self._cache: dict[SessionSignals, tuple[float, SeatContext]] = {}
 
-    def resolve(self, membership: str, *, detection_enabled: bool = True) -> SeatContext:
-        key = membership.strip()
-        if not key or not detection_enabled:
-            return probe_seat_context(key, detection_enabled=detection_enabled)
+    def resolve(self, signals: SessionSignals, *, detection_enabled: bool = True) -> SeatContext:
+        if not signals.runtime or not detection_enabled:
+            return probe_seat_context(signals, detection_enabled=detection_enabled)
         now = self._clock()
         with self._lock:
-            cached = self._cache.get(key)
+            cached = self._cache.get(signals)
         if cached is not None and now - cached[0] < self._ttl:
             return cached[1]
-        context = probe_seat_context(
-            key, runner=self._runner, path_probe=self._path_probe, timeout=self._timeout
-        )
+        context = probe_seat_context(signals, runner=self._runner, timeout=self._timeout)
         with self._lock:
-            self._cache[key] = (now, context)
+            self._cache[signals] = (now, context)
         return context

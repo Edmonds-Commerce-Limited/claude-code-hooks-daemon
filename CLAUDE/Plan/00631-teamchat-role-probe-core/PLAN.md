@@ -1,6 +1,6 @@
 # Plan 00631: teamchat role probe core
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: High
@@ -44,12 +44,14 @@ not in this clone).
 
 ### Phase 1: Shape and RED fixtures
 
-- [ ] ⬜ **Task 1.1**: Record the merged `whoami --json` contract and its F44
+- [ ] 🔄 **Task 1.1**: Record the merged `whoami --json` contract and its F44
   merge commit in the umbrella DESIGN.md section 2; confirm exit code 65.
   Prove the daemon shares the session's mount namespace and user (so the run
   directory resolves), or move the `whoami` call hook-side and stamp its JSON
-  (DESIGN.md section 5).
-- [ ] ⬜ **Task 1.2**: RED. Absent fixtures first (no `TEAMCHAT_RUNTIME`; exit
+  (DESIGN.md section 5). Contract and exit 69 recorded (v2 branch
+  `fe67f23c3`); F44 hash, exit 65 and the namespace proof still open.
+- [x] ✅ **Task 1.2**: RED (`tests/support/teamchat.py`,
+  `tests/unit/utils/test_teamchat_seat.py`). Absent fixtures first (no `TEAMCHAT_RUNTIME`; exit
   69; empty `teams`); v2-only proof (`PINGBUS_MEMBERSHIP=off`); no-answer
   fixtures (exit 65, other non-zero, timeout, malformed JSON, unknown `v`,
   `TEAMCHAT_KIT` unset); role and duty fixtures (multi-team, duty `host`,
@@ -58,7 +60,7 @@ not in this clone).
 
 ### Phase 2: Resolver and payload stamp
 
-- [ ] ⬜ **Task 2.1**: GREEN. `SeatContext` and the single teamchat module,
+- [x] ✅ **Task 2.1**: GREEN (`src/claude_code_hooks_daemon/utils/teamchat_seat.py`). `SeatContext` and the single teamchat module,
   calling `$TEAMCHAT_KIT/bin/teamchat whoami --json` with the stamped
   `TEAMCHAT_RUNTIME`, bounded timeout.
 - [ ] ⬜ **Task 2.2**: Stamp `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` onto the
@@ -69,9 +71,9 @@ not in this clone).
 
 ### Phase 3: Role gate primitive
 
-- [ ] ⬜ **Task 3.1**: TDD the gate: per named team for acts that name one,
+- [x] ✅ **Task 3.1**: TDD the gate (`utils/team_role_gate.py`: `role_gate`, `duty_gate`): per named team for acts that name one,
   `any_duty` for acts that name none; main thread only.
-- [ ] ⬜ **Task 3.2**: Invariant tests (role never relaxes a guard; no file
+- [x] ✅ **Task 3.2**: Invariant tests (role never relaxes a guard; no file
   opened under the seat store, state root or run directory; no v1 path).
   Targeted QA green.
 

@@ -1,38 +1,43 @@
 """Tests for the teamchat v2 role probe (Plan 00631).
 
-The absent case comes first: no membership signal must mean no subprocess, no
-file probe, no error and no role -- the "aware, not dependent" promise.
+The absent cases come first: no ``TEAMCHAT_RUNTIME``, ``whoami`` exit 69 and
+an empty ``teams`` list must all mean no team -- no error, no role, no log
+line -- the "aware, not dependent" promise.
 """
 
 from __future__ import annotations
 
-import inspect
+import builtins
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from claude_code_hooks_daemon.utils import teamchat_seat
 from claude_code_hooks_daemon.utils.teamchat_seat import (
-    MEMBERSHIP_ENV_VAR,
-    WHOAMI_COMMAND,
+    KIT_ENV_VAR,
+    RUNTIME_ENV_VAR,
+    UNKNOWN,
     CommandOutcome,
     CommandStatus,
-    PathState,
     ProbeReason,
     RoleKind,
     SeatContextResolver,
     SeatState,
+    SessionSignals,
     default_command_runner,
-    default_path_probe,
-    membership_from_environ,
     parse_whoami,
     probe_seat_context,
+    whoami_argv,
 )
 from tests.support import teamchat as fx
 
-MEMBERSHIP = "/run/teamchat/session-a"
+RUNTIME = "/tmp/teamchat/run-a"
+KIT = "/opt/teamchat-kit"
+SIGNALS = SessionSignals(runtime=RUNTIME, kit=KIT)
 
 
 class FakeRunner:
@@ -49,107 +54,121 @@ class FakeRunner:
         return self.outcome
 
 
-class FakePaths:
-    def __init__(self, state: PathState = PathState.PRESENT) -> None:
-        self.state = state
-        self.probed: list[Path] = []
-
-    def __call__(self, path: Path) -> PathState:
-        self.probed.append(path)
-        return self.state
-
-
 def ok(stdout: str) -> FakeRunner:
-    return FakeRunner(CommandOutcome(CommandStatus.OK, stdout))
+    return FakeRunner(CommandOutcome(CommandStatus.OK, stdout, 0))
 
 
-def probe(stdout: str, *, paths: FakePaths | None = None) -> teamchat_seat.SeatContext:
-    return probe_seat_context(MEMBERSHIP, runner=ok(stdout), path_probe=paths or FakePaths())
+def exited(code: int, stdout: str = "") -> FakeRunner:
+    return FakeRunner(CommandOutcome(CommandStatus.EXITED, stdout, code))
+
+
+def probe(stdout: str) -> teamchat_seat.SeatContext:
+    return probe_seat_context(SIGNALS, runner=ok(stdout))
 
 
 # --- absent ---------------------------------------------------------------
 
 
 class TestAbsent:
-    @pytest.mark.parametrize("membership", ["", "   "])
-    def test_no_signal_is_absent_and_touches_nothing(self, membership: str) -> None:
-        runner, paths = ok(fx.COORDINATOR_ONLY), FakePaths()
-        context = probe_seat_context(membership, runner=runner, path_probe=paths)
+    @pytest.mark.parametrize("runtime", ["", "   "])
+    def test_no_runtime_is_absent_and_runs_nothing(self, runtime: str) -> None:
+        runner = ok(fx.COORDINATOR_ONLY)
+        signals = SessionSignals.from_environ({RUNTIME_ENV_VAR: runtime, KIT_ENV_VAR: KIT})
+        context = probe_seat_context(signals, runner=runner)
         assert context.state is SeatState.ABSENT
-        assert context.reason is ProbeReason.NO_MEMBERSHIP_SIGNAL
+        assert context.reason is ProbeReason.NO_RUNTIME_SIGNAL
         assert context.teams_held() == ()
         assert runner.calls == []
-        assert paths.probed == []
 
     def test_detection_off_is_absent_even_with_signal(self) -> None:
-        runner, paths = ok(fx.COORDINATOR_ONLY), FakePaths()
-        context = probe_seat_context(
-            MEMBERSHIP, detection_enabled=False, runner=runner, path_probe=paths
-        )
+        runner = ok(fx.COORDINATOR_ONLY)
+        context = probe_seat_context(SIGNALS, detection_enabled=False, runner=runner)
         assert context.state is SeatState.ABSENT
         assert context.reason is ProbeReason.DETECTION_OFF
         assert runner.calls == []
 
+    def test_exit_69_is_no_team_not_an_error(self, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level(logging.DEBUG, logger=teamchat_seat.__name__)
+        context = probe_seat_context(SIGNALS, runner=exited(fx.EXIT_NO_SESSION, fx.WORKER_ONLY))
+        assert context.state is SeatState.ABSENT
+        assert context.reason is ProbeReason.NO_SESSION
+        assert context.teams_held() == ()
+        assert caplog.records == []
+
+    def test_empty_teams_is_absent(self) -> None:
+        context = probe(fx.NO_TEAMS)
+        assert context.state is SeatState.ABSENT
+        assert context.reason is ProbeReason.NO_TEAMS
+
     def test_absent_answers_no_team_for_any_team(self) -> None:
-        answer = probe_seat_context("", runner=ok(""), path_probe=FakePaths()).role_for_team("a")
+        context = probe_seat_context(SessionSignals(), runner=ok(""))
+        answer = context.role_for_team("a")
         assert answer.kind is RoleKind.NO_TEAM
         assert answer.guards_armed is False
         assert answer.holds_role("coordinator") is False
+        assert context.role_in("a") is None
+        assert context.duty_in("a") is None
+        assert context.any_duty("coordinator") is False
+        assert context.duty_unknown() is False
 
     def test_absent_logs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.DEBUG, logger=teamchat_seat.__name__)
-        probe_seat_context("", runner=ok(""), path_probe=FakePaths())
+        probe_seat_context(SessionSignals(), runner=ok(""))
         assert caplog.records == []
 
-    def test_membership_from_environ(self) -> None:
-        assert membership_from_environ({}) == ""
-        assert membership_from_environ({MEMBERSHIP_ENV_VAR: MEMBERSHIP}) == MEMBERSHIP
+    def test_signals_from_environ(self) -> None:
+        assert SessionSignals.from_environ({}) == SessionSignals()
+        environ = {RUNTIME_ENV_VAR: f" {RUNTIME} ", KIT_ENV_VAR: KIT, "OTHER": "x"}
+        assert SessionSignals.from_environ(environ) == SIGNALS
 
-
-# --- degraded: present but unreadable -> unknown, armed -------------------
-
-
-class TestDegraded:
-    @pytest.mark.parametrize(
-        ("state", "reason"),
-        [
-            (PathState.MISSING, ProbeReason.MEMBERSHIP_MISSING),
-            (PathState.UNREADABLE, ProbeReason.MEMBERSHIP_UNREADABLE),
-        ],
-    )
-    def test_membership_path_problem_is_unknown(
-        self, state: PathState, reason: ProbeReason
-    ) -> None:
-        runner = ok(fx.COORDINATOR_ONLY)
-        context = probe_seat_context(MEMBERSHIP, runner=runner, path_probe=FakePaths(state))
-        assert context.state is SeatState.UNRESOLVED
-        assert context.reason is reason
-        assert runner.calls == []
-
-    def test_relative_membership_is_unknown(self) -> None:
-        context = probe_seat_context("relative/x", runner=ok(""), path_probe=FakePaths())
-        assert context.reason is ProbeReason.MEMBERSHIP_NOT_A_PATH
-
-    @pytest.mark.parametrize("membership", ["/x/alpha/token", "/x/token/membership"])
-    def test_token_path_is_never_probed(self, membership: str) -> None:
-        paths, runner = FakePaths(), ok(fx.COORDINATOR_ONLY)
-        context = probe_seat_context(membership, runner=runner, path_probe=paths)
-        assert context.reason is ProbeReason.CREDENTIAL_PATH_REFUSED
-        assert paths.probed == []
-        assert runner.calls == []
-
-    @pytest.mark.parametrize(
-        ("status", "reason"),
-        [
-            (CommandStatus.NOT_FOUND, ProbeReason.COMMAND_NOT_FOUND),
-            (CommandStatus.TIMEOUT, ProbeReason.COMMAND_TIMEOUT),
-            (CommandStatus.FAILED, ProbeReason.COMMAND_FAILED),
-        ],
-    )
-    def test_command_failure_is_unknown(self, status: CommandStatus, reason: ProbeReason) -> None:
+    def test_v2_only_ignores_pingbus_off(self) -> None:
+        """A v2 launch sets PINGBUS_MEMBERSHIP=off; the answer comes from whoami alone."""
+        environ = {"PINGBUS_MEMBERSHIP": "off", RUNTIME_ENV_VAR: RUNTIME, KIT_ENV_VAR: KIT}
         context = probe_seat_context(
-            MEMBERSHIP, runner=FakeRunner(CommandOutcome(status)), path_probe=FakePaths()
+            SessionSignals.from_environ(environ), runner=ok(fx.WORKER_ONLY)
         )
+        assert context.role_in("alpha") == "worker"
+
+
+# --- no answer: present but unreadable -> unknown, armed ---------------------
+
+
+class TestNoAnswer:
+    def test_kit_missing_is_unknown_and_runs_nothing(self) -> None:
+        runner = ok(fx.COORDINATOR_ONLY)
+        context = probe_seat_context(SessionSignals(runtime=RUNTIME), runner=runner)
+        assert context.state is SeatState.UNRESOLVED
+        assert context.reason is ProbeReason.KIT_MISSING
+        assert runner.calls == []
+
+    @pytest.mark.parametrize(
+        "signals",
+        [
+            SessionSignals(runtime="relative/run", kit=KIT),
+            SessionSignals(runtime=RUNTIME, kit="kit"),
+        ],
+    )
+    def test_relative_signal_is_unknown(self, signals: SessionSignals) -> None:
+        runner = ok(fx.COORDINATOR_ONLY)
+        context = probe_seat_context(signals, runner=runner)
+        assert context.reason is ProbeReason.SIGNAL_NOT_A_PATH
+        assert runner.calls == []
+
+    @pytest.mark.parametrize(
+        ("outcome", "reason"),
+        [
+            (CommandOutcome(CommandStatus.NOT_FOUND), ProbeReason.COMMAND_NOT_FOUND),
+            (CommandOutcome(CommandStatus.TIMEOUT), ProbeReason.COMMAND_TIMEOUT),
+            (
+                CommandOutcome(CommandStatus.EXITED, exit_code=fx.EXIT_UNREADABLE),
+                ProbeReason.SEAT_UNREADABLE,
+            ),
+            (CommandOutcome(CommandStatus.EXITED, exit_code=1), ProbeReason.COMMAND_FAILED),
+            (CommandOutcome(CommandStatus.EXITED, exit_code=None), ProbeReason.COMMAND_FAILED),
+        ],
+    )
+    def test_command_failure_is_unknown(self, outcome: CommandOutcome, reason: ProbeReason) -> None:
+        context = probe_seat_context(SIGNALS, runner=FakeRunner(outcome))
         assert context.state is SeatState.UNRESOLVED
         assert context.reason is reason
 
@@ -158,11 +177,14 @@ class TestDegraded:
         [
             (fx.NOT_JSON, ProbeReason.NOT_JSON),
             (fx.FUTURE_VERSION, ProbeReason.VERSION_MISMATCH),
-            (fx.SEATS_NOT_A_LIST, ProbeReason.SHAPE_MISMATCH),
+            (fx.NO_VERSION, ProbeReason.VERSION_MISMATCH),
+            ('{"v": true, "teams": []}', ProbeReason.VERSION_MISMATCH),
+            ('{"v": "1", "teams": []}', ProbeReason.VERSION_MISMATCH),
+            (fx.TEAMS_NOT_A_LIST, ProbeReason.SHAPE_MISMATCH),
+            (fx.BARE_LIST, ProbeReason.SHAPE_MISMATCH),
             (fx.ROW_WITHOUT_TEAM, ProbeReason.SHAPE_MISMATCH),
-            (fx.NO_SEATS, ProbeReason.NO_SEATS),
+            ('{"v": 1, "seats": []}', ProbeReason.SHAPE_MISMATCH),
             ('"a string"', ProbeReason.SHAPE_MISMATCH),
-            ('{"v": true, "seats": []}', ProbeReason.VERSION_MISMATCH),
         ],
     )
     def test_bad_document_is_unknown(self, stdout: str, reason: ProbeReason) -> None:
@@ -171,78 +193,113 @@ class TestDegraded:
         assert context.reason is reason
 
     def test_unresolved_answers_unknown_and_armed_for_any_team(self) -> None:
-        answer = probe(fx.NOT_JSON).role_for_team("anything")
+        context = probe(fx.NOT_JSON)
+        answer = context.role_for_team("anything")
         assert answer.kind is RoleKind.UNKNOWN
         assert answer.guards_armed is True
         assert answer.holds_role("coordinator") is False
+        assert context.role_in("anything") == UNKNOWN
+        assert context.duty_in("anything") == UNKNOWN
+        assert context.any_duty("host") is False
+        assert context.duty_unknown() is True
 
-    def test_degraded_log_carries_reason_not_output(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_no_answer_log_carries_reason_not_output(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         caplog.set_level(logging.DEBUG, logger=teamchat_seat.__name__)
-        probe('{"v": 99, "token": "SYNTHETIC-SECRET-VALUE"}')
+        probe('{"v": 99, "password": "SYNTHETIC-SECRET-VALUE"}')
         text = caplog.text
         assert "version_mismatch" in text
         assert "SYNTHETIC-SECRET-VALUE" not in text
 
 
-# --- roles ----------------------------------------------------------------
+# --- roles and duties ------------------------------------------------------------
 
 
-class TestRoles:
+class TestRolesAndDuties:
     def test_worker(self) -> None:
-        answer = probe(fx.WORKER_ONLY).role_for_team("alpha")
+        context = probe(fx.WORKER_ONLY)
+        answer = context.role_for_team("alpha")
         assert answer.kind is RoleKind.DECLARED
-        assert answer.role == "worker"
         assert answer.holds_role("worker")
         assert not answer.holds_role("coordinator")
         assert answer.guards_armed is True
+        assert context.role_in("alpha") == "worker"
+        assert context.duty_in("alpha") == "worker"
 
     def test_coordinator(self) -> None:
-        assert probe(fx.COORDINATOR_ONLY).role_for_team("alpha").holds_role("coordinator")
+        context = probe(fx.COORDINATOR_ONLY)
+        assert context.role_for_team("alpha").holds_role("coordinator")
+        assert context.any_duty("coordinator") is True
 
     def test_multi_team_roles_are_per_team(self) -> None:
         context = probe(fx.MULTI_TEAM)
         assert context.state is SeatState.RESOLVED
         assert context.teams_held() == ("alpha", "beta")
-        assert context.role_for_team("alpha").role == "coordinator"
-        assert context.role_for_team("beta").role == "worker"
+        assert context.role_in("alpha") == "coordinator"
+        assert context.role_in("beta") == "worker"
 
-    def test_team_not_held_is_no_seat(self) -> None:
-        answer = probe(fx.MULTI_TEAM).role_for_team("gamma")
-        assert answer.kind is RoleKind.NO_SEAT
-        assert answer.holds_role("coordinator") is False
+    def test_team_not_held(self) -> None:
+        context = probe(fx.MULTI_TEAM)
+        assert context.role_for_team("gamma").kind is RoleKind.NO_SEAT
+        assert context.role_in("gamma") is None
+        assert context.duty_in("gamma") is None
 
-    def test_unknown_declared_role_passes_through_and_matches_nothing_known(self) -> None:
-        answer = probe(fx.UNKNOWN_ROLE).role_for_team("alpha")
-        assert answer.kind is RoleKind.DECLARED
-        assert answer.role == "deployer"
-        assert answer.duty == "host"
+    def test_host_duty_in_one_team(self) -> None:
+        context = probe(fx.HOST_DUTY)
+        assert context.duty_in("alpha") == "host"
+        assert context.duty_in("beta") == "worker"
+        assert context.any_duty("host") is True
+        assert context.any_duty("coordinator") is False
+
+    def test_host_is_never_coordinator(self) -> None:
+        context = probe(fx.HOST_AS_COORDINATOR)
+        answer = context.role_for_team("alpha")
+        assert answer.kind is RoleKind.UNKNOWN
+        assert answer.guards_armed is True
+        assert not answer.holds_role("coordinator")
+        assert context.any_duty("coordinator") is False
+        assert context.duty_in("alpha") == "host"
+
+    def test_role_null_is_unknown(self) -> None:
+        context = probe(fx.ROLE_NULL)
+        assert context.role_for_team("alpha").kind is RoleKind.UNKNOWN
+        assert context.role_in("alpha") == UNKNOWN
+        assert context.duty_in("alpha") == UNKNOWN
+        assert context.duty_unknown() is True
+
+    def test_probe_role_switches_nothing_on(self) -> None:
+        answer = probe(fx.ROLE_PROBE).role_for_team("alpha")
+        assert answer.role == "probe"
         assert not answer.holds_role("coordinator")
         assert not answer.holds_role("worker")
 
-    def test_holds_role_is_case_insensitive(self) -> None:
-        context = probe(fx.whoami(fx.seat("alpha", "Coordinator")))
-        assert context.role_for_team("alpha").holds_role("coordinator")
+    def test_unknown_duty_switches_nothing_on(self) -> None:
+        context = probe(fx.UNKNOWN_DUTY)
+        assert context.duty_in("alpha") == "reviewer"
+        for duty in ("coordinator", "worker", "host"):
+            assert context.any_duty(duty) is False
 
-    def test_duty_and_handle_are_carried(self) -> None:
-        context = probe(
-            fx.whoami(fx.seat("alpha", "worker", handle="@r.2+local.host:x", duty="deploy"))
+    def test_role_outside_wire_set_is_declared_and_inert(self) -> None:
+        answer = probe(fx.whoami(fx.seat("alpha", "deployer", duty="worker"))).role_for_team(
+            "alpha"
         )
-        seat = context.seats[0]
-        assert seat.handle == "@r.2+local.host:x"
-        assert seat.duty == "deploy"
+        assert answer.kind is RoleKind.DECLARED
+        assert not answer.holds_role("coordinator")
 
-    def test_extra_fields_ignored_and_secret_never_kept(self) -> None:
+    def test_holds_role_and_any_duty_are_case_insensitive(self) -> None:
+        context = probe(fx.whoami(fx.seat("alpha", "Coordinator", duty="Coordinator")))
+        assert context.role_for_team("alpha").holds_role("coordinator")
+        assert context.any_duty("coordinator")
+
+    def test_handle_is_carried(self) -> None:
+        context = probe(fx.whoami(fx.seat("alpha", "worker", handle="@r.2+local.host:x")))
+        assert context.seats[0].handle == "@r.2+local.host:x"
+
+    def test_extra_keys_ignored_and_secret_never_kept(self) -> None:
         context = probe(fx.EXTRA_FIELDS)
         assert context.role_for_team("alpha").holds_role("coordinator")
         assert "SYNTHETIC-SECRET-VALUE" not in repr(context)
-
-    def test_version_absent_is_accepted(self) -> None:
-        stdout = '{"seats": [{"team": "alpha", "role": "worker"}]}'
-        assert probe(stdout).role_for_team("alpha").holds_role("worker")
-
-    def test_bare_list_of_rows_is_accepted(self) -> None:
-        stdout = '[{"team": "alpha", "role": "worker"}]'
-        assert probe(stdout).role_for_team("alpha").holds_role("worker")
 
     @pytest.mark.parametrize(
         "stdout",
@@ -253,26 +310,29 @@ class TestRoles:
         assert answer.kind is RoleKind.UNKNOWN
         assert answer.guards_armed is True
 
+    def test_team_listed_twice_is_flagged(self) -> None:
+        context = probe(fx.CONFLICTING_ROWS)
+        assert context.duplicate_teams == ("alpha",)
+        assert probe(fx.MULTI_TEAM).duplicate_teams == ()
+
     def test_bad_role_in_one_team_leaves_other_team_resolved(self) -> None:
-        stdout = fx.whoami(fx.seat("alpha", 7), fx.seat("beta", "coordinator"))
-        context = probe(stdout)
+        context = probe(fx.whoami(fx.seat("alpha", 7), fx.seat("beta", "coordinator")))
         assert context.role_for_team("alpha").kind is RoleKind.UNKNOWN
         assert context.role_for_team("beta").holds_role("coordinator")
 
     def test_duplicate_rows_agreeing_resolve(self) -> None:
-        stdout = fx.whoami(fx.seat("alpha", "worker"), fx.seat("alpha", "worker"))
-        context = probe(stdout)
+        context = probe(fx.whoami(fx.seat("alpha", "worker"), fx.seat("alpha", "worker")))
         assert context.teams_held() == ("alpha",)
         assert context.role_for_team("alpha").holds_role("worker")
+        assert context.duplicate_teams == ("alpha",)
 
     def test_bad_handle_and_duty_are_dropped_not_fatal(self) -> None:
-        stdout = fx.whoami(fx.seat("alpha", "worker", handle="bad handle\n", duty=["x"]))
-        answer = probe(stdout).role_for_team("alpha")
-        assert answer.holds_role("worker")
-        assert answer.duty == ""
+        context = probe(fx.whoami(fx.seat("alpha", "worker", handle="bad handle\n", duty=["x"])))
+        assert context.role_for_team("alpha").holds_role("worker")
+        assert context.duty_in("alpha") == UNKNOWN
 
     def test_missing_role_key_is_unknown(self) -> None:
-        answer = probe('{"v": 1, "seats": [{"team": "alpha"}]}').role_for_team("alpha")
+        answer = probe('{"v": 1, "teams": [{"team": "alpha"}]}').role_for_team("alpha")
         assert answer.kind is RoleKind.UNKNOWN
 
     def test_parse_whoami_direct(self) -> None:
@@ -283,43 +343,46 @@ class TestRoles:
 
 
 class TestCommandCall:
-    def test_whoami_gets_the_session_membership_and_a_timeout(self) -> None:
+    def test_whoami_is_the_kit_binary_with_the_session_runtime(self) -> None:
         runner = ok(fx.WORKER_ONLY)
-        probe_seat_context(MEMBERSHIP, runner=runner, path_probe=FakePaths(), timeout=1.5)
-        assert runner.calls == [(WHOAMI_COMMAND, {MEMBERSHIP_ENV_VAR: MEMBERSHIP}, 1.5)]
+        probe_seat_context(SIGNALS, runner=runner, timeout=1.5)
+        assert runner.calls == [
+            ((f"{KIT}/bin/teamchat", "whoami", "--json"), {RUNTIME_ENV_VAR: RUNTIME}, 1.5)
+        ]
 
-    def test_command_never_names_token(self) -> None:
-        assert all("token" not in part for part in WHOAMI_COMMAND)
+    def test_argv_tolerates_trailing_slash(self) -> None:
+        assert whoami_argv(f"{KIT}/")[0] == f"{KIT}/bin/teamchat"
+
+    def test_command_never_names_the_credential(self) -> None:
+        assert all("password" not in part for part in whoami_argv(KIT))
 
 
-class TestDefaultSeams:
-    def test_runner_not_found(self) -> None:
-        outcome = default_command_runner(("teamchat-does-not-exist-00631",), {}, 1.0)
+class TestDefaultRunner:
+    def test_not_found(self) -> None:
+        outcome = default_command_runner(("/nonexistent-00631/bin/teamchat",), {}, 1.0)
         assert outcome.status is CommandStatus.NOT_FOUND
 
-    def test_runner_ok_and_env_overlay(self) -> None:
+    def test_ok_and_env_overlay(self) -> None:
         outcome = default_command_runner(
-            ("sh", "-c", f'printf %s "${MEMBERSHIP_ENV_VAR}"'), {MEMBERSHIP_ENV_VAR: "/m"}, 5.0
+            ("sh", "-c", f'printf %s "${RUNTIME_ENV_VAR}"'), {RUNTIME_ENV_VAR: "/m"}, 5.0
         )
         assert outcome.status is CommandStatus.OK
         assert outcome.stdout == "/m"
 
-    def test_runner_nonzero_exit_is_failed(self) -> None:
-        assert default_command_runner(("false",), {}, 5.0).status is CommandStatus.FAILED
+    def test_nonzero_exit_carries_the_code(self) -> None:
+        outcome = default_command_runner(("sh", "-c", "exit 69"), {}, 5.0)
+        assert outcome.status is CommandStatus.EXITED
+        assert outcome.exit_code == 69
 
-    def test_runner_timeout(self) -> None:
+    def test_timeout(self) -> None:
         assert default_command_runner(("sleep", "5"), {}, 0.1).status is CommandStatus.TIMEOUT
 
-    def test_path_probe(self, tmp_path: Path) -> None:
-        assert default_path_probe(tmp_path) is PathState.PRESENT
-        assert default_path_probe(tmp_path / "nope") is PathState.MISSING
-
-    def test_path_probe_unreadable(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        def denied(self: Path) -> bool:
-            raise PermissionError(13, "Permission denied")
-
-        monkeypatch.setattr(Path, "exists", denied)
-        assert default_path_probe(tmp_path / "x") is PathState.UNREADABLE
+    def test_permission_denied_is_not_found(self, tmp_path: Path) -> None:
+        binary = tmp_path / "teamchat"
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o600)
+        outcome = default_command_runner((str(binary),), {}, 1.0)
+        assert outcome.status is CommandStatus.NOT_FOUND
 
 
 # --- TTL cache ---------------------------------------------------------------
@@ -335,41 +398,40 @@ class Clock:
 
 class TestResolver:
     def _resolver(self, runner: FakeRunner, clock: Clock) -> SeatContextResolver:
-        return SeatContextResolver(
-            ttl_seconds=60, clock=clock, runner=runner, path_probe=FakePaths()
-        )
+        return SeatContextResolver(ttl_seconds=60, clock=clock, runner=runner)
 
     def test_role_change_lands_within_one_ttl(self) -> None:
         runner, clock = ok(fx.WORKER_ONLY), Clock()
         resolver = self._resolver(runner, clock)
-        assert resolver.resolve(MEMBERSHIP).role_for_team("alpha").holds_role("worker")
-        runner.outcome = CommandOutcome(CommandStatus.OK, fx.COORDINATOR_ONLY)
+        assert resolver.resolve(SIGNALS).role_in("alpha") == "worker"
+        runner.outcome = CommandOutcome(CommandStatus.OK, fx.COORDINATOR_ONLY, 0)
         clock.now += 30
-        assert resolver.resolve(MEMBERSHIP).role_for_team("alpha").holds_role("worker")
+        assert resolver.resolve(SIGNALS).role_in("alpha") == "worker"
         assert len(runner.calls) == 1
         clock.now += 31
-        assert resolver.resolve(MEMBERSHIP).role_for_team("alpha").holds_role("coordinator")
+        assert resolver.resolve(SIGNALS).role_in("alpha") == "coordinator"
         assert len(runner.calls) == 2
 
-    def test_cache_is_keyed_by_membership(self) -> None:
+    def test_seat_link_appearing_lands_within_one_ttl(self) -> None:
+        runner, clock = exited(fx.EXIT_NO_SESSION), Clock()
+        resolver = self._resolver(runner, clock)
+        assert resolver.resolve(SIGNALS).state is SeatState.ABSENT
+        runner.outcome = CommandOutcome(CommandStatus.OK, fx.WORKER_ONLY, 0)
+        clock.now += 61
+        assert resolver.resolve(SIGNALS).role_in("alpha") == "worker"
+
+    def test_cache_is_keyed_by_session_signals(self) -> None:
         runner, clock = ok(fx.WORKER_ONLY), Clock()
         resolver = self._resolver(runner, clock)
-        resolver.resolve(MEMBERSHIP)
-        resolver.resolve("/run/teamchat/session-b")
+        resolver.resolve(SIGNALS)
+        resolver.resolve(SessionSignals(runtime="/tmp/teamchat/run-b", kit=KIT))
         assert len(runner.calls) == 2
 
-    def test_absent_is_not_cached_and_runs_nothing(self) -> None:
-        runner, clock = ok(fx.WORKER_ONLY), Clock()
-        resolver = self._resolver(runner, clock)
-        assert resolver.resolve("").state is SeatState.ABSENT
-        assert runner.calls == []
-
-    def test_detection_off(self) -> None:
+    def test_absent_runs_nothing(self) -> None:
         runner = ok(fx.WORKER_ONLY)
-        resolver = SeatContextResolver(
-            ttl_seconds=60, clock=Clock(), runner=runner, path_probe=FakePaths()
-        )
-        assert resolver.resolve(MEMBERSHIP, detection_enabled=False).state is SeatState.ABSENT
+        resolver = self._resolver(runner, Clock())
+        assert resolver.resolve(SessionSignals()).state is SeatState.ABSENT
+        assert resolver.resolve(SIGNALS, detection_enabled=False).state is SeatState.ABSENT
         assert runner.calls == []
 
 
@@ -377,11 +439,27 @@ class TestResolver:
 
 
 class TestInvariants:
-    def test_module_has_no_v1_path(self) -> None:
-        source = inspect.getsource(teamchat_seat).lower()
-        assert "pingbus" not in source
+    def test_resolve_opens_and_stats_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Invariant 5: no file under the run directory (or anywhere) is touched."""
+        touched: list[Any] = []
 
-    def test_module_opens_no_file(self) -> None:
-        source = inspect.getsource(teamchat_seat)
-        for opener in ("open(", "read_text(", "read_bytes("):
-            assert opener not in source
+        def record(name: str, real: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                touched.append((name, args[:1]))
+                return real(*args, **kwargs)
+
+            return wrapper
+
+        monkeypatch.setattr(builtins, "open", record("open", builtins.open))
+        monkeypatch.setattr(os, "stat", record("stat", os.stat))
+        monkeypatch.setattr(os, "lstat", record("lstat", os.lstat))
+        monkeypatch.setattr(os, "scandir", record("scandir", os.scandir))
+        for stdout in (fx.MULTI_TEAM, fx.NOT_JSON, fx.NO_TEAMS):
+            probe(stdout)
+        probe_seat_context(SIGNALS, runner=exited(fx.EXIT_NO_SESSION))
+        assert touched == []
+
+    def test_module_has_no_v1_path(self) -> None:
+        source = Path(teamchat_seat.__file__).read_text(encoding="utf-8").lower()
+        assert "pingbus" not in source
+        assert "teamchat_membership" not in source

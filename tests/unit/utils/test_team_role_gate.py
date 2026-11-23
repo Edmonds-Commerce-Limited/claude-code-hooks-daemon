@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, role_gate
+from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, duty_gate, role_gate
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     ProbeReason,
     SeatContext,
@@ -18,7 +18,7 @@ from tests.support import teamchat as fx
 MAIN: dict[str, Any] = {"hook_event_name": "PreToolUse", "session_id": "s1"}
 SUBAGENT: dict[str, Any] = {**MAIN, "agent_id": "a1b2c3d4e5f6a7b8c"}
 
-ABSENT = SeatContext.absent(ProbeReason.NO_MEMBERSHIP_SIGNAL)
+ABSENT = SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)
 UNRESOLVED = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
 
 
@@ -50,8 +50,8 @@ def test_per_team_multi_team() -> None:
     )
 
 
-def test_unknown_declared_role_switches_nothing_on() -> None:
-    context = parse_whoami(fx.UNKNOWN_ROLE)
+def test_probe_role_switches_nothing_on() -> None:
+    context = parse_whoami(fx.ROLE_PROBE)
     for role in ("coordinator", "worker"):
         assert role_gate(MAIN, context, team="alpha", role=role).verdict is (
             GateVerdict.NOT_APPLICABLE
@@ -91,6 +91,42 @@ def test_decision_carries_reason_and_team() -> None:
     decision = role_gate(MAIN, parse_whoami(fx.WORKER_ONLY), team="alpha", role="coordinator")
     assert decision.team == "alpha"
     assert decision.reason
+
+
+def test_host_as_coordinator_is_role_unknown_not_applies() -> None:
+    context = parse_whoami(fx.HOST_AS_COORDINATOR)
+    assert role_gate(MAIN, context, team="alpha", role="coordinator").verdict is (
+        GateVerdict.ROLE_UNKNOWN
+    )
+
+
+# --- duty gate (acts that name no team) ------------------------------------------
+
+
+def test_duty_gate_absent_is_not_applicable() -> None:
+    assert duty_gate(MAIN, ABSENT, duty="host").verdict is GateVerdict.NOT_APPLICABLE
+
+
+def test_duty_gate_host_in_any_team_applies() -> None:
+    context = parse_whoami(fx.HOST_DUTY)
+    assert duty_gate(MAIN, context, duty="host").verdict is GateVerdict.APPLIES
+    assert duty_gate(MAIN, context, duty="coordinator").verdict is GateVerdict.NOT_APPLICABLE
+
+
+def test_duty_gate_subagent_is_not_applicable() -> None:
+    context = parse_whoami(fx.HOST_DUTY)
+    assert duty_gate(SUBAGENT, context, duty="host").verdict is GateVerdict.NOT_APPLICABLE
+
+
+@pytest.mark.parametrize("context", [UNRESOLVED, parse_whoami(fx.ROLE_NULL)])
+def test_duty_gate_unreadable_duty_is_role_unknown(context: SeatContext) -> None:
+    assert duty_gate(MAIN, context, duty="host").verdict is GateVerdict.ROLE_UNKNOWN
+
+
+def test_duty_gate_unknown_duty_switches_nothing_on() -> None:
+    context = parse_whoami(fx.UNKNOWN_DUTY)
+    for duty in ("coordinator", "host"):
+        assert duty_gate(MAIN, context, duty=duty).verdict is GateVerdict.NOT_APPLICABLE
 
 
 def test_gate_can_never_express_an_approval() -> None:
