@@ -11,11 +11,16 @@ judgement); every bus read and command goes through
 :mod:`utils.owner_wait_bus`.
 
 **Who it applies to.** A Stop on the main thread whose session carries a
-teamchat runtime, whose text (after ``STOPPING BECAUSE:``, outside fences and
-quotes) waits on a human or whose session is in the awaiting-human mode, and
+teamchat runtime, whose text (anywhere after ``STOPPING BECAUSE:``, outside
+fences and quotes, ordinary wordings such as "blocked on the owner", "need
+Joseph to pick", "the owner must answer"; a negated match like "not waiting on
+any user input" does not count) waits on a human or whose session is in the
+awaiting-human mode, and
 per held team only where the 00631 probe declares this seat ``coordinator``
 (:func:`role_gate` verdict APPLIES). A worker, an unknown role, an unresolved
-probe or no team leaves the stop untouched and reads nothing.
+probe or no team leaves the stop untouched and reads nothing. A stop whose
+message cannot be read is treated as an unconfirmed wait for each coordinator
+team, under ``options.on_unreadable_bus`` (the bus is not read).
 
 **An unreadable bus** (the adapter reports it, or raises) is governed by
 ``options.on_unreadable_bus``. ``refuse`` fails CLOSED, because an
@@ -53,6 +58,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Final
 
@@ -71,6 +77,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import event_synthetic_so
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _declares_human_blocked,
     _declaring_lines,
+    _quoted_spans,
 )
 from claude_code_hooks_daemon.utils.autonomy import session_policy
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
@@ -121,12 +128,40 @@ _STOP_PREFIX: Final[str] = "STOPPING BECAUSE:"
 #: How far back a re-entered stop looks for this guard's own refusal: wide enough
 #: for the bump turn between the deny and the re-stop (the helper's own default is 20).
 _REENTRY_LOOKBACK_LINES: Final[int] = 200
-#: A waiting declaration on the same line as the prefix: "waiting on/for ... the owner",
-#: "awaiting the owner's decision". ``[awaiting-human]`` is matched by auto_continue_stop's own test.
+#: What a wait is ON: a human, or a human's answer. Object slots stay inside one clause.
+_HUMAN: Final[str] = (
+    r"(?:owner|human|user|answers?|repl(?:y|ies)|decision|input|approval|sign[- ]?off"
+    r"|ruling|go-ahead|choice|confirmation|response)"
+)
+#: A named person: an ``@handle`` or a capitalised name (``Joseph``, not ``CI`` or ``GitHub``).
+_PERSON: Final[str] = r"(?:@\w+|(?-i:[A-Z][a-z]+)\b)"
+_WHO: Final[str] = rf"(?:(?:the\s+)?(?:owner|human|user)|{_PERSON})"
+_ACTS: Final[str] = r"(?:answer|decide|choose|pick|confirm|approve|reply|respond|rule|review|sign)"
+_CLAUSE: Final[str] = r"[^.;:!?\n]*?"
+#: Ordinary waiting wordings (Plan 00636 F2), searched across the whole declaring
+#: text after ``STOPPING BECAUSE:``. ``[awaiting-human]`` and the frozen prose
+#: are matched by auto_continue_stop's own test first.
 _WAITING_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:waiting\s+(?:on|for)|awaiting)\b[^\n]*?"
-    r"\b(?:owner|human|user|answers?|repl(?:y|ies)|decision|input)",
+    "|".join(
+        [
+            rf"\b(?:wait(?:ing)?\s+(?:on|for)|awaiting|blocked\s+(?:on|by)|pending)\b"
+            rf"(?:{_CLAUSE}\b{_HUMAN}\b|\s+{_PERSON})",
+            rf"\bneeds?\s+(?:{_WHO}\s+to\b|(?:an?\s+|the\s+|their\s+|your\s+)?{_HUMAN}\b)",
+            rf"\b{_WHO}\s+(?:must|has\s+to|needs\s+to|should|to)\s+{_ACTS}",
+            rf"\buntil\s+{_WHO}\s+{_ACTS}",
+        ]
+    ),
     re.IGNORECASE,
+)
+#: A negation that governs the match: adjacent to it, at the end of its clause prefix.
+_NEGATED_PREFIX_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\b(?:not|no|never|nothing)|n't)"
+    r"(?:\s+(?:longer|really|currently|actually|even|yet|anymore|any\s+more))?\s*$",
+    re.IGNORECASE,
+)
+#: Clause breaks: sentence punctuation, a spaced dash (ASCII, en or em), or "but".
+_CLAUSE_BREAK_RE: Final[re.Pattern[str]] = re.compile(
+    "[.;:!?\\n]|\\s[-\\u2013\\u2014]+\\s|\\bbut\\b", re.IGNORECASE
 )
 
 _RULE: Final[Rule] = Rule(
@@ -156,6 +191,20 @@ _RULE: Final[Rule] = Rule(
         "One deny per stop chain: the re-stop after this rule's own deny is allowed;\n"
         "a re-stop after another handler's deny is checked again."
     ),
+)
+
+
+class _Waiting(Enum):
+    """Whether a stop waits on a human. UNREADABLE: the stop message could not be read."""
+
+    YES = "yes"
+    NO = "no"
+    UNREADABLE = "unreadable"
+
+
+#: The ``_Unconfirmed`` reason when the stop message itself could not be read.
+_UNREADABLE_STOP_REASON: Final[str] = (
+    "the stop message could not be read, so whether it waits on a human is unknown"
 )
 
 
@@ -298,19 +347,34 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
 
     @staticmethod
     def _text_declares_waiting(text: str) -> bool:
+        """Whether the declaring text after ``STOPPING BECAUSE:`` waits on a human.
+
+        Searches every declaring line after the first prefix (a wait on the next
+        line counts), with quoted spans blanked so a cited phrase does not
+        declare, and skips a match negated at the end of its own clause
+        (``not waiting on any user input``).
+        """
         declaring = _declaring_lines(text)
         if _declares_human_blocked(declaring):
             return True
-        for line in declaring.splitlines():
-            _, prefix, reason = line.partition(_STOP_PREFIX)
-            if prefix and _WAITING_RE.search(reason):
+        _, prefix, body = declaring.partition(_STOP_PREFIX)
+        if not prefix:
+            return False
+        for start, end in _quoted_spans(body):
+            body = body[:start] + " " * (end - start) + body[end:]
+        for match in _WAITING_RE.finditer(body):
+            before = body[: match.start()]
+            breaks = list(_CLAUSE_BREAK_RE.finditer(before))
+            clause = before[breaks[-1].end() :] if breaks else before
+            if not _NEGATED_PREFIX_RE.search(clause):
                 return True
         return False
 
-    def _waits_on_a_human(self, hook_input: dict[str, Any]) -> bool:
+    def _waiting(self, hook_input: dict[str, Any]) -> _Waiting:
+        """Whether this stop waits on a human: the mode, else the stop text, else unknown."""
         try:
             if session_policy(hook_input).is_blocked:
-                return True
+                return _Waiting.YES
         except (RuntimeError, OSError) as exc:
             log_and_continue(
                 logger,
@@ -318,8 +382,10 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
                 reason="the session-modes registry is unreadable, so only the stop text can show a wait on a human",
             )
         reader = get_transcript_reader(hook_input)
-        text = reader.get_last_assistant_text() if reader is not None else ""
-        return bool(text) and self._text_declares_waiting(text)
+        if reader is None:
+            return _Waiting.UNREADABLE
+        text = reader.get_last_assistant_text()
+        return _Waiting.YES if text and self._text_declares_waiting(text) else _Waiting.NO
 
     @staticmethod
     def _reenters_own_refusal(hook_input: dict[str, Any]) -> bool:
@@ -355,7 +421,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             return False
         if is_stop_hook_active(hook_input) and self._reenters_own_refusal(hook_input):
             return False
-        return self._waits_on_a_human(hook_input)
+        return self._waiting(hook_input) is not _Waiting.NO
 
     # -- handling ----------------------------------------------------------------
 
@@ -372,6 +438,9 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Deny on stale threads or a refused unreadable bus; ``auto`` on v1 adds an advisory."""
+        waiting = self._waiting(hook_input)
+        if waiting is _Waiting.NO:
+            return BlockingResult(decision=Decision.ALLOW)
         signals = SessionSignals.from_hook_input(hook_input)
         context = self._resolve_seats(signals)
         policy = self._unreadable_policy()
@@ -383,7 +452,11 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             gate = role_gate(hook_input, context, team=team, role=ROLE_COORDINATOR)
             if gate.verdict is not GateVerdict.APPLIES:
                 continue
-            snapshot = self._read(gate.team, signals)
+            snapshot = (
+                BusUnreadable(_UNREADABLE_STOP_REASON)
+                if waiting is _Waiting.UNREADABLE
+                else self._read(gate.team, signals)
+            )
             if isinstance(snapshot, BusUnreadable):
                 refused = self._refuses_unreadable(policy)
                 logger.warning(

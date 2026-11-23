@@ -616,6 +616,69 @@ class TestWaitingDetection:
         bus = _FakeBus(_snapshot(_question()))
         assert _run(_Handler(_seats(), bus), _stop(tmp_path, text)).decision is Decision.DENY
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # The independent review's probe rows (F2), each missed before.
+            "STOPPING BECAUSE: blocked on the owner choosing A or B.",
+            "STOPPING BECAUSE: pending the owner decision.",
+            "STOPPING BECAUSE: need Joseph to pick A or B.",
+            "STOPPING BECAUSE: the owner must answer Q61 first.",
+            "STOPPING BECAUSE: waiting on Joseph.",
+            "STOPPING BECAUSE: slice 1 is merged.\nWaiting on the owner to choose A or B.",
+            "STOPPING BECAUSE:\nwaiting for the owner's ruling on Q61.",
+            # Negation is clause-local and adjacent: these still wait.
+            "STOPPING BECAUSE: can't continue until the owner decides.",
+            "STOPPING BECAUSE: not done: waiting on the owner.",
+            "STOPPING BECAUSE: waiting on @joseph for Q61.",
+            "STOPPING BECAUSE: needs a decision from the owner on Q61.",
+        ],
+    )
+    def test_ordinary_waiting_wordings_are_detected(self, text: str, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        assert _run(_Handler(_seats(), bus), _stop(tmp_path, text)).decision is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: not waiting on any user input; all tasks complete.",
+            "STOPPING BECAUSE: no longer waiting on the owner, Q61 was answered.",
+            "STOPPING BECAUSE: waiting on CI.",
+            "STOPPING BECAUSE: pending QA on the integration branch.",
+            "STOPPING BECAUSE: blocked on a failing test I cannot reproduce.",
+            'STOPPING BECAUSE: done; the docs now explain "waiting on the owner".',
+            "Waiting on the owner. STOPPING BECAUSE: QA passes, all tasks complete.",
+        ],
+    )
+    def test_non_waiting_wordings_are_not_detected(self, text: str, tmp_path: Path) -> None:
+        handler = _Handler(None, _FakeBus(_snapshot(_question())))
+        assert _run(handler, _stop(tmp_path, text)) is None
+
+    def test_unreadable_transcript_is_unconfirmed_under_refuse(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        hook_input = _stop(tmp_path)
+        hook_input["transcript_path"] = str(tmp_path / "missing.jsonl")
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="refuse"), hook_input)
+        assert result.decision is Decision.DENY
+        assert "could not be read" in result.reason
+        assert bus.reads == []
+
+    def test_unreadable_transcript_on_v1_auto_allows_with_an_advisory(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()), flags=False)
+        hook_input = _stop(tmp_path)
+        hook_input["transcript_path"] = str(tmp_path / "missing.jsonl")
+        result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), hook_input)
+        assert result.decision is Decision.ALLOW
+        assert "team alpha" in _advisory(result)
+
+    def test_unreadable_transcript_for_a_worker_is_untouched(self, tmp_path: Path) -> None:
+        bus = _FakeBus(_snapshot(_question()))
+        hook_input = _stop(tmp_path)
+        hook_input["transcript_path"] = str(tmp_path / "missing.jsonl")
+        result = _run(_Handler(_seats("worker"), bus), hook_input)
+        assert result.decision is Decision.ALLOW
+        assert result.context == []
+
     def test_waiting_phrase_inside_a_code_fence_is_not_a_declaration(self, tmp_path: Path) -> None:
         text = "STOPPING BECAUSE: done.\n```\nSTOPPING BECAUSE: waiting on the owner\n```"
         handler = _Handler(None, _FakeBus(_snapshot(_question())))
