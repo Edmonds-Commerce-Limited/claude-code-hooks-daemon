@@ -350,7 +350,7 @@ def test_wrapper_option_values_are_peeled(command: str) -> None:
         "p\\ytest tests/",
         '"/usr/bin/pytest" -x',
         "env FOO=1 'pytest'",
-        "nice -n 19 \"pytest\" tests/",
+        'nice -n 19 "pytest" tests/',
         "'sleep' 600",
     ],
 )
