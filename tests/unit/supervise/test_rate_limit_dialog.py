@@ -1560,3 +1560,203 @@ class TestLimitRowRequired:
             ("Enter to confirm · Esc to cancel",),
         )
         assert _mod.recognise_rate_limit_dialog(screen) is not None
+
+
+# ── Delta-review follow-ups F1-F4 ─────────────────────────────────────────────
+
+
+def _answered_enter(sidecar_dir: Path, machine: Any) -> Any:
+    """Two stable ticks on the target row: the second returns the Enter."""
+    _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+    enter = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1))
+    assert enter.payload == "\r"
+    return enter
+
+
+def _state(sidecar_dir: Path) -> dict[str, Any]:
+    return json.loads(_state_path(sidecar_dir).read_text(encoding="utf-8"))
+
+
+class TestF1SweepAgreesWithLoad:
+    def _open_state(self, sidecar_dir: Path, phase: str) -> Path:
+        state = _mod._new_rate_limit_window(_NOW - 3 * 86400.0, _NOW - 4 * 86400.0)
+        state.update(phase=phase, occurrence_open=True)
+        path = _state_path(sidecar_dir)
+        _mod._save_rate_limit_state(path, state)
+        return path
+
+    @pytest.mark.parametrize("phase", ["abandoned", ""])
+    def test_an_open_taken_over_or_key_capped_state_is_not_swept(
+        self, sidecar_dir: Path, machine: Any, phase: str
+    ) -> None:
+        path = self._open_state(sidecar_dir, phase)
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, child_pid=7))
+        assert path.exists()
+
+    def test_an_open_answered_state_is_still_swept(self, sidecar_dir: Path, machine: Any) -> None:
+        # `load` expires these at anchor + TTL even while open, so the sweep may too.
+        path = self._open_state(sidecar_dir, "answered")
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, child_pid=7))
+        assert not path.exists()
+
+
+class TestF2HeldEnter:
+    def _held(self, sidecar_dir: Path, outcome: Any) -> list[bytes]:
+        typed: list[bytes] = []
+        injected = _mod._apply_worker_outcome(
+            outcome,
+            machine=_mod.CompactStateMachine(_mod.CompactPolicy()),
+            line=_mod.HumanInputLine(),
+            master_writer=typed.append,
+            log=None,
+            main_focus_confirmed=False,
+            now_wall=_NOW + 1,
+            on_held=lambda held: _mod._rate_limit_host_held(
+                held,
+                status_dir=sidecar_dir.parent,
+                child_pid=_CHILD,
+                now_wall=_NOW + 1,
+            ),
+        )
+        assert injected is False
+        return typed
+
+    def test_a_held_enter_takes_answered_back(self, sidecar_dir: Path, machine: Any) -> None:
+        enter = _answered_enter(sidecar_dir, machine)
+        assert _phase(sidecar_dir) == "answered"
+        assert self._held(sidecar_dir, enter) == []
+        assert _phase(sidecar_dir) == ""
+        assert _state(sidecar_dir)["occurrence_open"] is True
+
+    def test_a_held_enter_that_closed_leaves_no_pending_resume(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        enter = _answered_enter(sidecar_dir, machine)
+        self._held(sidecar_dir, enter)
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), now=_NOW + 5))
+        resumed = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert resumed.decision_value != _CONTINUE
+
+    def test_a_held_non_rate_limit_outcome_changes_nothing(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        enter = _answered_enter(sidecar_dir, machine)
+        other = _key_outcome("/compact", "would-compact")
+        assert self._held(sidecar_dir, other) == []
+        assert enter.payload == "\r"
+        assert _phase(sidecar_dir) == "answered"
+
+
+class TestF3VetoedContinueIsRetried:
+    @pytest.mark.parametrize("box", ["", "continue"])
+    def test_the_redraw_that_caused_the_veto_does_not_open_a_recheck(
+        self, sidecar_dir: Path, machine: Any, box: str
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        before = machine.export_state()
+        sent = _resume(sidecar_dir, machine, _resume_facts(box))
+        assert sent.payload is not None
+        machine.import_state(before)
+        assert _mod._rate_limit_host_veto(
+            sent,
+            stdin_pending=False,
+            child_output_pending=True,
+            shipped_dump=_prompt_screen(box),
+            status_dir=sidecar_dir.parent,
+            child_pid=_CHILD,
+            now_wall=_AFTER,
+        )
+        # The redraw that vetoed it settles a few seconds later, box still as it was.
+        again = _resume(sidecar_dir, machine, _resume_facts(box, now=_AFTER + 10, quiet=8.0))
+        assert again.decision_value in (_KEY, _CONTINUE), again.noop_reason_log
+        assert again.payload is not None
+
+    def test_fresh_output_long_after_the_veto_still_opens_the_recheck(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        before = machine.export_state()
+        sent = _resume(sidecar_dir, machine, _resume_facts(""))
+        machine.import_state(before)
+        _mod._rate_limit_host_veto(
+            sent,
+            stdin_pending=False,
+            child_output_pending=True,
+            shipped_dump=_prompt_screen(""),
+            status_dir=sidecar_dir.parent,
+            child_pid=_CHILD,
+            now_wall=_AFTER,
+        )
+        later = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + 60, quiet=10.0))
+        assert later.payload is None
+        assert _phase(sidecar_dir) == "answered"
+
+
+class TestF4TakebackCap:
+    def _veto_enter(self, sidecar_dir: Path, enter: Any, now: float) -> None:
+        assert _mod._rate_limit_host_veto(
+            enter,
+            stdin_pending=False,
+            child_output_pending=True,
+            shipped_dump=_ON_TARGET,
+            status_dir=sidecar_dir.parent,
+            child_pid=_CHILD,
+            now_wall=now,
+        )
+
+    def test_the_enter_is_pressed_again_only_up_to_the_takeback_cap(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        enter = _answered_enter(sidecar_dir, machine)
+        now = _NOW + 1
+        for _ in range(_mod._RATE_LIMIT_TAKEBACK_CAP):
+            self._veto_enter(sidecar_dir, enter, now)
+            now += 1
+            enter = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=now))
+            if enter.payload is None:
+                break
+        capped = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=now + 1))
+        assert capped.payload is None
+        assert "take" in (capped.noop_reason_log or "")
+
+    def test_a_dialog_back_in_the_same_window_stays_held_after_the_cap(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        enter = _answered_enter(sidecar_dir, machine)
+        now = _NOW + 1
+        for _ in range(_mod._RATE_LIMIT_TAKEBACK_CAP):
+            self._veto_enter(sidecar_dir, enter, now)
+            now += 1
+            enter = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=now))
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), now=now + 1))
+        for offset in (2, 3, 4):
+            back = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=now + offset))
+            assert back.payload is None
+
+
+class TestArmedStatus:
+    def test_armed_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
+        line = _mod.rate_limit_armed_status(dry_run=False)
+        assert line.startswith("rate-limit dialog answerer: ARMED")
+
+    def test_dry_run_is_not_armed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
+        line = _mod.rate_limit_armed_status(dry_run=True)
+        assert line.startswith("rate-limit dialog answerer: dry-run")
+        assert "ARMED" not in line
+
+    @pytest.mark.parametrize("value", ["off", "0", "false", "NO"])
+    def test_switched_off_by_the_config_key(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv("CCY_RATE_LIMIT_DIALOG", value)
+        line = _mod.rate_limit_armed_status(dry_run=False)
+        assert line.startswith("rate-limit dialog answerer: OFF")
+        assert "CCY_RATE_LIMIT_DIALOG" in line
+
+    def test_the_banner_carries_the_line(self) -> None:
+        banner = _mod.render_startup_banner(
+            version="1.0", armed=True, extra_lines=("rate-limit dialog answerer: ARMED",)
+        )
+        assert "┃  rate-limit dialog answerer: ARMED" in banner.splitlines()

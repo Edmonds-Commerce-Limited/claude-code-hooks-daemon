@@ -522,7 +522,22 @@ veto takes back the phase the worker recorded for an Enter, a clear or the
 continue, so the next tick decides afresh: a dialog still shown is answered
 again within the caps, one closed some other way leaves no pending resume, and
 a vetoed continue is sent on a later tick. A vetoed arrow only spends its
-key-cap slot.
+key-cap slot. Three refinements (Plan 00523 F1-F4):
+
+- An Enter the host's focus model holds (`_rate_limit_host_held`) is taken back
+  the same way, so a never-typed Enter does not leave `answered` behind.
+- Enters taken back (vetoed or held) are counted per window; after
+  `_RATE_LIMIT_TAKEBACK_CAP` (2) the dialog is left alone.
+- Output within 5 s of a vetoed resume send is the redraw that caused the
+  veto, so it does not open the post-reset re-check (which would abandon an
+  empty box at its deadline): the send is retried.
+
+The sweep of old state files keeps an open dialog's taken-over or key-capped
+state, as the load does.
+
+**Armed state.** `rate_limit_armed_status` gives one line (`ARMED`, `dry-run`,
+or `OFF` with the `CCY_RATE_LIMIT_DIALOG` key). It is in the startup banner and
+the first decision-log line of the session, for Plan 00632's readiness check.
 
 **The resume.** Once the dialog is answered, Claude Code leaves `continue`
 pre-filled in the box. After `reset + 120 s` the supervisor clears it with
