@@ -103,6 +103,7 @@ from claude_code_hooks_daemon.utils.owner_wait_check import (
     printable_thread_id,
     stale_threads,
 )
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     configured_delay_hours,
     stand_in_requirement,
@@ -405,9 +406,14 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         return False
 
     def _waiting(self, hook_input: dict[str, Any]) -> _Waiting:
-        """Whether this stop waits on a human: the mode, else the stop text, else unknown."""
+        """Whether this stop waits on a human: the mode, else the stop text, else unknown.
+
+        Only ``awaiting-human`` counts as the mode: ``goal-blocked`` is the goal
+        loop's own block, not a declared wait on a human, so a goal-blocked stop
+        is a wait only when its text says so.
+        """
         try:
-            if session_policy(hook_input).is_blocked:
+            if ModeLabel.AWAITING_HUMAN in session_policy(hook_input).labels:
                 return _Waiting.YES
         except (RuntimeError, OSError) as exc:
             log_and_continue(

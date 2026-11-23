@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
-from tests.support.autonomy import awaiting_human_entry, pin_session_modes
+from tests.support.autonomy import awaiting_human_entry, goal_blocked_entry, pin_session_modes
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -226,6 +226,25 @@ class TestDeny:
         pin_session_modes(monkeypatch, tmp_path / "modes2", awaiting_human_entry(SESSION))
         bus = _FakeBus(_snapshot(_question()))
         result = _run(_Handler(_seats(), bus), _stop(tmp_path, "done for now"))
+        assert result.decision is Decision.DENY
+
+    def test_goal_blocked_mode_alone_is_not_a_wait_on_a_human(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # F9 (PR 226 review): goal-blocked is the goal loop's own block, not a
+        # declared wait on a human, so only the stop text can make it one.
+        pin_session_modes(monkeypatch, tmp_path / "modes3", goal_blocked_entry(SESSION))
+        bus = _FakeBus(_snapshot(_question()))
+        result = _run(_Handler(_seats(), bus), _stop(tmp_path, "done for now"))
+        assert result is None or result.decision is Decision.ALLOW
+
+    def test_goal_blocked_with_a_waiting_stop_text_is_still_a_wait(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path / "modes4", goal_blocked_entry(SESSION))
+        bus = _FakeBus(_snapshot(_question()))
+        text = "STOPPING BECAUSE: [awaiting-human] the owner must choose."
+        result = _run(_Handler(_seats(), bus), _stop(tmp_path, text))
         assert result.decision is Decision.DENY
 
     def test_deny_names_ids_only_and_never_bus_text(self, tmp_path: Path) -> None:
