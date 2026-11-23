@@ -79,6 +79,11 @@ class _Guard(OwnerWaitStopGuardHandler):
         return SeatContext(SeatState.RESOLVED, ProbeReason.RESOLVED, (seat,))
 
 
+class _FaultingGuard(_Guard):
+    def _check(self, hook_input: dict[str, Any]) -> Any:
+        raise RuntimeError("stale check exploded")
+
+
 def _stale() -> BusSnapshot:
     return BusSnapshot(
         threads=(OwnerThread("Q61", "$Q61root", ThreadKind.SEAT_QUESTION, started_at=0.0),)
@@ -183,7 +188,94 @@ class TestStandInSurvivesTheOwnerWaitDeny:
         assert result.decision is Decision.DENY
         assert STAND_IN_HEADLINE not in result.reason
 
+    def test_the_fault_path_refusal_carries_the_stand_in_too(self, tmp_path: Path) -> None:
+        # N1: a fault while checking used to deny with static text only, hiding the stand-in.
+        chain = HandlerChain()
+        chain.add(_FaultingGuard(_Bus(_stale()), ENABLED))
+        auto = AutoContinueStopHandler()
+        auto._config_loader = lambda: ENABLED
+        chain.add(auto)
+        result = _run(chain, tmp_path, [_assistant(AWAITING)])
+        assert result.decision is Decision.DENY
+        assert "failed before it could confirm" in result.reason
+        assert STAND_IN_HEADLINE in result.reason
+
+    def test_a_stand_in_fault_on_the_fault_path_still_denies(self, tmp_path: Path) -> None:
+        guard = _FaultingGuard(_Bus(_stale()), ENABLED)
+
+        def _broken() -> Config:
+            raise RuntimeError("config gone")
+
+        guard._config_loader = _broken
+        chain = HandlerChain()
+        chain.add(guard)
+        result = _run(chain, tmp_path, [_assistant(AWAITING)])
+        assert result.decision is Decision.DENY
+        assert "failed before it could confirm" in result.reason
+
     def test_a_bumped_wait_still_meets_the_stand_in_deny(self, tmp_path: Path) -> None:
         result = _run(_chain(_Bus(_bumped())), tmp_path, [_assistant(AWAITING)])
         assert result.decision is Decision.DENY
         assert STAND_IN_HEADLINE in result.reason
+
+
+RHETORICAL = (
+    "STOPPING BECAUSE: waiting on the owner to choose A or B (Q61). "
+    "Want me to build slice 2 next?"
+)
+
+
+class TestOtherStopRefusalsSurviveTheOwnerWaitDeny:
+    """N1: the guard's deny must not make the re-stop skip auto_continue_stop's own refusals."""
+
+    def test_the_re_stop_after_the_guard_deny_meets_auto_continue_afresh(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _chain(_Bus(_stale()))
+        first = _run(chain, tmp_path, [_assistant(RHETORICAL)])
+        assert first.decision is Decision.DENY
+        assert "R-STOP-OWNER-WAIT-UNBUMPED" in first.reason
+        second = _run(
+            chain,
+            tmp_path,
+            [_assistant(RHETORICAL), _feedback(first.reason), _assistant(RHETORICAL)],
+            active=True,
+        )
+        assert second.decision is Decision.DENY
+        assert second.rule == "R-STOP-TAUTOLOGICAL-QUESTION"
+
+    def test_no_third_refusal_in_the_chain(self, tmp_path: Path) -> None:
+        chain = _chain(_Bus(_stale()))
+        first = _run(chain, tmp_path, [_assistant(RHETORICAL)])
+        second = _run(
+            chain,
+            tmp_path,
+            [_assistant(RHETORICAL), _feedback(first.reason), _assistant(RHETORICAL)],
+            active=True,
+        )
+        third = _run(
+            chain,
+            tmp_path,
+            [
+                _assistant(RHETORICAL),
+                _feedback(first.reason),
+                _assistant(RHETORICAL),
+                _feedback(second.reason),
+                _assistant(RHETORICAL),
+            ],
+            active=True,
+        )
+        assert third.decision is Decision.ALLOW
+
+    def test_a_clean_re_stop_after_the_guard_deny_is_allowed(self, tmp_path: Path) -> None:
+        text = "STOPPING BECAUSE: waiting on the owner to choose A or B (Q61)."
+        chain = _chain(_Bus(_stale()))
+        first = _run(chain, tmp_path, [_assistant(text)])
+        assert first.decision is Decision.DENY
+        second = _run(
+            chain,
+            tmp_path,
+            [_assistant(text), _feedback(first.reason), _assistant(text)],
+            active=True,
+        )
+        assert second.decision is Decision.ALLOW

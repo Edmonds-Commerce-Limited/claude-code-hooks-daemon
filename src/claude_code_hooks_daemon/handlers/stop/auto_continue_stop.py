@@ -81,11 +81,33 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
     is_stop_hook_active,
+    recent_stop_hook_block_texts,
     transcript_is_readable,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
+
+
+def _last_block_is_owner_wait_guard(transcript_path: str | None) -> bool:
+    """Whether the LATEST Stop-hook block was owner_wait_stop_guard's (Plan 00636 N1).
+
+    That guard runs first and the chain shows only the first deny, so a re-stop
+    after it has not yet met this handler's refusals. Any read fault answers
+    False: an unverifiable re-entry stands down, as before.
+    """
+    try:
+        texts = recent_stop_hook_block_texts(transcript_path)
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable block marker cannot be attributed, so the re-entry stands down",
+            level=logging.DEBUG,
+        )
+        return False
+    return bool(texts) and RuleID.STOP_OWNER_WAIT_UNBUMPED in texts[-1]
+
 
 # Plan 00181: stop-events.jsonl is append-only and was never bounded (644 KB
 # observed). Cap it after each write; on breach keep the newest half so a busy
@@ -778,8 +800,18 @@ class AutoContinueStopHandler(StopHandlerBase):
                 )
                 return False
             if has_recent_stop_hook_block(transcript_path):
-                logger.debug("Stop hook re-entry confirmed by transcript block marker - skipping")
-                return False
+                if not _last_block_is_owner_wait_guard(transcript_path):
+                    logger.debug(
+                        "Stop hook re-entry confirmed by transcript block marker - skipping"
+                    )
+                    return False
+                # Plan 00636 N1: the chain showed only owner_wait_stop_guard's
+                # deny, so this handler's own refusal was never seen. Judge the
+                # re-stop afresh; its own deny is the next marker, so it never loops.
+                logger.info(
+                    "stop_hook_active=true after owner_wait_stop_guard's deny - "
+                    "treating as fresh Stop event"
+                )
             logger.info(
                 "stop_hook_active=true but no prior block marker — silent-stop bug,"
                 " treating as fresh Stop event"

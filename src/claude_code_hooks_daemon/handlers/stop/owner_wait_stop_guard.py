@@ -58,7 +58,9 @@ it runs before ``auto_continue_stop`` enters the awaiting-human mode, it reads
 the current message for the declaration as well as the mode. The chain shows
 only the first deny, so on an ``[awaiting-human]`` stop this deny also carries
 auto_continue_stop's stand-in requirement (one shared gate,
-:func:`utils.stand_in_cron.stand_in_requirement`).
+:func:`utils.stand_in_cron.stand_in_requirement`), the fault deny included.
+auto_continue_stop's other refusals are not hidden: it judges the re-stop
+after THIS guard's deny afresh (N1), so at most one more refusal follows.
 """
 
 from __future__ import annotations
@@ -573,7 +575,28 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             )
             if not self._armed_or_unknown(hook_input):
                 return BlockingResult(decision=Decision.ALLOW)
-            return BlockingResult.deny(_FAIL_CLOSED_REASON).under_rule(_RULE)
+            reason = self._with_stand_in(_FAIL_CLOSED_REASON, hook_input)
+            return BlockingResult.deny(reason).under_rule(_RULE)
+
+    def _with_stand_in(self, reason: str, hook_input: dict[str, Any]) -> str:
+        """``reason`` plus the stand-in requirement this deny would hide (F1, N1).
+
+        A fault computing the requirement leaves ``reason`` as it is: the deny
+        must still land, and auto_continue_stop meets the re-stop afresh.
+        """
+        try:
+            stand_in = self._stand_in_reason(hook_input)
+        except Exception as exc:  # the deny must land; the stand-in is a best-effort addition
+            log_and_continue(
+                logger,
+                exc,
+                reason="the stand-in requirement could not be computed, so the refusal goes out without it",
+                level=logging.WARNING,
+            )
+            return reason
+        if not stand_in:
+            return reason
+        return f"{reason}\n\nALSO REQUIRED BEFORE STOPPING AGAIN:\n\n{stand_in}"
 
     def _armed_or_unknown(self, hook_input: dict[str, Any]) -> bool:
         """Whether any team arms this guard; a fault deciding that counts as armed."""
@@ -635,10 +658,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         if not stale and not unconfirmed:
             return BlockingResult(decision=Decision.ALLOW, context=advisory)
         reason = "\n\n".join([self._render(stale, unconfirmed, window), *advisory])
-        stand_in = self._stand_in_reason(hook_input)
-        if stand_in:
-            reason = f"{reason}\n\nALSO REQUIRED BEFORE STOPPING AGAIN:\n\n{stand_in}"
-        return BlockingResult.deny(reason).under_rule(_RULE)
+        return BlockingResult.deny(self._with_stand_in(reason, hook_input)).under_rule(_RULE)
 
     def _render(self, stale: list[_Stale], unconfirmed: list[_Unconfirmed], window: float) -> str:
         minutes = int(window // _SECONDS_PER_MINUTE)
