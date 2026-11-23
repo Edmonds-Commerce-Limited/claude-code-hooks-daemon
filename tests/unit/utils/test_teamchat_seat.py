@@ -505,6 +505,32 @@ class TestDefaultRunner:
         assert outcome.status is CommandStatus.OK
         assert outcome.stdout == "/m"
 
+    def test_env_is_an_allowlist_not_the_daemons_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review F3: the daemon's own (possibly stale) teamchat seat must not leak."""
+        monkeypatch.setenv("TEAMCHAT_HANDLE", "@stale.1+local.x:old")
+        monkeypatch.setenv(KIT_ENV_VAR, "/stale/kit")
+        monkeypatch.setenv(RUNTIME_ENV_VAR, "/stale/run")
+        monkeypatch.setenv("SYNTHETIC_DAEMON_ONLY_VAR", "x")
+        outcome = default_command_runner(("/bin/sh", "-c", "env"), {RUNTIME_ENV_VAR: "/m"}, 5.0)
+        assert outcome.status is CommandStatus.OK
+        names = {
+            line.split("=", 1)[0]: line.split("=", 1)[1]
+            for line in outcome.stdout.splitlines()
+            if "=" in line
+        }
+        assert {name for name in names if name.startswith("TEAMCHAT_")} == {RUNTIME_ENV_VAR}
+        assert names[RUNTIME_ENV_VAR] == "/m"
+        assert "SYNTHETIC_DAEMON_ONLY_VAR" not in names
+        assert "PATH" in names
+        assert set(names) <= set(teamchat_seat.PROBE_ENV_ALLOWLIST) | {
+            RUNTIME_ENV_VAR,
+            "PWD",
+            "SHLVL",
+            "_",
+        }
+
     def test_nonzero_exit_carries_the_code(self) -> None:
         outcome = default_command_runner(("sh", "-c", "exit 69"), {}, 5.0)
         assert outcome.status is CommandStatus.EXITED
