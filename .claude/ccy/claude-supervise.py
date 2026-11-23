@@ -223,9 +223,10 @@ import traceback
 import tty
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Protocol, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if TYPE_CHECKING:
     from types import FrameType
@@ -1303,6 +1304,202 @@ def screen_shows_busy_footer(dump: str) -> bool:
     return any(_SCREEN_BUSY_FOOTER.search(row) for row in rows[-_SCREEN_FOOTER_ROWS:])
 
 
+# Plan 00523: Claude Code's rate-limit options dialog, read from the rendered
+# screen. Strings are from the Claude Code 2.1.330 bundle. The title alone is
+# shared with the trial-expired dialog, so the exact target label is required.
+_RATE_LIMIT_DIALOG_TITLE = "What do you want to do?"
+_RATE_LIMIT_TARGET_LABEL = "Stop and wait for limit to reset"
+_RATE_LIMIT_NEAR_MISS_PREFIX = "Stop and wait for limit to re"
+_RATE_LIMIT_POINTER = chr(0x276F)  # Claude Code's Select pointer glyph
+_RATE_LIMIT_BORDER_CHARS = "│╭╮╰╯─"
+_RATE_LIMIT_WINDOW_ROWS = 14
+_RATE_LIMIT_MAX_TRAILING_ROWS = 4
+_RATE_LIMIT_OPTION_ROW = re.compile(
+    rf"^(?P<pointer>{_RATE_LIMIT_POINTER}\s+)?(?P<number>\d+)\.\s+(?P<label>.+?)(?:\s+✔)?$"
+)
+# Review I4: the limit message must sit above the title, which a model's own
+# AskUserQuestion of the same shape lacks (a model can still write the row,
+# so this narrows the risk rather than closing it).
+_RATE_LIMIT_CONTEXT_ROW = re.compile(rf"You[{chr(0x2019)}']ve hit your\b.*\blimit\b")
+_RATE_LIMIT_COMPOSER_ROW = re.compile(rf"^[>{_RATE_LIMIT_POINTER}](?:\s(?P<text>.*))?$")
+_RATE_LIMIT_RESET_TIME = re.compile(
+    r"resets\s+"
+    r"(?:(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2}),\s+(?:(?P<year>\d{4}),\s+)?)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?(?P<ampm>am|pm)"
+    r"(?:\s+\((?P<zone>[^)]+)\))?(?:\s|$)"
+)
+_RATE_LIMIT_MONTHS = {
+    name: index
+    for index, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        start=1,
+    )
+}
+# A yearless date this far in the past is next year's (the dialog never shows
+# a reset that has already happened).
+_RATE_LIMIT_YEAR_ROLL_SECONDS = 30 * 86400.0
+_RATE_LIMIT_RESET_PAST_GRACE_SECONDS = 300.0
+_RATE_LIMIT_RESET_MAX_AHEAD_SECONDS = 8 * 86400.0
+# The host sends the worker the bottom rows of the rendered screen, and only
+# once the child has stopped drawing, so a half-painted frame is never read.
+_SCREEN_DUMP_ROWS = 40
+_RATE_LIMIT_DUMP_QUIET_SECONDS = 2.0
+_SCREEN_RESOLVE_INTERVAL_SECONDS = 60.0
+
+
+@dataclass(frozen=True)
+class RateLimitDialog:
+    """The rate-limit dialog as the screen shows it: rows, pointer row, target row."""
+
+    options: tuple[str, ...]
+    selected: int
+    target: int
+
+    @property
+    def signature(self) -> str:
+        """Identifies the rendering, so a key is only confirmed on a stable screen."""
+        return f"{self.selected}|" + "\x1f".join(self.options)
+
+
+def _strip_screen_borders(row: str) -> str:
+    """A row with box-drawing borders and padding removed from both edges."""
+    return row.strip().strip(_RATE_LIMIT_BORDER_CHARS).strip()
+
+
+def recognise_rate_limit_dialog(dump: str) -> RateLimitDialog | None:
+    """The rate-limit dialog if it is the foreground of ``dump``, else None.
+
+    Strict, because a match types keys: a ``You've hit your ... limit`` row
+    above the title within the inspected rows, the exact title row, options numbered
+    1..n straight after it, exactly one pointer row, exactly one row labelled
+    ``Stop and wait for limit to reset``, and at most a few footer rows after
+    the options, none of them a prompt row or another option. Only the bottom
+    rows are inspected, so a dialog quoted in the transcript is not matched.
+    """
+    rows = [cleaned for cleaned in map(_strip_screen_borders, dump.splitlines()) if cleaned]
+    window = rows[-_RATE_LIMIT_WINDOW_ROWS:]
+    titles = [index for index, row in enumerate(window) if row == _RATE_LIMIT_DIALOG_TITLE]
+    if len(titles) != 1:
+        return None
+    if not any(_RATE_LIMIT_CONTEXT_ROW.search(row) for row in window[: titles[0]]):
+        return None
+    options: list[str] = []
+    pointers: list[int] = []
+    position = titles[0] + 1
+    while position < len(window):
+        match = _RATE_LIMIT_OPTION_ROW.match(window[position])
+        if match is None:
+            break
+        if int(match.group("number")) != len(options) + 1:
+            return None
+        if match.group("pointer"):
+            pointers.append(len(options))
+        options.append(match.group("label").strip())
+        position += 1
+    trailing = window[position:]
+    if len(trailing) > _RATE_LIMIT_MAX_TRAILING_ROWS:
+        return None
+    for row in trailing:
+        if _RATE_LIMIT_OPTION_ROW.match(row) or _RATE_LIMIT_COMPOSER_ROW.match(row):
+            return None
+    targets = [index for index, label in enumerate(options) if label == _RATE_LIMIT_TARGET_LABEL]
+    if len(pointers) != 1 or len(targets) != 1:
+        return None
+    return RateLimitDialog(options=tuple(options), selected=pointers[0], target=targets[0])
+
+
+def rate_limit_dialog_near_miss(dump: str) -> bool:
+    """True when the target label (or a truncation of it) shows but no dialog is recognised."""
+    return _RATE_LIMIT_NEAR_MISS_PREFIX in dump and recognise_rate_limit_dialog(dump) is None
+
+
+def parse_rate_limit_reset(dump: str, now: float) -> float | None:
+    """When the limit resets, from the last ``You've hit your ... · resets <time>`` row.
+
+    Formats: ``3pm``, ``3:30pm``, ``Nov 29, 3pm``, ``Jan 2, 2027, 3:30pm``, each
+    with an optional ``(Area/City)`` zone (no zone means local time). A time
+    alone already past means tomorrow; a yearless date more than 30 days past
+    means next year. Anything else, an unknown zone included, gives None. So
+    does a reset more than ``_RATE_LIMIT_RESET_PAST_GRACE_SECONDS`` past (the
+    resume would fire while the limit holds) or more than
+    ``_RATE_LIMIT_RESET_MAX_AHEAD_SECONDS`` ahead (8 days: a weekly limit plus
+    a day, so a misread date cannot hold every injection for longer).
+    """
+    reset = _parse_rate_limit_reset_unchecked(dump, now)
+    if reset is None:
+        return None
+    if (
+        not now - _RATE_LIMIT_RESET_PAST_GRACE_SECONDS
+        <= reset
+        <= (now + _RATE_LIMIT_RESET_MAX_AHEAD_SECONDS)
+    ):
+        return None
+    return reset
+
+
+def _parse_rate_limit_reset_unchecked(dump: str, now: float) -> float | None:
+    """`parse_rate_limit_reset` before the range check."""
+    rows = [row for row in dump.splitlines() if "hit your" in row and "resets " in row]
+    if not rows:
+        return None
+    match = _RATE_LIMIT_RESET_TIME.search(rows[-1])
+    if match is None:
+        return None
+    zone: tzinfo | None = None
+    if match.group("zone"):
+        try:
+            zone = ZoneInfo(match.group("zone"))
+        except (ZoneInfoNotFoundError, ValueError):
+            return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    if not 1 <= hour <= 12 or minute > 59:
+        return None
+    hour = hour % 12 + (12 if match.group("ampm") == "pm" else 0)
+    today = datetime.fromtimestamp(now, zone)
+    try:
+        if match.group("month") is None:
+            day = today.date()
+            candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+            if candidate.timestamp() < now:
+                day += timedelta(days=1)
+                candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+            return candidate.timestamp()
+        month = _RATE_LIMIT_MONTHS.get(match.group("month"))
+        if month is None:
+            return None
+        day_of_month = int(match.group("day"))
+        if match.group("year") is not None:
+            year = int(match.group("year"))
+            return datetime(year, month, day_of_month, hour, minute, tzinfo=zone).timestamp()
+        candidate = datetime(today.year, month, day_of_month, hour, minute, tzinfo=zone)
+        if candidate.timestamp() < now - _RATE_LIMIT_YEAR_ROLL_SECONDS:
+            candidate = datetime(today.year + 1, month, day_of_month, hour, minute, tzinfo=zone)
+        return candidate.timestamp()
+    except (ValueError, OverflowError):
+        return None
+
+
+def rate_limit_composer_text(dump: str) -> str | None:
+    """The text in Claude Code's input box: ``""`` when empty, None when none is visible.
+
+    The box is the last prompt row (``>`` or the pointer glyph) whose previous
+    non-blank row is a horizontal rule.
+    """
+    previous = ""
+    found: str | None = None
+    for raw in dump.splitlines():
+        row = raw.strip()
+        if not row:
+            continue
+        stripped = row.strip("│").strip()
+        match = _RATE_LIMIT_COMPOSER_ROW.match(stripped)
+        if match is not None and previous and set(previous) <= set("─╭╮╰╯"):
+            found = (match.group("text") or "").strip()
+        previous = row
+    return found
+
+
 class ScreenFocusCheck:
     """Plan 00538: asks hooks-screen what the child's screen shows.
 
@@ -1328,9 +1525,16 @@ class ScreenFocusCheck:
         clock: Callable[[], float] = time.monotonic,
         log: Callable[[str], object] | None = None,
         missing_note: str = _SCREEN_MISSING_NOTE,
+        resolve_binary: Callable[[], Path | None] | None = None,
     ) -> None:
         self._buffer = buffer
         self._binary = binary
+        # Plan 00523: a binary built after launch is found again, at most once
+        # per `_SCREEN_RESOLVE_INTERVAL_SECONDS`.
+        self._resolve_binary = resolve_binary
+        self._last_resolve_at = clock()
+        self._dump: str | None = None
+        self._dump_total = -1
         self._missing_note = missing_note
         self._size_fn = size_fn
         self._timeout = timeout
@@ -1397,8 +1601,29 @@ class ScreenFocusCheck:
         self._last_quiet, self._last_quiet_total, self._last_quiet_at = quiet, total, now
         return quiet
 
+    def recent_dump(self) -> str:
+        """Plan 00523: the bottom rows of the ``--dump`` rendering, ``""`` on any failure.
+
+        Rendered again only after new output; a failure is not cached, so the
+        next call retries.
+        """
+        total = self._buffer.total_appended
+        if self._dump is not None and self._dump_total == total:
+            return self._dump
+        text = self._spawn(self._buffer.snapshot(), "--dump")
+        if text is None:
+            return ""
+        rows = text.splitlines()[-_SCREEN_DUMP_ROWS:]
+        self._dump, self._dump_total = "\n".join(rows), total
+        return self._dump
+
     def _spawn(self, snapshot: bytes, extra: str) -> str | None:
         """Raw stdout text of one hooks-screen run, or None (reason noted)."""
+        if self._binary is None and self._resolve_binary is not None:
+            now = self._clock()
+            if now - self._last_resolve_at >= _SCREEN_RESOLVE_INTERVAL_SECONDS:
+                self._last_resolve_at = now
+                self._binary = self._resolve_binary()
         if self._binary is None:
             self._failed(self._missing_note)
             return None
@@ -1473,7 +1698,23 @@ def _build_screen_check(
         capture_dir=capture_dir,
         log=log.write if log is not None else None,
         missing_note=screen_binary_missing_note(),
+        resolve_binary=lambda: resolve_screen_binary(project_dir, os.environ),
     )
+
+
+def _rate_limit_screen_dump(screen: ScreenFocusCheck | None, *, output_quiet_seconds: float) -> str:
+    """Plan 00523: the screen rows the worker reads the rate-limit dialog from.
+
+    ``""`` (nothing rendered) while the child is still drawing, without a
+    screen check, or with ``CCY_RATE_LIMIT_DIALOG`` off.
+    """
+    if (
+        screen is None
+        or output_quiet_seconds < _RATE_LIMIT_DUMP_QUIET_SECONDS
+        or not _rate_limit_dialog_enabled()
+    ):
+        return ""
+    return screen.recent_dump()
 
 
 @dataclass
@@ -2438,6 +2679,11 @@ class Decision(enum.Enum):
     WOULD_CRON_RECONCILE = "would-cron-reconcile"
     WOULD_PLUGIN_NOTICE = "would-plugin-notice"
     WOULD_SESSION_NOTICE = "would-session-notice"
+    # Plan 00523: a key typed into the rate-limit dialog (or the backspaces that
+    # clear its prefilled input box), and the `continue` sent once it has reset.
+    # Separate from WOULD_CONTINUE, which the host books as a post-compact resume.
+    WOULD_RATE_LIMIT_KEY = "would-rate-limit-key"
+    WOULD_RATE_LIMIT_CONTINUE = "would-rate-limit-continue"
 
 
 class SupervisorState(enum.Enum):
@@ -2618,6 +2864,11 @@ class TickFacts:
     # the screen buffer. False -- not idle -- from a host that predates it, so
     # idle compaction fails closed there.
     true_idle: bool = False
+    # Plan 00523: the bottom rows of the hooks-screen ``--dump`` rendering, sent
+    # only once output has settled, so the worker can recognise the rate-limit
+    # dialog. Empty from a legacy host or with no binary, which fails closed
+    # (nothing is answered).
+    screen_dump: str = ""
 
 
 @dataclass(frozen=True)
@@ -8515,6 +8766,525 @@ def _note_focus_hold(
     return machine.focus_hold_log(family, hold, now_wall=now_wall)
 
 
+# ── Plan 00523: answering the rate-limit dialog ─────────────────────────────
+_RATE_LIMIT_ENV_VAR = "CCY_RATE_LIMIT_DIALOG"
+_RATE_LIMIT_OFF_VALUES = frozenset({"off", "0", "false", "no"})
+_RATE_LIMIT_STATE_PREFIX = "supervise-rate-limit-dialog"
+_RATE_LIMIT_SETTLE_SECONDS = 3.0
+_RATE_LIMIT_OCCURRENCE_KEY_CAP = 6
+_RATE_LIMIT_WINDOW_KEY_CAP = 30
+_RATE_LIMIT_STATE_TTL_SECONDS = 86400.0
+# ``btime`` is whole seconds, so the derived start can sit a little late.
+_RATE_LIMIT_START_SLACK_SECONDS = 5.0
+_RATE_LIMIT_RESUME_GRACE_SECONDS = 120.0
+_RATE_LIMIT_RECHECK_SECONDS = 600.0
+_RATE_LIMIT_CLEAR_ATTEMPTS = 2
+_RATE_LIMIT_PREFILL = "continue"
+_RATE_LIMIT_BACKSPACES = "\x7f" * len(_RATE_LIMIT_PREFILL)
+# The dim suggestion Claude Code draws in an empty input box, which
+# hooks-screen renders as plain text: the whole box reads ``Try "<text>"``,
+# straight or curly quotes. Anything else in the box is someone's text.
+_RATE_LIMIT_PLACEHOLDER = re.compile('^Try (?:"[^"]+"|“[^“”]+”)$')
+_RATE_LIMIT_ENTER = "\r"
+_RATE_LIMIT_UP = "\x1b[A"
+_RATE_LIMIT_DOWN = "\x1b[B"
+_RATE_LIMIT_KEY_NAMES = {
+    _RATE_LIMIT_ENTER: "[enter]",
+    _RATE_LIMIT_UP: "[up]",
+    _RATE_LIMIT_DOWN: "[down]",
+}
+_RATE_LIMIT_LOG = f"{_NOOP_LOG_PREFIX}: rate-limit dialog"
+# Terminal reports the host forwards from stdin that are not the human typing:
+# focus in/out and SGR mouse reports.
+_RATE_LIMIT_TERMINAL_REPORTS = re.compile(rb"\x1b\[[IO]|\x1b\[<[\d;]*[Mm]")
+_PHASE_ANSWERED = "answered"
+_PHASE_CLEARED = "cleared"
+_PHASE_DONE = "done"
+_PHASE_ABANDONED = "abandoned"
+_RATE_LIMIT_DRY_RUN_NOTE = "would send continue (dry-run), nothing typed"
+
+
+def _rate_limit_dialog_enabled() -> bool:
+    """False when ``CCY_RATE_LIMIT_DIALOG`` says off; the feature is on by default."""
+    raw = os.environ.get(_RATE_LIMIT_ENV_VAR, "")
+    return raw.strip().lower() not in _RATE_LIMIT_OFF_VALUES
+
+
+def _read_child_start(child_pid: int, proc_root: Path = Path("/proc")) -> tuple[int, float] | None:
+    """The child's start as ``(clock ticks since boot, wall-clock seconds)``, or None.
+
+    Field 22 of ``/proc/<pid>/stat``, counted after the closing ``)`` of the
+    command name (which may hold spaces and parentheses); the wall time adds
+    it to ``btime`` from ``/proc/stat``.
+    """
+    try:
+        stat = (proc_root / str(child_pid) / "stat").read_text(encoding="utf-8")
+        boot = (proc_root / "stat").read_text(encoding="utf-8")
+        ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        btime = next(
+            int(line.split()[1]) for line in boot.splitlines() if line.startswith("btime ")
+        )
+        return ticks, btime + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
+
+
+def _rate_limit_child_start(child_pid: int) -> tuple[int, float] | None:
+    """The running child's start, read from the real ``/proc``."""
+    return _read_child_start(child_pid)
+
+
+def _rate_limit_state_path(status_dir: Path, child_pid: int) -> Path | None:
+    """The state file of THIS Claude child, or None when its start time is unreadable.
+
+    Keyed on the pid and its start ticks: the status directory is shared by
+    every terminal, and a pid is reused after a restart or in another pid
+    namespace. None turns the feature off for the tick (nothing is typed).
+    """
+    start = _rate_limit_child_start(child_pid)
+    if start is None:
+        return None
+    return status_dir / f"{_RATE_LIMIT_STATE_PREFIX}.{child_pid}-{start[0]}.json"
+
+
+def _rate_limit_session_start(child_pid: int) -> float:
+    """The child's wall-clock start, ``inf`` when unreadable (no stored state is trusted)."""
+    start = _rate_limit_child_start(child_pid)
+    return float("inf") if start is None else start[1]
+
+
+def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, object]:
+    """The stored state, or ``{}`` when absent, unreadable, a day past its window
+    (unless its dialog is still on screen and it holds no other family), or
+    opened before this child started
+    (a pid and start ticks repeated by a fresh pid namespace)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        append_worker_error(f"rate-limit dialog state unreadable, starting afresh: {exc}")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    opened = data.get("window_opened")
+    if not isinstance(opened, (int, float)) or opened < (
+        _rate_limit_session_start(child_pid) - _RATE_LIMIT_START_SLACK_SECONDS
+    ):
+        return {}
+    # Delta review D6: a state that holds the other families (`answered`,
+    # `cleared`) expires even while the dialog counts as on screen, since
+    # dumps that stop after the Enter leave the occurrence open for ever. Any
+    # other open state (taken over, key-capped) holds while its dialog shows,
+    # so it is never answered afresh.
+    anchor = _rate_limit_window_anchor(data) or opened
+    holds_families = data.get("phase") in (_PHASE_ANSWERED, _PHASE_CLEARED)
+    if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS and (
+        holds_families or not data.get("occurrence_open")
+    ):
+        return {}
+    return data
+
+
+def _rate_limit_window_anchor(data: dict[str, object]) -> float | None:
+    """When a stored window ends: its reset time, else when it opened, else None."""
+    for key in ("window_reset", "window_opened"):
+        value = data.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
+def _sweep_rate_limit_states(status_dir: Path, now: float) -> None:
+    """Delete state files whose window ended more than twice the state TTL ago.
+
+    Delta review D1: judged on the STORED window, not the mtime. An answered
+    state is not rewritten while it waits for its reset, which may be 8 days
+    ahead, so an old mtime does not mean an expired state; a window still
+    pending is never swept. Only a file with no readable window falls back
+    to its mtime.
+    """
+    for stale in status_dir.glob(f"{_RATE_LIMIT_STATE_PREFIX}.*.json"):
+        try:
+            try:
+                data = json.loads(stale.read_text(encoding="utf-8"))
+            except ValueError:
+                data = None
+            anchor = _rate_limit_window_anchor(data) if isinstance(data, dict) else None
+            if anchor is None:
+                anchor = stale.stat().st_mtime
+            if now - anchor > 2 * _RATE_LIMIT_STATE_TTL_SECONDS:
+                stale.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            append_worker_error(f"could not sweep {stale.name}: {exc}")
+
+
+def _save_rate_limit_state(path: Path, state: dict[str, object]) -> None:
+    """Write the state atomically (temporary file, then replace)."""
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _human_typed(raw_b64: str) -> bool:
+    """True when the forwarded stdin holds anything but terminal reports.
+
+    Undecodable input counts as typing, which leaves the dialog to the human.
+    """
+    if not raw_b64:
+        return False
+    try:
+        raw = base64.b64decode(raw_b64)
+    except (ValueError, TypeError):
+        return True
+    return bool(_RATE_LIMIT_TERMINAL_REPORTS.sub(b"", raw))
+
+
+# Review I2: per state file, whether the human pressed keys after the last
+# dialog-free screen the worker saw. The host sends a dump only after quiet
+# output and every arrow redraws, so keys pressed while navigating the dialog
+# arrive before the first dump of it. A child missing here (a fresh worker)
+# counts as having keys pending until a dialog-free dump is seen.
+_RATE_LIMIT_KEYS_SINCE_DUMP: dict[str, bool] = {}
+
+
+def _human_submitted(raw_b64: str) -> bool:
+    """True when the forwarded stdin ends with Enter: the human sent a prompt."""
+    try:
+        raw = base64.b64decode(raw_b64)
+    except (ValueError, TypeError):
+        return False
+    return _RATE_LIMIT_TERMINAL_REPORTS.sub(b"", raw).endswith(b"\r")
+
+
+def _note_human_keys(key: str, *, typed: bool, raw_b64: str, dialog_free_dump: bool) -> bool:
+    """Update the keys-since-dump latch for ``key``; True while keys are pending.
+
+    Set by any key; cleared by a submitted prompt (a chunk ending in Enter),
+    or by a dialog-free dump in a tick that carried no key (that tick's dump
+    may predate its keys).
+    """
+    if typed:
+        _RATE_LIMIT_KEYS_SINCE_DUMP[key] = not _human_submitted(raw_b64)
+    elif dialog_free_dump:
+        _RATE_LIMIT_KEYS_SINCE_DUMP[key] = False
+    return _RATE_LIMIT_KEYS_SINCE_DUMP.get(key, True)
+
+
+def _new_rate_limit_window(reset: float | None, now: float) -> dict[str, object]:
+    """Fresh state for a reset window (``reset`` None when no time was parsed)."""
+    return {
+        "window_reset": reset,
+        "window_opened": now,
+        "occurrence_open": False,
+        "occurrence_keys": 0,
+        "window_keys": 0,
+        "last_signature": "",
+        "phase": "",
+        "answered_at": None,
+        "cleared_at": None,
+        "clear_attempts": 0,
+    }
+
+
+def _describe_unrecognised_screen(dump: str) -> str:
+    """A near-miss screen as a sha256 prefix and a row count, never its text.
+
+    The screen may show anything, secrets included, so its content is neither
+    logged nor saved; the digest only tells two near-misses apart.
+    """
+    digest = hashlib.sha256(dump.encode("utf-8")).hexdigest()[:12]
+    return f"sha256 {digest}, {len(dump.splitlines())} rows"
+
+
+def _rate_limit_dialog_step(
+    machine: CompactStateMachine,
+    *,
+    facts: TickFacts,
+    dry_run: bool,
+    status_dir: Path,
+) -> tuple[TickOutcome | None, str | None]:
+    """Answer the rate-limit dialog with ``Stop and wait for limit to reset``.
+
+    Returns ``(outcome, note)``. An outcome decides the whole tick (a key, or a
+    NOOP that keeps every other family from typing over the dialog). A note is
+    a NOOP log line for the caller to use only if nothing else claims the tick.
+    One arrow per tick moves the pointer; Enter is pressed only when the
+    pointer has sat on the target row for two ticks with the same rendering.
+    State is per Claude child and per reset window, so a window is answered
+    once; a dialog still shown after the Enter is pressed again (the host may
+    have held the Enter), within the key caps.
+    """
+    if facts.child_pid is None or not _rate_limit_dialog_enabled():
+        return None, None
+    child_pid = facts.child_pid
+    path = _rate_limit_state_path(status_dir, child_pid)
+    if path is None:
+        return None, None
+    note: str | None = None
+    typed = _human_typed(facts.human_raw_input)
+    dump = facts.screen_dump
+    dialog = recognise_rate_limit_dialog(dump) if dump else None
+    # Delta review D4: a near miss is not dialog-free; it may be the dialog
+    # made unrecognisable by the human's own navigation.
+    keys_pending = _note_human_keys(
+        path.name,
+        typed=typed,
+        raw_b64=facts.human_raw_input,
+        dialog_free_dump=bool(dump) and dialog is None and not rate_limit_dialog_near_miss(dump),
+    )
+    if typed and path.exists():
+        state = _load_rate_limit_state(path, facts.now_wall, child_pid)
+        phase = state.get("phase")
+        if phase in (_PHASE_ANSWERED, _PHASE_CLEARED) or (
+            phase == "" and state.get("occurrence_open")
+        ):
+            state["phase"] = _PHASE_ABANDONED
+            _save_rate_limit_state(path, state)
+            note = f"{_RATE_LIMIT_LOG}: the human typed, left to them for this window"
+    if not dump:
+        return None, note
+    if dialog is None:
+        if path.exists():
+            state = _load_rate_limit_state(path, facts.now_wall, child_pid)
+            if state.get("occurrence_open"):
+                state["occurrence_open"] = False
+                state["occurrence_keys"] = 0
+                _save_rate_limit_state(path, state)
+        if rate_limit_dialog_near_miss(dump):
+            note = note or (
+                f"{_RATE_LIMIT_LOG}: a screen like it was not recognised, nothing typed "
+                f"({_describe_unrecognised_screen(dump)})"
+            )
+        return None, note
+
+    def hold(reason: str) -> TickOutcome:
+        return TickOutcome(
+            decision_value=Decision.NOOP.value,
+            reason=f"rate-limit dialog: {reason}",
+            payload=None,
+            submit=False,
+            consume_signal_path=None,
+            deferred_log=None,
+            machine_state=machine.export_state(),
+            noop_reason_log=f"{_RATE_LIMIT_LOG}: {reason}",
+        )
+
+    now = facts.now_wall
+    reset = parse_rate_limit_reset(dump, now)
+    state = _load_rate_limit_state(path, now, child_pid)
+    # While the dialog stays on screen its stored window holds: past "resets
+    # 3pm" a re-read means tomorrow, and a dialog the human took over (or that
+    # hit the key cap) must not be answered afresh as a new window.
+    if not state or (
+        not state.get("occurrence_open")
+        and reset is not None
+        and reset != state.get("window_reset")
+    ):
+        _sweep_rate_limit_states(status_dir, now)
+        state = _new_rate_limit_window(reset, now)
+    phase = state.get("phase")
+    if not state.get("occurrence_open"):
+        if phase and state.get("window_reset") is not None:
+            return hold("already answered for this reset window"), None
+        if phase:
+            # No reset time was parsed: each occurrence is answered once.
+            state.update(phase="", answered_at=None, cleared_at=None, clear_attempts=0)
+        state.update(occurrence_open=True, occurrence_keys=0, last_signature="")
+        if typed or keys_pending:
+            state["phase"] = _PHASE_ABANDONED
+            _save_rate_limit_state(path, state)
+            return hold("the human pressed keys before it was seen, left to them"), None
+    elif phase in (_PHASE_ABANDONED, _PHASE_DONE):
+        return hold("left to the human for this window"), None
+    if not (
+        facts.idle
+        and facts.input_line_empty
+        and facts.main_focus_confirmed
+        and facts.output_quiet_seconds >= _RATE_LIMIT_SETTLE_SECONDS
+    ):
+        _save_rate_limit_state(path, state)
+        return hold("shown, waiting for a settled screen and an idle human"), None
+    occurrence_keys = _coerce_int(state.get("occurrence_keys"))
+    window_keys = _coerce_int(state.get("window_keys"))
+    if (
+        occurrence_keys >= _RATE_LIMIT_OCCURRENCE_KEY_CAP
+        or window_keys >= _RATE_LIMIT_WINDOW_KEY_CAP
+    ):
+        _save_rate_limit_state(path, state)
+        return hold("key cap reached, nothing more typed"), None
+    signature = dialog.signature
+    if dialog.selected == dialog.target:
+        if signature != state.get("last_signature"):
+            state["last_signature"] = signature
+            _save_rate_limit_state(path, state)
+            return hold("pointer on the target row, confirming"), None
+        key = _RATE_LIMIT_ENTER
+    else:
+        key = _RATE_LIMIT_UP if dialog.selected > dialog.target else _RATE_LIMIT_DOWN
+        state["last_signature"] = signature
+    name = _RATE_LIMIT_KEY_NAMES[key]
+    if dry_run:
+        _save_rate_limit_state(path, state)
+        return hold(f"would press {name} (dry-run, nothing typed)"), None
+    state.update(occurrence_keys=occurrence_keys + 1, window_keys=window_keys + 1)
+    if key == _RATE_LIMIT_ENTER:
+        state.update(phase=_PHASE_ANSWERED, answered_at=now)
+    _save_rate_limit_state(path, state)
+    return (
+        TickOutcome(
+            decision_value=Decision.WOULD_RATE_LIMIT_KEY.value,
+            reason=f"rate-limit dialog -> pressing {name} toward {_RATE_LIMIT_TARGET_LABEL!r}",
+            payload=key,
+            submit=False,
+            consume_signal_path=None,
+            deferred_log=None,
+            machine_state=machine.export_state(),
+        ),
+        None,
+    )
+
+
+def _rate_limit_prefill_blocks(facts: TickFacts, status_dir: Path) -> bool:
+    """True while Claude Code's pre-filled ``continue`` may sit in the input box.
+
+    The host's ``input_line_empty`` tracks typed keys only, so it cannot see
+    the pre-fill; anything typed now would be appended to it. Blocks while a
+    resume is pending (phase ``answered`` or ``cleared``, whatever the screen
+    shows) and, in any later phase, while the screen still shows the pre-fill.
+    """
+    if facts.child_pid is None or not _rate_limit_dialog_enabled():
+        return False
+    path = _rate_limit_state_path(status_dir, facts.child_pid)
+    if path is None or not path.exists():
+        return False
+    state = _load_rate_limit_state(path, facts.now_wall, facts.child_pid)
+    phase = state.get("phase")
+    if phase in (_PHASE_ANSWERED, _PHASE_CLEARED):
+        # Also while the occurrence is still open: the Enter sets `answered`
+        # and the pre-fill appears as the dialog closes, before a dump says so.
+        return True
+    if not phase:
+        return False
+    return bool(facts.screen_dump) and (
+        rate_limit_composer_text(facts.screen_dump) == _RATE_LIMIT_PREFILL
+    )
+
+
+@dataclass(frozen=True)
+class _RateLimitResume:
+    """What the late resume types: the box-clearing backspaces or the ``continue``."""
+
+    decision_value: str
+    reason: str
+    payload: str
+    submit: bool
+
+
+def _rate_limit_resume_step(
+    *, facts: TickFacts, dry_run: bool, status_dir: Path
+) -> tuple[_RateLimitResume | None, str | None]:
+    """After the reset, clear Claude Code's pre-filled box and send one ``continue``.
+
+    Returns ``(send, note)``. The caller applies its own gates first (an
+    otherwise-NOOP MONITOR tick, no usage pause, no BLOCKED, no unconfirmed own
+    line). Acts only once the dialog answered this window has closed, the
+    STORED reset time plus a grace has passed, and the session is settled with
+    the input box visible. Output after the reset in phase ``answered`` opens a
+    re-check of ``_RATE_LIMIT_RECHECK_SECONDS``: the resume goes on only if the
+    settled screen still shows the pre-fill, and the window is abandoned at the
+    deadline otherwise (fail closed). Phase ``done`` keeps it once per window.
+    """
+    if facts.child_pid is None or not facts.screen_dump or not _rate_limit_dialog_enabled():
+        return None, None
+    path = _rate_limit_state_path(status_dir, facts.child_pid)
+    if path is None or not path.exists():
+        return None, None
+    now = facts.now_wall
+    state = _load_rate_limit_state(path, now, facts.child_pid)
+    phase = state.get("phase")
+    if phase not in (_PHASE_ANSWERED, _PHASE_CLEARED) or state.get("occurrence_open"):
+        return None, None
+
+    def finish(new_phase: str, note: str) -> tuple[None, str]:
+        state["phase"] = new_phase
+        _save_rate_limit_state(path, state)
+        return None, f"{_RATE_LIMIT_LOG}: {note}"
+
+    reset = state.get("window_reset")
+    if not isinstance(reset, (int, float)):
+        return finish(_PHASE_DONE, "no reset time was read, no continue will be sent")
+    if now < reset + _RATE_LIMIT_RESUME_GRACE_SECONDS:
+        return None, f"{_RATE_LIMIT_LOG}: waiting for the limit to reset"
+    dump = facts.screen_dump
+    if not (
+        facts.idle
+        and facts.work_idle
+        and facts.input_line_empty
+        and facts.main_focus_confirmed
+        and not screen_shows_busy_footer(dump)
+    ):
+        return None, f"{_RATE_LIMIT_LOG}: continue pending but session busy"
+    # Output after the reset (an idle redraw, or the session moving on) opens
+    # a bounded re-check: only a settled screen still showing the pre-fill
+    # proves nothing was submitted; an empty box stays ambiguous until the
+    # deadline abandons the window.
+    recheck = phase == _PHASE_ANSWERED and facts.output_quiet_seconds < now - reset
+    if recheck:
+        until = state.get("resume_recheck_until")
+        if not isinstance(until, (int, float)):
+            until = now + _RATE_LIMIT_RECHECK_SECONDS
+            state["resume_recheck_until"] = until
+            _save_rate_limit_state(path, state)
+        if now >= until:
+            return finish(
+                _PHASE_ABANDONED, "output after the reset, re-check window over, no continue sent"
+            )
+        if facts.output_quiet_seconds < _RATE_LIMIT_SETTLE_SECONDS:
+            return None, f"{_RATE_LIMIT_LOG}: output after the reset, waiting for it to settle"
+    text = rate_limit_composer_text(dump)
+    if text is None:
+        return None, f"{_RATE_LIMIT_LOG}: continue pending, no input box visible"
+    if _RATE_LIMIT_PLACEHOLDER.match(text):
+        text = ""
+    if recheck and not text:
+        return None, f"{_RATE_LIMIT_LOG}: output after the reset and an empty box, re-checking"
+    attempts = _coerce_int(state.get("clear_attempts"))
+    if text == _RATE_LIMIT_PREFILL:
+        if phase == _PHASE_CLEARED and attempts >= _RATE_LIMIT_CLEAR_ATTEMPTS:
+            return finish(_PHASE_ABANDONED, "the input box would not clear, no continue sent")
+        if dry_run:
+            return finish(_PHASE_DONE, _RATE_LIMIT_DRY_RUN_NOTE)
+        state.update(phase=_PHASE_CLEARED, cleared_at=now, clear_attempts=attempts + 1)
+        _save_rate_limit_state(path, state)
+        return (
+            _RateLimitResume(
+                decision_value=Decision.WOULD_RATE_LIMIT_KEY.value,
+                reason="limit reset -> clearing the pre-filled input box",
+                payload=_RATE_LIMIT_BACKSPACES,
+                submit=False,
+            ),
+            None,
+        )
+    if text:
+        return finish(_PHASE_ABANDONED, "other text in the input box, no continue sent")
+    if dry_run:
+        return finish(_PHASE_DONE, _RATE_LIMIT_DRY_RUN_NOTE)
+    state["phase"] = _PHASE_DONE
+    _save_rate_limit_state(path, state)
+    return (
+        _RateLimitResume(
+            decision_value=Decision.WOULD_RATE_LIMIT_CONTINUE.value,
+            reason="limit reset -> would send continue",
+            payload=f"{_format_bot_prefix(now)} {_CONTINUE_BODY}",
+            submit=True,
+        ),
+        None,
+    )
+
+
 def _usage_pause_outcome(
     machine: CompactStateMachine,
     pause: UsagePauseRecord,
@@ -8594,7 +9364,7 @@ def _usage_pause_outcome(
                 status_dir=status_dir,
             ),
         )
-    if not facts.input_line_empty:
+    if not facts.input_line_empty or _rate_limit_prefill_blocks(facts, status_dir):
         return outcome(
             Decision.NOOP,
             held,
@@ -8758,9 +9528,14 @@ def decide_once(
     # Plan 00537: and nothing is typed while the human's own keys say focus may
     # be off the main prompt; the sends that bypass `can_inject` are gated on
     # `focus_hold` explicitly below.
-    can_inject = facts.idle and facts.input_line_empty and facts.main_focus_confirmed
-    focus_hold = _focus_hold_of(facts)
     status_dir = sidecar_dir.parent
+    # Plan 00523: Claude Code's pre-filled `continue` after a rate-limit answer
+    # is invisible to `input_line_empty`; every family waits for the resume.
+    prefill_blocks = _rate_limit_prefill_blocks(facts, status_dir)
+    can_inject = (
+        facts.idle and facts.input_line_empty and facts.main_focus_confirmed and not prefill_blocks
+    )
+    focus_hold = _focus_hold_of(facts)
 
     def _held(family: str) -> str | None:
         if focus_hold is None:
@@ -8774,6 +9549,13 @@ def decide_once(
     # path (the passed machine is already the live authoritative one).
     if facts.machine_state is not None:
         machine.import_state(facts.machine_state)
+    # Plan 00523: the rate-limit dialog, when on screen, decides the whole tick.
+    # Ahead of the usage pause: answering it types no prompt and wakes nothing.
+    rate_limit_outcome, rate_limit_note = _rate_limit_dialog_step(
+        machine, facts=facts, dry_run=dry_run, status_dir=status_dir
+    )
+    if rate_limit_outcome is not None:
+        return rate_limit_outcome
     # Plan 00479 Task 4.5: a live usage pause for this session decides the whole
     # tick (one /compact, then silence) and bypasses every injection family below.
     usage_pause = load_usage_pause(sidecar_dir, now=facts.now_wall, own_sessions=own_sessions)
@@ -9404,6 +10186,10 @@ def decide_once(
                     deferred_log, noop_reason_log = _held("model restore"), None
                 elif facts.idle and not facts.input_line_empty:
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (model restore pending)"
+                elif prefill_blocks:
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: model restore held behind the rate-limit continue"
+                    )
                 else:
                     noop_reason_log = f"{_NOOP_LOG_PREFIX}: model restore pending but session busy"
             else:
@@ -9427,6 +10213,30 @@ def decide_once(
                 confirm_enters = model_confirm_enters
                 deferred_log = None
                 noop_reason_log = None
+    # ── The `continue` after a rate-limit reset (Plan 00523) ────────────────
+    # Late, on an otherwise-NOOP MONITOR tick: a usage pause has already
+    # returned above, BLOCKED and an unconfirmed own line keep it back, and
+    # the step's own gates need a settled, idle session with the box visible.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and not modes_gate_closed
+        and not own_line_blocks_text
+    ):
+        resume, resume_note = _rate_limit_resume_step(
+            facts=facts, dry_run=dry_run, status_dir=status_dir
+        )
+        if resume is not None:
+            decision_value = resume.decision_value
+            reason = resume.reason
+            payload = resume.payload
+            submit = resume.submit
+            deferred_log = None
+            noop_reason_log = None
+        elif resume_note is not None and noop_reason_log is None:
+            noop_reason_log = resume_note
     # ── Idle compaction at a percentage (Plan 00603) ─────────────────────────
     # Below every other family, on an otherwise-NOOP MONITOR tick, so a pending
     # goal, restore or flush always goes first and a compaction in flight is
@@ -9783,7 +10593,11 @@ def decide_once(
         deferred_log=deferred_log,
         machine_state=machine.export_state(),
         noop_reason_log=(
-            pause_lifted_log or modes_error_log or continue_skipped_log or noop_reason_log
+            pause_lifted_log
+            or modes_error_log
+            or continue_skipped_log
+            or noop_reason_log
+            or rate_limit_note
         ),
         confirm_enters=confirm_enters,
         model_switch_family=model_switch_family,
@@ -9899,6 +10713,125 @@ def _apply_decision(
     return False
 
 
+def _rate_limit_apply_veto(
+    outcome: TickOutcome,
+    *,
+    stdin_pending: bool,
+    child_output_pending: bool,
+    shipped_dump: str,
+) -> str | None:
+    """Plan 00523 review I3/L4: why the host must not type a rate-limit send now, or None.
+
+    Read at APPLY time, after the worker round trip. Any rate-limit send is
+    vetoed while a human byte waits on stdin or child output waits unread
+    (the dialog may have closed: an arrow would recall history into the
+    box). An Enter (which confirms the highlighted row, possibly a billing
+    option) is also vetoed unless the dump shipped this tick shows the
+    pointer on ``Stop and wait for limit to reset``. ``_rate_limit_host_veto``
+    takes back the phase a vetoed Enter, clear or ``continue`` recorded, so
+    the next tick decides afresh; a vetoed arrow only spends its key-cap slot.
+    An Enter held by the focus model in ``_apply_worker_outcome`` never
+    reaches this veto and keeps ``answered``: the dialog still shown gets the
+    Enter again, but one closed some other way meanwhile is still treated as
+    answered (a held focus means the human is elsewhere in the UI, a much
+    narrower path than a redraw).
+    """
+    if outcome.payload is None or outcome.decision_value not in (
+        Decision.WOULD_RATE_LIMIT_KEY.value,
+        Decision.WOULD_RATE_LIMIT_CONTINUE.value,
+    ):
+        return None
+    if stdin_pending:
+        return "a human key is waiting"
+    if child_output_pending:
+        return "the screen may have changed"
+    if outcome.payload != _RATE_LIMIT_ENTER:
+        return None
+    dialog = recognise_rate_limit_dialog(shipped_dump) if shipped_dump else None
+    if dialog is None or dialog.selected != dialog.target:
+        return "the highlighted row is not verified as the target"
+    return None
+
+
+def _rate_limit_undo_vetoed_enter(status_dir: Path, child_pid: int, now_wall: float) -> None:
+    """Take back the ``answered`` the worker recorded for an Enter the host did not type.
+
+    The occurrence stays open, so a dialog still shown is answered again
+    (within the key caps), a human key abandons it as before, and a dialog
+    closed by some other route leaves no pending resume.
+    """
+    path = _rate_limit_state_path(status_dir, child_pid)
+    if path is None or not path.exists():
+        return
+    state = _load_rate_limit_state(path, now_wall, child_pid)
+    if state.get("phase") != _PHASE_ANSWERED or not state.get("occurrence_open"):
+        return
+    state.update(phase="", answered_at=None)
+    _save_vetoed_rate_limit_state(path, state)
+
+
+def _rate_limit_undo_vetoed_resume(
+    outcome: TickOutcome, status_dir: Path, child_pid: int, now_wall: float
+) -> None:
+    """Take back the phase the resume recorded for a clear or ``continue`` not typed.
+
+    The resume step saves ``cleared`` or ``done`` before the host applies the
+    send; a send vetoed on a redraw would otherwise never be retried, which
+    leaves an unattended session stalled after the reset.
+    """
+    path = _rate_limit_state_path(status_dir, child_pid)
+    if path is None or not path.exists():
+        return
+    state = _load_rate_limit_state(path, now_wall, child_pid)
+    attempts = _coerce_int(state.get("clear_attempts"))
+    if outcome.payload == _RATE_LIMIT_BACKSPACES and state.get("phase") == _PHASE_CLEARED:
+        state.update(
+            phase=_PHASE_CLEARED if attempts > 1 else _PHASE_ANSWERED,
+            clear_attempts=max(attempts - 1, 0),
+        )
+    elif outcome.decision_value == Decision.WOULD_RATE_LIMIT_CONTINUE.value and (
+        state.get("phase") == _PHASE_DONE
+    ):
+        state["phase"] = _PHASE_CLEARED if attempts else _PHASE_ANSWERED
+    else:
+        return
+    _save_vetoed_rate_limit_state(path, state)
+
+
+def _save_vetoed_rate_limit_state(path: Path, state: dict[str, object]) -> None:
+    """Save a state the host's veto took back; a failure is logged, never raised."""
+    try:
+        _save_rate_limit_state(path, state)
+    except OSError as exc:
+        append_worker_error(f"could not take back a vetoed rate-limit send: {exc}")
+
+
+def _rate_limit_host_veto(
+    outcome: TickOutcome,
+    *,
+    stdin_pending: bool,
+    child_output_pending: bool,
+    shipped_dump: str,
+    status_dir: Path,
+    child_pid: int,
+    now_wall: float,
+) -> str | None:
+    """The host's apply-time veto: ``_rate_limit_apply_veto``, undoing a vetoed Enter."""
+    veto = _rate_limit_apply_veto(
+        outcome,
+        stdin_pending=stdin_pending,
+        child_output_pending=child_output_pending,
+        shipped_dump=shipped_dump,
+    )
+    if veto is None:
+        return None
+    if outcome.payload == _RATE_LIMIT_ENTER:
+        _rate_limit_undo_vetoed_enter(status_dir, child_pid, now_wall)
+    else:
+        _rate_limit_undo_vetoed_resume(outcome, status_dir, child_pid, now_wall)
+    return veto
+
+
 def _apply_worker_outcome(
     outcome: TickOutcome,
     *,
@@ -9908,6 +10841,7 @@ def _apply_worker_outcome(
     log: DecisionLog | None,
     main_focus_confirmed: bool,
     now_wall: float,
+    apply_veto: Callable[[TickOutcome], str | None] | None = None,
 ) -> bool:
     """Perform a worker-decided outcome on the host and adopt what it decided.
 
@@ -9916,10 +10850,16 @@ def _apply_worker_outcome(
     worker's post-tick state is NOT adopted, nothing is booked and the box
     model is not cleared, so the held send is retried rather than recorded as
     sent -- a held `/compact` would otherwise leave the machine awaiting a
-    compaction that never started.
+    compaction that never started. ``apply_veto`` (Plan 00523) works the same
+    way: a reason from it types nothing and adopts nothing.
     """
     if outcome.payload is not None and not main_focus_confirmed:
         _apply_decision(outcome, master_writer=master_writer, log=log, main_focus_confirmed=False)
+        return False
+    veto = apply_veto(outcome) if apply_veto is not None else None
+    if veto is not None:
+        if log is not None:
+            log.write_noop(f"{_RATE_LIMIT_LOG}: {outcome.decision_value} not typed, {veto}")
         return False
     # Plan 00182: pass the host's authoritative PRE-tick state so a stale
     # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
@@ -10126,6 +11066,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "focus_latch_bytes": facts.focus_latch_bytes,
             "child_pid": facts.child_pid,
             "true_idle": facts.true_idle,
+            "screen_dump": facts.screen_dump,
         }
     )
 
@@ -10150,6 +11091,7 @@ def _facts_from_json(line: str) -> TickFacts:
         focus_latch_bytes=str(data.get("focus_latch_bytes", "")),
         child_pid=int(data["child_pid"]) if data.get("child_pid") is not None else None,
         true_idle=bool(data.get("true_idle", False)),
+        screen_dump=str(data.get("screen_dump", "")),
     )
 
 
@@ -11568,7 +12510,11 @@ def supervise(
     # background task or sub-agent), so it builds the check when the focus hold
     # has not.
     idle_compact_on = policy.idle_compact_mode != _IDLE_COMPACT_OFF
-    if activity.screen is None and (activity.focus.enabled or idle_compact_on):
+    # Plan 00523: so does the rate-limit dialog answer (the worker reads it from
+    # the rendered screen the host sends).
+    if activity.screen is None and (
+        activity.focus.enabled or idle_compact_on or _rate_limit_dialog_enabled()
+    ):
         activity.screen = _build_screen_check(output_activity, stdin_fd=resolved_stdin_fd, log=log)
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
     machine = CompactStateMachine(policy)
@@ -11750,7 +12696,11 @@ def supervise(
             and activity.screen.quiet_prompt()
         )
         outcome = None
+        shipped_dump = ""
         if decider is not None:
+            shipped_dump = _rate_limit_screen_dump(
+                activity.screen, output_quiet_seconds=output_quiet_seconds
+            )
             outcome = decider(
                 _with_focus_hold(
                     TickFacts(
@@ -11768,6 +12718,7 @@ def supervise(
                         # Plan 00551: scopes the worker's identity scan.
                         child_pid=pid,
                         true_idle=true_idle,
+                        screen_dump=shipped_dump,
                     ),
                     focus_hold,
                 )
@@ -11802,6 +12753,18 @@ def supervise(
                 # Read now, not at tick start: the worker was waited on.
                 main_focus_confirmed=activity.focus_confirmed(),
                 now_wall=now_wall,
+                # Plan 00523 review I3: the select loop reads nothing during
+                # the worker round trip, so waiting bytes are new since the
+                # tick's facts were taken.
+                apply_veto=lambda decided: _rate_limit_host_veto(
+                    decided,
+                    stdin_pending=_fd_readable(resolved_stdin_fd),
+                    child_output_pending=_fd_readable(master_fd),
+                    shipped_dump=shipped_dump,
+                    status_dir=sidecar_dir.parent,
+                    child_pid=pid,
+                    now_wall=time.time(),
+                ),
             )
             _handle_plugin_outcome(outcome)
         else:
