@@ -8255,3 +8255,48 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Severity**: Low (workaround: an absolute path).
 
 **Status**: ⬜ Open. Reproduce first from a linked worktree with the current daemon. TDD red tests on the handler: (1) `cd sub && echo > ../x` with the hook cwd at the root is allowed; (2) `cd sub && echo > ../../outside` is denied; (3) a `cd` target that cannot be read or placed fails closed (unresolved, per Plan 00483 A1); (4) no `cd` behaves unchanged; (5) with the hook cwd inside a linked worktree, the worktree root counts as the project root and `cd src-go && echo > ../untracked/scratch/x` is allowed. If (5) is the red one, fix root resolution (`ProjectContext.project_root()` vs the worktree toplevel), not the `cd` tracking.
+### N705 — `dangerous_permissions` octal mode pattern has no token-start anchor, so `chmod 644 v1.0.2026` and `chmod 640 report-2026.txt` are denied
+
+**Source**: Plan 00634 delta review of PR #225 (`CLAUDE/Plan/00634-human-approval-check-cited-questions-id/subagent-reports/261123-opus-delta-review-pr225.md`, lines 42-45). Pre-existing on the base commit, not introduced by the PR. Reported by the reviewer, unverified here.
+
+**Evidence**: reported: the octal-mode regex uses `\b`, which matches after `.` or `-`, so a filename ending in a number that reads as a world-writable octal (`2026`) is taken for a mode. One of the reviewer's own probe commands was denied by the live handler for containing that text.
+
+**Severity**: Low (false positive on a rare filename shape; workaround is to rename or quote differently).
+
+**Status**: ⬜ Open. TDD fix, red tests first: `chmod 644 v1.0.2026` and `chmod 640 report-2026.txt` allowed; `chmod 777 f` and `chmod 0777 f` still denied. Anchor the mode to a token start (whitespace before it) and require it to be an argument of `chmod`.
+
+### N706 — `dangerous_permissions` accepts `install` as a path segment of another command's argument
+
+**Source**: Plan 00634 delta review of PR #225 (same report, lines 33-40). Reported, unverified here.
+
+**Evidence**: reported: `dangerous_permissions.py:62` uses `(?:^|[\s/])install\s`, so `ls /usr/share/install -m 2026` is read as an `install -m` call. Contrived (the reviewer rates it not realistic); `chmod 644 a=wx` is the same class (a filename shaped like a mode).
+
+**Severity**: Low.
+
+**Status**: ⬜ Open. Anchor `install` to command position (start of the segment, or a path whose basename is `install` in command position). Red tests: `ls /usr/share/install -m 2026` allowed; `install -m 777 f` and `/usr/bin/install -m 777 f` denied.
+
+### N707 — open detector gaps in the PR #225 permission and merge-to-main detectors
+
+**Source**: Plan 00634 delta review of PR #225 (same report, lines 65-77). Reported, unverified here; reviewer probed each against the PR head.
+
+**Evidence**: still missed, in the reviewer's rank order:
+
+1. `git -C /workspace merge x` issued from a worktree cwd gives no verdict: the merge is judged against the hook's cwd, not `-C` (first review finding 3, last bullet).
+2. `install -m777` and `install -Dm777` (no space, or a combined short flag; pattern at `dangerous_permissions.py:62` needs `-m` as its own token start); `setfacl -m o::7` (numeric ACL perms, `:64`); `chmod 0o777`; `chmod o=u`; `chmod =rwx` (depends on umask).
+3. `gh --hostname h pr merge 5`: only `-R`/`--repo` are allowed between `gh` and `pr` (`merge_to_main_approval.py:70`).
+
+Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviour, not a gap.
+
+**Severity**: Low (evasion needs an unusual spelling; the handler ships `mode: advise`).
+
+**Status**: ⬜ Open. TDD: one red test per shape above, then widen the patterns; for `git -C`, resolve the target checkout from `-C` before judging the merge.
+
+### N708 — `moves_main` runs 1-3 git subprocesses per Bash call because `default_branch` is not computed lazily
+
+**Source**: Plan 00634 delta review of PR #225 (same report, lines 89-94). Reported, unverified here.
+
+**Evidence**: reported: after seat-before-classify, every Bash call in a teamchat-runtime session resolves the seat (TTL-cached); for an armed seat each call also runs `default_branch(cwd)`, 1-3 git subprocesses even for `ls`, because `moves_main` calls it unconditionally (`human_approval_check.py:249-250`). Also noted (LOW, advise-only today): `git fetch origin main:main` and `gh api repos/o/r/commits?merges=1` classify as MERGE_MAIN (`_GH_API_MERGE` matches `merges` anywhere after `api`, `:162-164`); fails closed.
+
+**Severity**: Low (latency per Bash call for armed seats only).
+
+**Status**: ⬜ Open. Compute `defaults` lazily, only once a run is a switcher, mover or ref-writer. Red test: `ls` for an armed seat makes no `default_branch` call. Tighten `_GH_API_MERGE` to the `pulls/N/merge` and `/merges` path segments.
