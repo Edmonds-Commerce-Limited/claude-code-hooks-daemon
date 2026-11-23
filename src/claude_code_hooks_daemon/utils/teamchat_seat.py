@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.safe_signal import (
     RefusedSignalTarget,
@@ -528,10 +529,20 @@ def _kill_group(process: subprocess.Popen[bytes]) -> None:
     """
     try:
         signal_own_session_group(process, signal.SIGKILL)
-    except ProcessLookupError:
-        _LOGGER.debug("teamchat seat probe: process group already gone")
+    except ProcessLookupError as exc:
+        log_and_continue(
+            _LOGGER,
+            exc,
+            reason="teamchat seat probe: process group already gone, only the reap remains",
+            level=logging.DEBUG,
+        )
     except RefusedSignalTarget as exc:
-        _LOGGER.debug("teamchat seat probe: group kill refused (%s)", type(exc).__name__)
+        log_and_continue(
+            _LOGGER,
+            exc,
+            reason="teamchat seat probe: group kill refused, the caller still answers TIMEOUT",
+            level=logging.DEBUG,
+        )
     process.wait()
 
 
