@@ -56,7 +56,9 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   handler learns which threads a stop names).
 - [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop, and
   the multi-thread bump request (one bus call posts to N threads; open
-  teamchat-side dependency of Task 2.1; ask fedora-desktop.1).
+  teamchat-side dependency of Task 2.1; ask fedora-desktop.1). Also ask what
+  the teamchat v2 equivalent of `pingbus thread --ask` (a NOTIFYING post) is
+  and whether history marks a post as notifying; open dependency of Task 2.1.
 
 ### Phase 2: TDD, one item per branch
 
@@ -64,7 +66,9 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   owner-directive Stop handler). Tests first: a coordinator stop with an
   unposted thread is denied; a worker or unknown role is untouched; a posted
   thread passes; an unreadable bus fails open with a log line. "Posted this
-  turn" is read from the read-only teamchat CLI history, no secrets.
+  turn" is read from the read-only teamchat CLI history, no secrets. Only a
+  NOTIFYING post counts: a plain post to the named thread leaves the stop
+  denied (the owner missed bumps that landed silently).
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.

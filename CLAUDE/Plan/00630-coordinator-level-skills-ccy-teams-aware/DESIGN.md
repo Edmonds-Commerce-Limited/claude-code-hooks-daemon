@@ -521,7 +521,21 @@ bus call that posts the same status to N threads, so the refusal costs one call
 rather than N. Until it exists the deny names the per-thread posts. Filed with
 Plan 00636 Task 1.2 alongside the wake-coalescing request.
 
-Open question Q18: how does the handler learn which threads a stop names?
+Notifying posts only (coordinator addendum, bus id
+`$dmAOwAJt3ZU7lEz-zXujdmyZbNwnQC66DRPHDnf1YdQ`): a thread post the owner must
+act on has to NOTIFY (v1: `pingbus thread --ask`). A plain post lands silently
+and the owner missed bumps that way, so the guard counts only notifying posts
+as "the owner was told". Rule 2 and "posted this turn" are read with that
+filter. The teamchat v2 equivalent of the notifying flag, and whether the
+history marks a post as notifying, is an open dependency to ask fedora-desktop.1
+(Plan 00636 Task 1.2); until known, the adapter treats a post whose notify
+status cannot be read as non-notifying and the deny says so.
+
+Open question Q18: how does the handler learn which threads a stop names, and
+how does it tell a notifying post from a plain one?
+Second half: (d) read the notify marker from the history entry (needs the v2
+history to carry it), or (e) infer it from the posting command the turn ran.
+(d) is preferred; (e) is fragile. Settled with the first half.
 Options: (a) parse thread ids or names out of the stop reason text; (b) require
 a structured line in the stop message (`THREADS: a, b`); (c) treat every thread
 with an unanswered owner ask in the history as named. (a) is fragile, (b) adds a
@@ -530,12 +544,22 @@ Unsettled; Plan 00636 Task 1.1 settles it before Task 2.1 starts.
 
 Test-first acceptance criteria (each red before the handler exists):
 
+- A plain, non-notifying post to the named thread does not satisfy the guard;
+  the stop is denied and the deny names the notifying post that fixes it.
+
+- A notifying post to the named thread satisfies it.
+
 - A coordinator stop waiting on the owner with one unposted named thread is
   denied, and the deny names that thread.
+
 - A worker seat stop, and a stop with an unknown role, are untouched.
+
 - A stop whose every named thread has a bus post this turn passes.
+
 - A stop with terminal-only status (no post anywhere) counts as unsent.
+
 - An unreadable bus passes and writes a log line.
+
 - A stop that does not wait on the owner is untouched.
 
 ## 21. Coordinator no-value remote branch retire (Q17, settled)
