@@ -8159,3 +8159,33 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Severity**: Medium (a plain read-only command in a foreign clone is blocked, and the deny names nothing the agent can fix).
 
 **Status**: ⬜ Open. TDD fix: red test reproducing `git ls-files | xargs wc` with `cwd` inside a second git repository holding no protected file and asserting allow, then read `_search_reach` to confirm the cause and scope the index judgement to the project's own tree.
+
+### N697 — `R-BASH-SAFE-MODE-PRELUDE-MISSING` reported firing on chains the reporter calls read-only
+
+**Source**: lts-infra coordinator self-retrospective (lts-infra Plan 00158, situation 12), relayed on the bus for Plan 00630. No exact command was supplied.
+
+**Evidence**: by design the handler speaks only when a statement is in the shared mutator table (`_DEFAULT_ONLY_WITH_MUTATOR`, owner ruling A3 of Plan 00483, `handlers/pre_tool_use/bash_safe_mode.py:65-68`, gate at `:342`), and this project sets `only_with_mutator: true`. So a hit on a genuinely read-only chain means `statements_contain_mutator` classified one of its statements as a mutator. Which statement is unconfirmed until a reproducing command is captured.
+
+**Severity**: Low (false positive; retried by another route).
+
+**Status**: ⬜ Open. TDD fix: obtain one failing command from the lts-infra coordinator's transcripts; red test asserting it is allowed; then correct the mutator-table entry (or the statement splitter) that misclassified it, keeping a test that a real mutator chain still fires.
+
+### N698 — the secret-mention check denies a command holding a bare `*` token
+
+**Source**: lts-infra coordinator self-retrospective (lts-infra Plan 00158, situation 12). Related to, but not the same as, N696 (an expanded `git ls-files`).
+
+**Evidence**: a Bash command whose only "mention" is a bare `*` glob operand was denied under the `R-SECRET-BASH-MENTION` family. A bare `*` names no protected path; the guard appears to treat a glob as reaching every file in `cwd`, including protected ones (the `_search_reach` route in `handlers/pre_tool_use/secret_file_guard.py`, the same area N696 names). Whether the deny is correct depends on the verb: a reader such as `cat *` would genuinely read a protected file in that directory, while `ls *` or `wc -l *` in a directory holding none would not.
+
+**Severity**: Medium (the deny names nothing the agent can fix).
+
+**Status**: ⬜ Open. TDD fix: red tests for `ls *` and `wc -l *` in a directory holding no protected file (allow) and `cat *` in a directory holding one (deny); then make the glob reach judge the files the glob can actually match from `cwd`, not the whole index.
+
+### N699 — `sed_blocker` denies a bus message whose body contains the word `sed`, piped to the bus CLI
+
+**Source**: lts-infra coordinator self-retrospective (lts-infra Plan 00158, situation 12); the retrospective message itself was first refused this way, so it is a live example.
+
+**Evidence**: the Bash branch's exemptions cover a git or `gh` message (exemptions 2 and 3), a command holding `grep` or a plain `echo` (4), and a heredoc whose only write target is a `.md` file (5). A quoted-delimiter heredoc piped to a messaging CLI (`cat <<'EOF' | <bus-cli> send ...`) matches none of them, so the word in prose is treated as an executed `sed` (`handlers/pre_tool_use/sed_blocker.py`). The body is data the shell never runs, unless the receiving stage is an interpreter.
+
+**Severity**: Low (false positive; the agent rewords the message).
+
+**Status**: ⬜ Open. TDD fix: red test that a quoted-delimiter heredoc mentioning sed, piped to a non-interpreter receiver, is allowed, while the same body piped to `bash`/`sh` stays denied; then add the exemption using the pipe blocker's existing data-consumer allowlist for heredoc receivers rather than a second list.

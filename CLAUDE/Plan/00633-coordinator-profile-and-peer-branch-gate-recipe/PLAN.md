@@ -11,17 +11,20 @@
 
 Child (c) of umbrella [Plan 00630](../00630-coordinator-level-skills-ccy-teams-aware/PLAN.md);
 design in its [DESIGN.md](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md)
-section 14 (features 3 and 4). Two parts. (1) A coordinator role profile: one
+section 14 (features 3 and 4). Two parts. (1) A coordinator profile: one
 setting that turns on the goal ledger, crons, park-and-move-on for
 awaiting-human when unattended, work-queue enforcement on dispatch and the
-owner's standing authorisations. It sets existing per-feature keys and owns no
-new mechanism. (2) A peer-branch gate recipe: a declared `gate_command` that
-`merge_qa_advisor` and the work-queue record per merged branch, so "merged and
-gated" is a record, not a habit (`--no-ff` merge, Layer 1 and 2 QA, push only if
-green, else `reset --keep`, one at a time).
+`standing_authorisations` handler (the one authorisation store). It sets
+existing per-feature keys and owns no new mechanism. (2) The peer-branch gate
+recipe (B12, which is also B3): a declared `gate_command` that
+`merge_qa_advisor` and the work-queue record per merged branch (`--no-ff`
+merge, Layer 1 and 2 QA, push only if green, else `reset --keep`, one at a
+time).
 
-The profile applies per team: it is active for acts concerning a team where
-the seat is coordinator, never session-wide.
+The profile's switches are session-level and concern no team, so it applies
+while the seat is coordinator in ANY held team (`any_duty("coordinator")`).
+There is no repo-to-team map. A gated act that names a team (a push cite)
+still gates on that team, through Plan 00634.
 
 ## Goals
 
@@ -31,16 +34,17 @@ the seat is coordinator, never session-wide.
 
 ## Non-Goals
 
-- New work-queue storage (Plan 00470 Task 3.3), merge approval (Plan 00502),
-  the HUMAN check (Plan 00634).
+- New work-queue storage (Plan 00470 Task 3.3), a second authorisation store,
+  merge approval (Plan 00502), the HUMAN check (Plan 00634).
 
 ## Tasks
 
 ### Phase 1: RED
 
-- [ ] ⬜ **Task 1.1**: Fixtures: profile off for a worker-in-B/coordinator-in-A
-  session on B's acts; override wins; unknown role unchanged; record written per
-  merge; no record on a failed gate.
+- [ ] ⬜ **Task 1.1**: Fixtures: profile on for a coordinator-in-A,
+  worker-in-B session; off for a worker-only, probe-only or host-duty session;
+  override wins; unknown role unchanged; record written per merge; no record on
+  a failed gate.
 
 ### Phase 2: Profile
 
@@ -63,4 +67,4 @@ the seat is coordinator, never session-wide.
 
 ## Delivery & Milestones
 
-- Plan filed.
+- Plan filed; revised for the fedora-desktop vet.
