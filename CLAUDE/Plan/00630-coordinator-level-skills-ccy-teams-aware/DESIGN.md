@@ -589,8 +589,13 @@ admitted request prints the exact reviewer prompt; a separate at-least-Opus
 reviewer judges every unique commit and content-unique path; a verdict plus a
 guard-written, verified recovery bundle let `delete-branch` remove an
 `unproven` LOCAL branch; verdicts are single-use and expire; removals are
-rate-limited and ledgered (`.claude/branch-removals.jsonl`). Its module
-header states "No remote delete. R-GIT-PUSH-DELETE-REMOTE is unchanged".
+rate-limited and ledgered (default `.claude/branch-removals.jsonl`, config
+`branches.reject.ledger_path`). The rate is counted over a rolling
+`window_days` (default 7): a removal needs two reviewers once `n >= two_reviewer_after` (default 3) removals are in the window and is refused at
+`refuse_after` (default 10). The route is local-only: `core/branch_reject.py`
+has no remote deletion, and its callers are `delete-branch` (via
+`RejectRoute` in `daemon/branch_safety.py`), the `branch-reject` CLI and the
+dispatch gate, so `R-GIT-PUSH-DELETE-REMOTE` is untouched by it.
 `delete-branch --remote-only` deletes a remote branch only on the merged or
 no-unique-file proof, under a lease on the proven tip.
 
