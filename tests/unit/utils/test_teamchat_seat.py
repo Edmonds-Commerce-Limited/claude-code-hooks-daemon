@@ -10,6 +10,7 @@ from __future__ import annotations
 import builtins
 import logging
 import os
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,21 @@ def exited(code: int, stdout: str = "") -> FakeRunner:
 
 def probe(stdout: str) -> teamchat_seat.SeatContext:
     return probe_seat_context(SIGNALS, runner=ok(stdout))
+
+
+def _wait_until_not_running(pid: int, within: float = 5.0) -> bool:
+    """Whether ``pid`` is gone or a zombie (killed, awaiting a reaper) within ``within`` s."""
+    deadline = time.monotonic() + within
+    stat = Path(f"/proc/{pid}/stat")
+    while time.monotonic() < deadline:
+        try:
+            state = stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
+        except FileNotFoundError:
+            return True
+        if state in ("Z", "X"):
+            return True
+        time.sleep(0.05)
+    return False
 
 
 # --- absent ---------------------------------------------------------------
@@ -556,6 +572,45 @@ class TestDefaultRunner:
 
     def test_timeout(self) -> None:
         assert default_command_runner(("sleep", "5"), {}, 0.1).status is CommandStatus.TIMEOUT
+
+    def test_timeout_kills_the_whole_process_group(self, tmp_path: Path) -> None:
+        """Review F5: a grandchild must not outlive a timed-out probe."""
+        pid_file = tmp_path / "grandchild.pid"
+        script = f'/bin/sleep 30 & echo $! > "{pid_file}"; wait'
+        outcome = default_command_runner(("/bin/sh", "-c", script), {}, 0.5)
+        assert outcome.status is CommandStatus.TIMEOUT
+        grandchild = int(pid_file.read_text(encoding="utf-8").strip())
+        assert _wait_until_not_running(grandchild)
+
+    def test_stdin_is_dev_null(self) -> None:
+        """Review F5: a binary that reads stdin gets EOF at once, never the terminal."""
+        outcome = default_command_runner(("/bin/sh", "-c", "cat; echo done"), {}, 5.0)
+        assert outcome.status is CommandStatus.OK
+        assert outcome.stdout == "done\n"
+
+    def test_stderr_is_discarded(self) -> None:
+        outcome = default_command_runner(("/bin/sh", "-c", "echo noise >&2; echo out"), {}, 5.0)
+        assert outcome.stdout == "out\n"
+
+    def test_oversized_output_is_too_large(self) -> None:
+        """Review F5: stdout is read to a cap, never without limit."""
+        script = "/usr/bin/yes x"
+        outcome = default_command_runner(("/bin/sh", "-c", script), {}, 5.0)
+        assert outcome.status is CommandStatus.TOO_LARGE
+        assert outcome.stdout == ""
+
+    def test_output_at_the_cap_is_read(self) -> None:
+        size = teamchat_seat.MAX_OUTPUT_BYTES
+        script = f"/usr/bin/head -c {size} /dev/zero | /usr/bin/tr '\\0' x"
+        outcome = default_command_runner(("/bin/sh", "-c", script), {}, 5.0)
+        assert outcome.status is CommandStatus.OK
+        assert len(outcome.stdout) == size
+
+    def test_too_large_outcome_is_unknown(self) -> None:
+        runner = FakeRunner(CommandOutcome(CommandStatus.TOO_LARGE))
+        context = probe_seat_context(SIGNALS, runner=runner)
+        assert context.state is SeatState.UNRESOLVED
+        assert context.reason is ProbeReason.OUTPUT_TOO_LARGE
 
     def test_permission_denied_is_not_found(self, tmp_path: Path) -> None:
         binary = tmp_path / "teamchat"
