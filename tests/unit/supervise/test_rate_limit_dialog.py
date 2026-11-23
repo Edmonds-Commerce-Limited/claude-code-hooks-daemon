@@ -1593,6 +1593,18 @@ class TestF1SweepAgreesWithLoad:
         _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, child_pid=7))
         assert path.exists()
 
+    @pytest.mark.parametrize("name", ["99-9900", f"{_CHILD}-1"])
+    def test_an_open_state_of_a_gone_child_is_swept(
+        self, sidecar_dir: Path, machine: Any, name: str
+    ) -> None:
+        # The human quit Claude with the dialog open: nothing will ever close it.
+        state = _mod._new_rate_limit_window(_NOW - 3 * 86400.0, _NOW - 4 * 86400.0)
+        state.update(phase="abandoned", occurrence_open=True)
+        path = sidecar_dir.parent / f"supervise-rate-limit-dialog.{name}.json"
+        _mod._save_rate_limit_state(path, state)
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, child_pid=7))
+        assert not path.exists()
+
     def test_an_open_answered_state_is_still_swept(self, sidecar_dir: Path, machine: Any) -> None:
         # `load` expires these at anchor + TTL even while open, so the sweep may too.
         path = self._open_state(sidecar_dir, "answered")
@@ -1645,6 +1657,77 @@ class TestF2HeldEnter:
         assert self._held(sidecar_dir, other) == []
         assert enter.payload == "\r"
         assert _phase(sidecar_dir) == "answered"
+
+
+class TestHeldResumeSends:
+    def test_a_held_clear_is_taken_back_and_retried(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        before = machine.export_state()
+        clear = _resume(sidecar_dir, machine, _resume_facts("continue"))
+        assert clear.payload == _BACKSPACES
+        assert _phase(sidecar_dir) == "cleared"
+        machine.import_state(before)  # the host adopts nothing from a held send
+        _mod._rate_limit_host_held(
+            clear, status_dir=sidecar_dir.parent, child_pid=_CHILD, now_wall=_AFTER + 1
+        )
+        assert _phase(sidecar_dir) == "answered"
+        assert _state(sidecar_dir)["resume_vetoed_at"] == _AFTER + 1
+        again = _resume(sidecar_dir, machine, _resume_facts("continue", now=_AFTER + 30, quiet=30.0))
+        assert again.payload == _BACKSPACES
+
+    def test_a_held_continue_is_taken_back_and_retried(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        before = machine.export_state()
+        sent = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert sent.decision_value == _CONTINUE
+        assert _phase(sidecar_dir) == "done"
+        machine.import_state(before)  # the host adopts nothing from a held send
+        _mod._rate_limit_host_held(
+            sent, status_dir=sidecar_dir.parent, child_pid=_CHILD, now_wall=_AFTER + 1
+        )
+        assert _phase(sidecar_dir) == "answered"
+        assert _state(sidecar_dir)["resume_vetoed_at"] == _AFTER + 1
+        again = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + 10, quiet=8.0))
+        assert again.decision_value == _CONTINUE, again.noop_reason_log
+
+    def test_supervise_tells_the_host_when_the_focus_model_holds_a_send(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The `on_held=` wiring in `supervise()` itself (as D5 does for `apply_veto`).
+        import os
+        import sys
+
+        calls: list[tuple[Any, dict[str, Any]]] = []
+
+        def spy(outcome: Any, **kw: Any) -> None:
+            calls.append((outcome, kw))
+
+        monkeypatch.setattr(_mod, "_rate_limit_host_held", spy)
+        monkeypatch.setattr(_mod.InputActivity, "focus_confirmed", lambda self: False)
+        child = "import time\ntime.sleep(0.8)\n"
+        stdin_fd = os.open(os.devnull, os.O_RDONLY)
+        try:
+            _mod.supervise(
+                [sys.executable, "-c", child],
+                dry_run=False,
+                log=_mod.DecisionLog(tmp_path / "decision.log"),
+                stdin_fd=stdin_fd,
+                poll_seconds=0.05,
+                sidecar_dir=tmp_path / "untracked" / "context-sidecar",
+                decider=lambda facts: _key_outcome("\r"),
+                restart_coordinator=_mod.RestartCoordinator(
+                    state_path=tmp_path / "state" / "restart-request.json"
+                ),
+            )
+        finally:
+            os.close(stdin_fd)
+        assert calls, "the host held a rate-limit key without telling the take-back"
+        outcome, kw = calls[0]
+        assert outcome.payload == "\r"
+        assert kw["status_dir"] == tmp_path / "untracked"
+        assert isinstance(kw["child_pid"], int)
 
 
 class TestF3VetoedContinueIsRetried:
@@ -1707,17 +1790,36 @@ class TestF4TakebackCap:
     def test_the_enter_is_pressed_again_only_up_to_the_takeback_cap(
         self, sidecar_dir: Path, machine: Any
     ) -> None:
+        assert _mod._RATE_LIMIT_TAKEBACK_CAP == 2
+        assert _mod._RATE_LIMIT_TAKEBACK_CAP == 2
         enter = _answered_enter(sidecar_dir, machine)
-        now = _NOW + 1
-        for _ in range(_mod._RATE_LIMIT_TAKEBACK_CAP):
-            self._veto_enter(sidecar_dir, enter, now)
-            now += 1
-            enter = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=now))
-            if enter.payload is None:
-                break
-        capped = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=now + 1))
+        # The first take-back is followed by a fresh Enter (fails for a cap of 0 or 1)...
+        self._veto_enter(sidecar_dir, enter, _NOW + 1)
+        retry = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 2))
+        assert retry.payload == "\r"
+        # ...the second is not (fails for a cap of 3 or more).
+        self._veto_enter(sidecar_dir, retry, _NOW + 2)
+        capped = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 3))
         assert capped.payload is None
         assert "take" in (capped.noop_reason_log or "")
+
+    def test_the_cap_tripping_is_shown_on_the_status_line_once(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        enter = _answered_enter(sidecar_dir, machine)
+        message = _mod._status_message_path(sidecar_dir.parent)
+        self._veto_enter(sidecar_dir, enter, _NOW + 1)
+        retry = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 2))
+        assert retry.payload == "\r"
+        assert not message.exists()
+        self._veto_enter(sidecar_dir, retry, _NOW + 2)
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 3))
+        payload = json.loads(message.read_text(encoding="utf-8"))
+        assert "rate-limit" in payload["text"]
+        assert payload["level"] == "warning"
+        message.unlink()
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 4))
+        assert not message.exists()
 
     def test_a_dialog_back_in_the_same_window_stays_held_after_the_cap(
         self, sidecar_dir: Path, machine: Any
@@ -1737,13 +1839,23 @@ class TestF4TakebackCap:
 class TestArmedStatus:
     def test_armed_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
-        line = _mod.rate_limit_armed_status(dry_run=False)
+        line = _mod.rate_limit_armed_status(dry_run=False, screen_found=True)
         assert line.startswith("rate-limit dialog answerer: ARMED")
 
     def test_dry_run_is_not_armed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
-        line = _mod.rate_limit_armed_status(dry_run=True)
+        line = _mod.rate_limit_armed_status(dry_run=True, screen_found=True)
         assert line.startswith("rate-limit dialog answerer: dry-run")
+        assert "ARMED" not in line
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_without_a_screen_binary_it_is_inert_and_says_why(
+        self, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+    ) -> None:
+        monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
+        line = _mod.rate_limit_armed_status(dry_run=dry_run, screen_found=False)
+        assert line.startswith("rate-limit dialog answerer: INERT")
+        assert "hooks-screen" in line
         assert "ARMED" not in line
 
     @pytest.mark.parametrize("value", ["off", "0", "false", "NO"])
@@ -1751,12 +1863,59 @@ class TestArmedStatus:
         self, monkeypatch: pytest.MonkeyPatch, value: str
     ) -> None:
         monkeypatch.setenv("CCY_RATE_LIMIT_DIALOG", value)
-        line = _mod.rate_limit_armed_status(dry_run=False)
+        line = _mod.rate_limit_armed_status(dry_run=False, screen_found=True)
         assert line.startswith("rate-limit dialog answerer: OFF")
         assert "CCY_RATE_LIMIT_DIALOG" in line
+
+    def test_the_session_status_looks_up_the_screen_binary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
+        monkeypatch.delenv("CCY_HOOKS_SCREEN", raising=False)
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        assert "INERT" in _mod.rate_limit_session_status(dry_run=False)
+        binary = tmp_path / "untracked" / "bin" / "hooks-screen"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o755)
+        assert "ARMED" in _mod.rate_limit_session_status(dry_run=False)
 
     def test_the_banner_carries_the_line(self) -> None:
         banner = _mod.render_startup_banner(
             version="1.0", armed=True, extra_lines=("rate-limit dialog answerer: ARMED",)
         )
         assert "┃  rate-limit dialog answerer: ARMED" in banner.splitlines()
+
+    def test_supervise_puts_the_session_status_in_the_banner_and_the_log(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        import os
+        import sys
+
+        monkeypatch.delenv("CCY_RATE_LIMIT_DIALOG", raising=False)
+        monkeypatch.delenv("CCY_HOOKS_SCREEN", raising=False)
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        monkeypatch.setattr(_mod, "_should_show_banner", lambda *_a, **_k: True)
+        stdin_fd = os.open(os.devnull, os.O_RDONLY)
+        try:
+            _mod.supervise(
+                [sys.executable, "-c", "pass"],
+                dry_run=False,
+                log=_mod.DecisionLog(tmp_path / "decision.log"),
+                stdin_fd=stdin_fd,
+                poll_seconds=0.05,
+                sidecar_dir=tmp_path / "untracked" / "context-sidecar",
+                restart_coordinator=_mod.RestartCoordinator(
+                    state_path=tmp_path / "state" / "restart-request.json"
+                ),
+            )
+        finally:
+            os.close(stdin_fd)
+        expected = _mod.rate_limit_session_status(dry_run=False)
+        assert "INERT" in expected
+        assert f"┃  {expected}" in capsys.readouterr().err.splitlines()
+        lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
+        assert any(line.endswith(expected) for line in lines)

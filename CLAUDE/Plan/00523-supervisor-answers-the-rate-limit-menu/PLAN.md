@@ -75,9 +75,11 @@ writing the keystroke.
   clears only when the menu leaves the screen. Each press is logged to the
   decision log, and dry-run mode logs it without sending. As built, the latch
   is per reset window, and the keys are capped per occurrence and per window.
-- [x] ✅ **Task 2.4** (as built: `rate_limit_armed_status`, in the startup banner and the first decision-log line; the key is `CCY_RATE_LIMIT_DIALOG`): A readable armed state for Plan 00632's readiness check
+- [x] ✅ **Task 2.4** (as built: `rate_limit_armed_status`, in the startup banner and the second decision-log line, after `supervisor active`; the key is `CCY_RATE_LIMIT_DIALOG`): A readable armed state for Plan 00632's readiness check
   (Plan 00630 vet M-9): a config key that turns the answerer on, plus a
   supervisor status line saying whether it is armed in this session. TDD.
+  As built the key turns the answerer OFF (the feature is on by default), not
+  on as asked here; the line reads `INERT` when no hooks-screen binary resolves.
 - [x] ✅ **Task 2.5** (added): after the reset, clear the pre-filled box and
   send one `continue`. Two guards go with it:
   - every other family is held while the pre-fill may be in the box;
@@ -185,4 +187,10 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   in /workspace.
 
   The host part (the screen dump and the apply veto) takes effect on the next
-  ccy relaunch. Phase 1 (live capture), Phase 2b and Task 2.4 are still open.
+  ccy relaunch. Phase 1 (live capture) is still open; Phase 2b and Task 2.4
+  are built.
+
+  F2, F3 and F4 (the held-Enter take-back, the retried resume and the take-back
+  cap) also need a ccy relaunch: the host writes the fields they read
+  (`enter_takebacks`, `resume_vetoed_at`). Only the sweep rule reloads with the
+  worker; under an older host F3 and F4 are inert and fail safe.

@@ -8,10 +8,10 @@ Done, all in `.claude/ccy/claude-supervise.py`:
 - **F2**: `_apply_worker_outcome` takes an `on_held` callback; the host passes `_rate_limit_host_held`, which takes back a held Enter, clear or `continue` the same way a vetoed one is. `_rate_limit_host_veto` now uses it too.
 - **F3**: a vetoed resume send records `resume_vetoed_at`; output within 5 s of it is the veto's own redraw and does not open the post-reset re-check, so an empty box is retried instead of abandoned at the deadline.
 - **F4**: the Review item was under-specified. Taking an Enter back means it never landed, so one re-answer is right. I added `_RATE_LIMIT_TAKEBACK_CAP = 2` taken-back Enters per window; after that the dialog is left alone.
-- **Task 2.4**: `rate_limit_armed_status(dry_run=)` returns an `ARMED`, `dry-run` or `OFF` line (key `CCY_RATE_LIMIT_DIALOG`). It is in the startup banner (`render_startup_banner(extra_lines=)`) and is the first decision-log line.
+- **Task 2.4**: `rate_limit_armed_status(dry_run=)` returns an `ARMED`, `dry-run` or `OFF` line (key `CCY_RATE_LIMIT_DIALOG`). It is in the startup banner (`render_startup_banner(extra_lines=)`) and is the second decision-log line (after `supervisor active`). Corrected by the independent review: it can also read `INERT` when no hooks-screen binary resolves.
 - Docs in `CLAUDE/development/CcySupervisor.md`; release note `090-rate-limit-dialog-follow-ups.md`.
 
-Hot reload: the worker-side changes (F1, F3, F4, the sweep) reload by themselves. F2's held take-back and the banner line run in the host and need a ccy relaunch. I did not restart anything.
+Hot reload (corrected by the independent review): only the sweep rule reloads by itself. The host writes `enter_takebacks` and `resume_vetoed_at`, so F2, F3 and F4 (like the banner line) need a ccy relaunch; under an older host F3 and F4 are inert and fail safe. I did not restart anything.
 
 Blocked or not built:
 
