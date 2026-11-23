@@ -4,6 +4,7 @@
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: High
+**GitHub Issue**: #221
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Orchestration
 
