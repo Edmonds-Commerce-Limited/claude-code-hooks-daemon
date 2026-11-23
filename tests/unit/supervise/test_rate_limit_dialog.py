@@ -483,3 +483,209 @@ def test_legacy_host_json_has_no_dump() -> None:
         }
     )
     assert _mod._facts_from_json(line).screen_dump == ""
+
+
+# ── Unit 2b: the late `continue` after the reset ─────────────────────────────
+
+# The fixtures' limit resets at 3pm Europe/London on the same day as _NOW.
+_RESET = datetime(2026, 11, 23, 15, 0, tzinfo=_LONDON).timestamp()
+_AFTER = _RESET + 180.0  # past the resume grace
+_CONTINUE = "would-rate-limit-continue"
+_BACKSPACES = "\x7f" * len("continue")
+_QUIET_SINCE_ANSWER = _NOW + 5.0  # the last output: the dialog closing
+
+
+def _resume_facts(text: str, *, now: float = _AFTER, **overrides: Any) -> Any:
+    """A settled prompt screen after the answer, no output since the dialog closed."""
+    overrides.setdefault("quiet", now - _QUIET_SINCE_ANSWER)
+    return _dialog_facts(_prompt_screen(text), now=now, **overrides)
+
+
+def _answer_and_close(sidecar_dir: Path, machine: Any) -> None:
+    """Answer the dialog, then see it gone (the occurrence closes)."""
+    _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+    assert _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1)).payload == "\r"
+    closed = _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen("continue"), now=_NOW + 5))
+    assert closed.payload is None
+
+
+def _resume(sidecar_dir: Path, machine: Any, facts: Any, *, dry_run: bool = False) -> Any:
+    """A tick with a fresh green context reading, so only the resume speaks in the log."""
+    (sidecar_dir / "fg.json").write_text(
+        json.dumps(
+            {
+                "red": False,
+                "critical": False,
+                "compact_urgent": False,
+                "tier": "",
+                "pct": 30.0,
+                "session_id": "fg",
+                "ts": facts.now_wall,
+                "seq": 1,
+                "writer_pid": 1,
+                "compacting": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return _tick(sidecar_dir, machine, facts, dry_run=dry_run)
+
+
+def _phase(sidecar_dir: Path) -> Any:
+    return json.loads(_state_path(sidecar_dir).read_text(encoding="utf-8"))["phase"]
+
+
+class TestResumeAfterReset:
+    def test_clear_then_continue_then_nothing(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        clear = _resume(sidecar_dir, machine, _resume_facts("continue"))
+        assert clear.decision_value == _KEY
+        assert clear.payload == _BACKSPACES
+        assert clear.submit is False
+        # Our own backspaces redraw the box: the next tick sees fresh output.
+        sent = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + 2, quiet=1.5))
+        assert sent.decision_value == _CONTINUE
+        assert sent.submit is True
+        assert sent.payload is not None
+        assert sent.payload.endswith(" continue")
+        assert "[ccy-supervisor " in sent.payload
+        assert _phase(sidecar_dir) == "done"
+        for offset in range(4, 40, 5):
+            later = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + offset))
+            assert later.decision_value not in (_KEY, _CONTINUE)
+
+    def test_empty_box_goes_straight_to_continue(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        sent = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert sent.decision_value == _CONTINUE
+
+    def test_nothing_before_the_reset(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        for now in (_NOW + 60, _RESET - 1, _RESET + 60):
+            outcome = _resume(sidecar_dir, machine, _resume_facts("continue", now=now))
+            assert outcome.decision_value not in (_KEY, _CONTINUE)
+        assert "waiting for the limit to reset" in (outcome.noop_reason_log or "")
+
+    def test_output_after_the_reset_abandons(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts("continue", quiet=30.0))
+        assert outcome.decision_value not in (_KEY, _CONTINUE)
+        assert "output after the reset" in (outcome.noop_reason_log or "")
+        assert _phase(sidecar_dir) == "abandoned"
+        again = _resume(sidecar_dir, machine, _resume_facts("", now=_AFTER + 10))
+        assert again.decision_value not in (_KEY, _CONTINUE)
+
+    def test_no_parsed_reset_never_continues(self, sidecar_dir: Path, machine: Any) -> None:
+        unparsed = _ON_TARGET.replace("resets 3pm (Europe/London)", "resets soon")
+        _tick(sidecar_dir, machine, _dialog_facts(unparsed))
+        assert _tick(sidecar_dir, machine, _dialog_facts(unparsed, now=_NOW + 1)).payload == "\r"
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), now=_NOW + 5))
+        outcome = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert outcome.decision_value not in (_KEY, _CONTINUE)
+        assert _phase(sidecar_dir) == "done"
+
+    def test_stored_reset_is_used_not_a_reparse(self, sidecar_dir: Path, machine: Any) -> None:
+        # Past 3pm a re-parse of "resets 3pm" would mean tomorrow; the stored
+        # window says today, so the continue goes now.
+        _answer_and_close(sidecar_dir, machine)
+        late = _RESET + 3600.0
+        sent = _resume(sidecar_dir, machine, _resume_facts("", now=late))
+        assert sent.decision_value == _CONTINUE
+
+    def test_box_still_prefilled_after_the_clear_attempts_abandons(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        first = _resume(sidecar_dir, machine, _resume_facts("continue")).payload
+        payloads = [first] + [
+            _resume(
+                sidecar_dir, machine, _resume_facts("continue", now=_AFTER + i, quiet=1.0)
+            ).payload
+            for i in range(1, 4)
+        ]
+        assert payloads.count(_BACKSPACES) == 2
+        assert _phase(sidecar_dir) == "abandoned"
+
+    def test_foreign_text_in_the_box_abandons(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts("half a thought"))
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "abandoned"
+
+    def test_no_visible_box_waits(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _tick(
+            sidecar_dir,
+            machine,
+            _dialog_facts("just transcript\n", now=_AFTER, quiet=_AFTER - _QUIET_SINCE_ANSWER),
+        )
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "answered"
+
+    def test_human_typing_blocks_the_resume(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts("", idle=False))
+        assert outcome.payload is None
+        assert _phase(sidecar_dir) == "answered"
+
+    def test_busy_footer_blocks_the_resume(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        busy = _prompt_screen("") + "  2 background tasks\n"
+        outcome = _tick(
+            sidecar_dir,
+            machine,
+            _dialog_facts(busy, now=_AFTER, quiet=_AFTER - _QUIET_SINCE_ANSWER),
+        )
+        assert outcome.payload is None
+
+    def test_dry_run_types_nothing_and_finishes(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        outcome = _resume(sidecar_dir, machine, _resume_facts(""), dry_run=True)
+        assert outcome.payload is None
+        assert "would send continue (dry-run)" in (outcome.noop_reason_log or "")
+        assert _phase(sidecar_dir) == "done"
+
+
+_GATE_SESSION = "fg"
+
+
+class TestResumeGates:
+    def test_control_without_a_gate_continues(self, sidecar_dir: Path, machine: Any) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        sent = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert sent.decision_value == _CONTINUE
+
+    def test_no_continue_under_a_usage_pause(self, sidecar_dir: Path, machine: Any) -> None:
+        from claude_code_hooks_daemon.utils import usage_pause
+        from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+
+        _answer_and_close(sidecar_dir, machine)
+        usage_pause.write_usage_pause(
+            sidecar_dir.parent,
+            UsagePause(
+                session_id=_GATE_SESSION,
+                paused_at=_AFTER - 60.0,
+                resume_at=_AFTER + 3600.0,
+                window=usage_pause.WINDOW_FIVE_HOUR,
+                used_percentage=93.0,
+                ceiling=90.0,
+                reason="five_hour window at 93% (ceiling 90%)",
+            ),
+        )
+        assert _mod.load_usage_pause(sidecar_dir, now=_AFTER, own_sessions=None) is not None
+        outcome = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert outcome.decision_value != _CONTINUE
+        assert outcome.payload is None or "continue" not in outcome.payload.split()[-1:]
+
+    def test_no_continue_under_blocked(self, sidecar_dir: Path, machine: Any) -> None:
+        from claude_code_hooks_daemon.core.session_mode_registry import SessionModeRegistry
+        from claude_code_hooks_daemon.utils.session_modes import declared_blocked_entry
+
+        _answer_and_close(sidecar_dir, machine)
+        SessionModeRegistry(sidecar_dir, clock=lambda: _AFTER).enter(
+            declared_blocked_entry(_GATE_SESSION, entered_at=_AFTER - 60.0)
+        )
+        assert _mod.load_session_modes(sidecar_dir, now=_AFTER, own_sessions=None).gate_closed
+        outcome = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert outcome.decision_value != _CONTINUE
+        assert outcome.payload is None

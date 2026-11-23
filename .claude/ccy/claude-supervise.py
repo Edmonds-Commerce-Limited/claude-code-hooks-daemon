@@ -8720,6 +8720,7 @@ _PHASE_ANSWERED = "answered"
 _PHASE_CLEARED = "cleared"
 _PHASE_DONE = "done"
 _PHASE_ABANDONED = "abandoned"
+_RATE_LIMIT_DRY_RUN_NOTE = "would send continue (dry-run), nothing typed"
 
 
 def _rate_limit_dialog_enabled() -> bool:
@@ -8921,6 +8922,98 @@ def _rate_limit_dialog_step(
             consume_signal_path=None,
             deferred_log=None,
             machine_state=machine.export_state(),
+        ),
+        None,
+    )
+
+
+@dataclass(frozen=True)
+class _RateLimitResume:
+    """What the late resume types: the box-clearing backspaces or the ``continue``."""
+
+    decision_value: str
+    reason: str
+    payload: str
+    submit: bool
+
+
+def _rate_limit_resume_step(
+    *, facts: TickFacts, dry_run: bool, status_dir: Path
+) -> tuple[_RateLimitResume | None, str | None]:
+    """After the reset, clear Claude Code's pre-filled box and send one ``continue``.
+
+    Returns ``(send, note)``. The caller applies its own gates first (an
+    otherwise-NOOP MONITOR tick, no usage pause, no BLOCKED, no unconfirmed own
+    line). Acts only once the dialog answered this window has closed, the
+    STORED reset time plus a grace has passed, and the session is settled with
+    the input box visible. Output after the reset in phase ``answered`` means
+    the session has already moved on, so the window is abandoned; that fails
+    closed, so an idle redraw also suppresses the resume.
+    """
+    if facts.child_pid is None or not facts.screen_dump or not _rate_limit_dialog_enabled():
+        return None, None
+    path = _rate_limit_state_path(status_dir, facts.child_pid)
+    if not path.exists():
+        return None, None
+    now = facts.now_wall
+    state = _load_rate_limit_state(path, now)
+    phase = state.get("phase")
+    if phase not in (_PHASE_ANSWERED, _PHASE_CLEARED) or state.get("occurrence_open"):
+        return None, None
+
+    def finish(new_phase: str, note: str) -> tuple[None, str]:
+        state["phase"] = new_phase
+        _save_rate_limit_state(path, state)
+        return None, f"{_RATE_LIMIT_LOG}: {note}"
+
+    reset = state.get("window_reset")
+    if not isinstance(reset, (int, float)):
+        return finish(_PHASE_DONE, "no reset time was read, no continue will be sent")
+    if now < reset + _RATE_LIMIT_RESUME_GRACE_SECONDS:
+        return None, f"{_RATE_LIMIT_LOG}: waiting for the limit to reset"
+    dump = facts.screen_dump
+    if not (
+        facts.idle
+        and facts.work_idle
+        and facts.input_line_empty
+        and facts.main_focus_confirmed
+        and not screen_shows_busy_footer(dump)
+    ):
+        return None, f"{_RATE_LIMIT_LOG}: continue pending but session busy"
+    if phase == _PHASE_ANSWERED and facts.output_quiet_seconds < now - reset:
+        return finish(_PHASE_ABANDONED, "output after the reset, no continue sent")
+    text = rate_limit_composer_text(dump)
+    if text is None:
+        return None, f"{_RATE_LIMIT_LOG}: continue pending, no input box visible"
+    attempts = _coerce_int(state.get("clear_attempts"))
+    if text == _RATE_LIMIT_PREFILL:
+        if phase == _PHASE_CLEARED and attempts >= _RATE_LIMIT_CLEAR_ATTEMPTS:
+            return finish(_PHASE_ABANDONED, "the input box would not clear, no continue sent")
+        if dry_run:
+            return finish(_PHASE_DONE, _RATE_LIMIT_DRY_RUN_NOTE)
+        state.update(phase=_PHASE_CLEARED, cleared_at=now, clear_attempts=attempts + 1)
+        _save_rate_limit_state(path, state)
+        return (
+            _RateLimitResume(
+                decision_value=Decision.WOULD_RATE_LIMIT_KEY.value,
+                reason="limit reset -> clearing the pre-filled input box",
+                payload=_RATE_LIMIT_BACKSPACES,
+                submit=False,
+            ),
+            None,
+        )
+    if text:
+        return finish(_PHASE_ABANDONED, "other text in the input box, no continue sent")
+    if dry_run:
+        return finish(_PHASE_DONE, _RATE_LIMIT_DRY_RUN_NOTE)
+    state["phase"] = _PHASE_DONE
+    _save_rate_limit_state(path, state)
+    return (
+        _RateLimitResume(
+            decision_value=Decision.WOULD_RATE_LIMIT_CONTINUE.value,
+            reason="limit reset -> would send continue",
+            payload=f"{_format_bot_prefix(now)} {_CONTINUE_BODY}",
+            submit=True,
         ),
         None,
     )
@@ -9845,6 +9938,30 @@ def decide_once(
                 confirm_enters = model_confirm_enters
                 deferred_log = None
                 noop_reason_log = None
+    # ── The `continue` after a rate-limit reset (Plan 00523) ────────────────
+    # Late, on an otherwise-NOOP MONITOR tick: a usage pause has already
+    # returned above, BLOCKED and an unconfirmed own line keep it back, and
+    # the step's own gates need a settled, idle session with the box visible.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and not modes_gate_closed
+        and not own_line_blocks_text
+    ):
+        resume, resume_note = _rate_limit_resume_step(
+            facts=facts, dry_run=dry_run, status_dir=status_dir
+        )
+        if resume is not None:
+            decision_value = resume.decision_value
+            reason = resume.reason
+            payload = resume.payload
+            submit = resume.submit
+            deferred_log = None
+            noop_reason_log = None
+        elif resume_note is not None and noop_reason_log is None:
+            noop_reason_log = resume_note
     # ── Idle compaction at a percentage (Plan 00603) ─────────────────────────
     # Below every other family, on an otherwise-NOOP MONITOR tick, so a pending
     # goal, restore or flush always goes first and a compaction in flight is
