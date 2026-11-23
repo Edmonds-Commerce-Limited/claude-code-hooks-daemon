@@ -10712,9 +10712,10 @@ def _rate_limit_apply_veto(
     """Plan 00523 review I3/L4: why the host must not type a rate-limit send now, or None.
 
     Read at APPLY time, after the worker round trip. Any rate-limit send is
-    vetoed while a human byte waits on stdin. An Enter (which confirms the
-    highlighted row, possibly a billing option) is also vetoed while child
-    output waits unread, and unless the dump shipped this tick shows the
+    vetoed while a human byte waits on stdin or child output waits unread
+    (the dialog may have closed: an arrow would recall history into the
+    box). An Enter (which confirms the highlighted row, possibly a billing
+    option) is also vetoed unless the dump shipped this tick shows the
     pointer on ``Stop and wait for limit to reset``. A vetoed arrow, clear or
     ``continue`` is not retried: the worker already recorded it, so the
     window fails closed. A vetoed Enter is taken back by
@@ -10727,10 +10728,10 @@ def _rate_limit_apply_veto(
         return None
     if stdin_pending:
         return "a human key is waiting"
-    if outcome.payload != _RATE_LIMIT_ENTER:
-        return None
     if child_output_pending:
         return "the screen may have changed"
+    if outcome.payload != _RATE_LIMIT_ENTER:
+        return None
     dialog = recognise_rate_limit_dialog(shipped_dump) if shipped_dump else None
     if dialog is None or dialog.selected != dialog.target:
         return "the highlighted row is not verified as the target"

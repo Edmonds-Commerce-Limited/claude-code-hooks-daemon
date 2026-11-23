@@ -1322,6 +1322,15 @@ class TestApplyVeto:
     def test_enter_vetoed_when_the_screen_may_have_changed(self) -> None:
         assert self._veto("\r", child_output_pending=True)
 
+    def test_every_rate_limit_send_vetoed_when_the_screen_may_have_changed(self) -> None:
+        # Delta review D3: an arrow landing in a just-closed dialog's composer
+        # recalls history into the box; a clear or continue would hit a
+        # screen nobody has seen.
+        assert self._veto("\x1b[A", child_output_pending=True)
+        assert self._veto("\x1b[B", child_output_pending=True)
+        assert self._veto(_BACKSPACES, child_output_pending=True)
+        assert self._veto("[ccy] continue", _CONTINUE, child_output_pending=True)
+
     def test_enter_vetoed_unless_the_dump_shows_the_target_highlighted(self) -> None:
         assert self._veto("\r", shipped_dump=_dialog(_STANDARD, pointer=2))
         assert self._veto("\r", shipped_dump="")
