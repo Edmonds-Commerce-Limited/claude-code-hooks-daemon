@@ -17,7 +17,7 @@ What actually happens:
 
 A probe heredoc was denied with the sentence "moves into more than 16 existing directories". The culprit was another agent's scratch directory holding a two-link loop. I did not touch that directory. I also did not open any protected file.
 
-The same defect hit this fix's own test file. Python test strings containing `cd "$D"` were denied, so the test assembles the move from pieces.
+Writing this fix's own test file was denied once. The rewrite both assembled the move from pieces and dropped a literal glob spelling, so the cause of that deny was not isolated.
 
 ## Fix
 
@@ -33,7 +33,20 @@ A `scandir` that fails for the whole directory still yields `None`, which still 
 
 ## Tests
 
-`tests/unit/handlers/pre_tool_use/test_secret_file_guard_link_loop.py`: 23 tests, red before the fix for the reason above. The fixture is hermetic: 20 link-holding directories plus one loop.
+`tests/unit/handlers/pre_tool_use/test_secret_file_guard_link_loop.py`: 23 tests. The fixture is hermetic: 20 link-holding directories plus one loop.
+
+Run against the old listing rule (`_listed_kind` swapped back to a link-following `is_dir()`), 14 fail and 9 pass:
+
+- **Fail:** both bootstrap tests, the 5 ordinary commands on the Bash route, the same 5 on the Write route, and the 2 listing-shape tests.
+- **Pass, by design:** the fixture check and the still-denied tests.
+
+Requirement (4), fail closed on unparseable input, is untouched: the change does not reach the parsing code. These existing pins still pass:
+
+- `test_secret_file_guard.py::...::test_an_unparseable_shebang_script_still_fails_closed`
+- `test_secret_file_guard_cwd_fail_closed.py::...::test_an_unparseable_word_beside_a_search_denies`
+- `test_secret_file_guard_cwd_fail_closed.py::...::test_an_unparseable_word_alone_stays_an_advisory`
+
+**Behaviour change to review:** after a computed move, `cat bin/t2` (`bin/t2` is a word that passes through the loop directory into a loop link) was denied before the fix and is allowed now. Before the fix the whole listing was `None`. Now the word is judged like any deeper word whose link target is not protected. That is the existing design, the same one that allows a deeper word to an unprotected target. A link to a protected file in the same directory is still denied (`bin/late`). I dropped that case from the denied list rather than pin it as allowed.
 
 **Now allowed** (Bash and Write routes):
 
@@ -51,4 +64,4 @@ A `scandir` that fails for the whole directory still yields `None`, which still 
 
 ## Residual, not fixed
 
-A truly unlistable directory, or an unfinished link scan, still denies every relative word after a computed `cd`, command names included. Exempting command-position words is a wider change (`./x`, `. x`, a PATH holding `.`) and needs its own review. It is unconfirmed whether fedora-desktop.1's deny comes from a loop or from this residual. The diagnostic: does their deny carry the "more than 16 existing directories" sentence, and is there a link loop under their project?
+The general restriction the brief asked for, judging glob and link heuristics only against path operands, was NOT implemented: the real trigger was the listing defect. A truly unlistable directory, or an unfinished link scan, still denies every relative word after a computed `cd`, command names included. Exempting command-position words is a wider change (`./x`, `. x`, a PATH holding `.`) and needs its own review. It is unconfirmed whether fedora-desktop.1's deny comes from a loop or from this residual. The diagnostic: does their deny carry the "more than 16 existing directories" sentence, and is there a link loop under their project?

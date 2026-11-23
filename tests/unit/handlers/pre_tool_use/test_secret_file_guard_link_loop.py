@@ -231,6 +231,9 @@ class TestStillDenied:
             return real_scandir(path)
 
         with patch.object(os, "scandir", side_effect=scandir):
+            cwds = sfm.effective_cwds(_MOVE, str(looped.root))
+            assert cwds._listing(refused) is None
+            assert cwds.could_be_link("r.md")
             assert _bash(looped, f"{_MOVE} && cat r.md") is Decision.DENY
 
     def test_an_entry_that_cannot_be_classified_counts_for_its_own_name(
