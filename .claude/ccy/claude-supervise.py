@@ -9018,11 +9018,13 @@ def _rate_limit_dialog_step(
     typed = _human_typed(facts.human_raw_input)
     dump = facts.screen_dump
     dialog = recognise_rate_limit_dialog(dump) if dump else None
+    # Delta review D4: a near miss is not dialog-free; it may be the dialog
+    # made unrecognisable by the human's own navigation.
     keys_pending = _note_human_keys(
         path.name,
         typed=typed,
         raw_b64=facts.human_raw_input,
-        dialog_free_dump=bool(dump) and dialog is None,
+        dialog_free_dump=bool(dump) and dialog is None and not rate_limit_dialog_near_miss(dump),
     )
     if typed and path.exists():
         state = _load_rate_limit_state(path, facts.now_wall, child_pid)

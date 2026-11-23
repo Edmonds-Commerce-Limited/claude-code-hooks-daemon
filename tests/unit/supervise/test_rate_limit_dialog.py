@@ -1275,6 +1275,22 @@ class TestKeysBeforeTheFirstDump:
         ]
         assert all(outcome.payload is None for outcome in outcomes)
 
+    def test_a_near_miss_dump_does_not_clear_the_keys(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Delta review D4: the human's navigation made the dialog unrecognisable
+        # for a tick (a near miss, not a dialog-free screen); a later redraw
+        # that is recognisable must still be theirs.
+        _tick(sidecar_dir, machine, _dialog_facts("", raw=b"\x1b[B", quiet=0.5))
+        near = "What do you want to do?\n  1. Stop and wait for limit to re…\n" + _prompt_screen("")
+        assert _mod.rate_limit_dialog_near_miss(near)
+        _tick(sidecar_dir, machine, _dialog_facts(near, now=_NOW + 1))
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            for offset in range(2, 6)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+
     def test_a_fresh_worker_waits_for_a_dialog_free_dump(
         self, sidecar_dir: Path, machine: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
