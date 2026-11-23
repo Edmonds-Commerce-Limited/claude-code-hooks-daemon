@@ -15,9 +15,14 @@ recognise exactly is left alone.
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -245,6 +250,226 @@ def test_screen_dump_survives_the_worker_json() -> None:
         screen_dump="row one\nrow two",
     )
     assert _mod._facts_from_json(_mod._facts_to_json(facts)).screen_dump == "row one\nrow two"
+
+
+_CHILD = 4242
+_SETTLED = 10.0
+
+
+def _dialog_facts(
+    dump: str,
+    *,
+    now: float = _NOW,
+    quiet: float = _SETTLED,
+    child_pid: int | None = _CHILD,
+    raw: bytes = b"",
+    **overrides: Any,
+) -> Any:
+    fields: dict[str, Any] = {
+        "now_wall": now,
+        "idle": True,
+        "input_line_empty": True,
+        "human_compact_submitted": False,
+        "work_idle": True,
+        "output_quiet_seconds": quiet,
+        "child_pid": child_pid,
+        "screen_dump": dump,
+        "human_raw_input": base64.b64encode(raw).decode("ascii"),
+    }
+    fields.update(overrides)
+    return _mod.TickFacts(**fields)
+
+
+def _write_red_sidecar(sidecar_dir: Path, *, now: float = _NOW) -> None:
+    """A context reading that, absent the dialog, makes the supervisor compact."""
+    (sidecar_dir / "fg.json").write_text(
+        json.dumps(
+            {
+                "red": True,
+                "critical": False,
+                "compact_urgent": True,
+                "tier": "urgent",
+                "pct": 80.0,
+                "session_id": "fg",
+                "ts": now,
+                "seq": 1,
+                "writer_pid": 1,
+                "compacting": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _state_path(sidecar_dir: Path, child_pid: int = _CHILD) -> Path:
+    return sidecar_dir.parent / f"supervise-rate-limit-dialog.{child_pid}.json"
+
+
+@pytest.fixture
+def sidecar_dir(tmp_path: Path) -> Path:
+    directory = tmp_path / "context-sidecar"
+    directory.mkdir()
+    return directory
+
+
+@pytest.fixture
+def machine() -> Any:
+    return _mod.CompactStateMachine(_mod.CompactPolicy())
+
+
+def _tick(sidecar_dir: Path, machine: Any, facts: Any, *, dry_run: bool = False) -> Any:
+    policy = _mod.CompactPolicy()
+    return _mod.decide_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        facts=facts,
+        dry_run=dry_run,
+        freshness_seconds=policy.freshness_seconds,
+    )
+
+
+_ON_TARGET = _dialog(_STANDARD, pointer=0)
+_KEY = "would-rate-limit-key"
+
+
+class TestDialogKeys:
+    def test_enter_only_on_the_second_stable_tick(self, sidecar_dir: Path, machine: Any) -> None:
+        first = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        assert first.payload is None
+        assert first.decision_value == "noop"
+        second = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1))
+        assert second.decision_value == _KEY
+        assert second.payload == "\r"
+        assert second.submit is False
+
+    def test_arrow_never_enter_when_pointer_is_off_target(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        options = ["Upgrade your plan", "Add funds", _TARGET]
+        for offset in range(2):
+            outcome = _tick(
+                sidecar_dir, machine, _dialog_facts(_dialog(options), now=_NOW + offset)
+            )
+            assert outcome.payload == "\x1b[B"
+        above = _dialog([_TARGET, "Upgrade your plan"], pointer=1)
+        outcome = _tick(sidecar_dir, machine, _dialog_facts(above, now=_NOW + 2))
+        assert outcome.payload == "\x1b[A"
+
+    def test_unsettled_screen_is_a_noop_that_suppresses_other_families(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, quiet=1.0))
+        assert outcome.payload is None
+        assert outcome.decision_value == "noop"
+        assert "rate-limit dialog" in (outcome.noop_reason_log or "")
+
+    def test_dialog_without_a_red_sidecar_still_types_nothing_else(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _write_red_sidecar(sidecar_dir)
+        outcome = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        assert outcome.decision_value == "noop"
+
+    def test_dry_run_types_nothing(self, sidecar_dir: Path, machine: Any) -> None:
+        for offset in range(3):
+            outcome = _tick(
+                sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset), dry_run=True
+            )
+            assert outcome.payload is None
+        assert "would press" in (outcome.noop_reason_log or "")
+
+    def test_env_off_leaves_the_dialog_alone(
+        self, sidecar_dir: Path, machine: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CCY_RATE_LIMIT_DIALOG", "off")
+        for offset in range(2):
+            outcome = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            assert outcome.decision_value != _KEY
+        assert not _state_path(sidecar_dir).exists()
+
+    def test_legacy_empty_dump_touches_no_state(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(""))
+        assert not _state_path(sidecar_dir).exists()
+
+    def test_no_child_pid_means_off(self, sidecar_dir: Path, machine: Any) -> None:
+        for offset in range(2):
+            outcome = _tick(
+                sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset, child_pid=None)
+            )
+            assert outcome.decision_value != _KEY
+        assert list(sidecar_dir.parent.glob("supervise-rate-limit-dialog.*")) == []
+
+    def test_another_child_does_not_see_the_state(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        other = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1, child_pid=7))
+        assert other.payload is None
+        assert _state_path(sidecar_dir).exists()
+        assert _state_path(sidecar_dir, 7).exists()
+
+
+class TestOncePerWindow:
+    def _answer(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        assert _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1)).payload == "\r"
+
+    def test_dialog_back_after_going_away_is_left_alone(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        self._answer(sidecar_dir, machine)
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), now=_NOW + 5))
+        for offset in range(6, 9):
+            outcome = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            assert outcome.payload is None
+        assert "already answered" in (outcome.noop_reason_log or "")
+
+    def test_lost_enter_is_pressed_again(self, sidecar_dir: Path, machine: Any) -> None:
+        self._answer(sidecar_dir, machine)
+        payloads = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset)).payload
+            for offset in range(2, 4)
+        ]
+        assert "\r" in payloads
+
+    def test_occurrence_key_cap(self, sidecar_dir: Path, machine: Any) -> None:
+        stuck = _dialog(["Upgrade your plan", _TARGET], pointer=0)
+        payloads = [
+            _tick(sidecar_dir, machine, _dialog_facts(stuck, now=_NOW + offset)).payload
+            for offset in range(10)
+        ]
+        assert payloads.count("\x1b[B") == 6
+        assert payloads[-1] is None
+
+
+class TestHumanAndNearMiss:
+    def test_human_typing_abandons_the_window(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        typed = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1, raw=b"\x1b[B"))
+        assert typed.payload is None
+        later = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 2))
+        assert later.payload is None
+
+    def test_focus_reports_are_not_typing(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        outcome = _tick(
+            sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1, raw=b"\x1b[O\x1b[I")
+        )
+        assert outcome.payload == "\r"
+
+    def test_near_miss_screen_is_saved(self, sidecar_dir: Path, machine: Any) -> None:
+        screen = "What do you want to do?\n  1. Stop and wait for limit to re…\n" + _prompt_screen(
+            ""
+        )
+        outcome = _tick(sidecar_dir, machine, _dialog_facts(screen))
+        assert outcome.decision_value != _KEY
+        saved = sidecar_dir.parent / "supervise-rate-limit-unrecognised.txt"
+        assert saved.read_text(encoding="utf-8").endswith(screen[-200:])
+
+
+def _prompt_screen(text: str) -> str:
+    """The main prompt after the dialog closed, with ``text`` in the input box."""
+    rule = "─" * 40
+    return "\n".join([*_TRANSCRIPT, rule, f"> {text}".rstrip(), rule, "  ? for shortcuts"]) + "\n"
 
 
 def test_legacy_host_json_has_no_dump() -> None:

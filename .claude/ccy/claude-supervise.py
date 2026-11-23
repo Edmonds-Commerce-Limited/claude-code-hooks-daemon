@@ -2603,6 +2603,11 @@ class Decision(enum.Enum):
     WOULD_CRON_RECONCILE = "would-cron-reconcile"
     WOULD_PLUGIN_NOTICE = "would-plugin-notice"
     WOULD_SESSION_NOTICE = "would-session-notice"
+    # Plan 00523: a key typed into the rate-limit dialog (or the backspaces that
+    # clear its prefilled input box), and the `continue` sent once it has reset.
+    # Separate from WOULD_CONTINUE, which the host books as a post-compact resume.
+    WOULD_RATE_LIMIT_KEY = "would-rate-limit-key"
+    WOULD_RATE_LIMIT_CONTINUE = "would-rate-limit-continue"
 
 
 class SupervisorState(enum.Enum):
@@ -8685,6 +8690,242 @@ def _note_focus_hold(
     return machine.focus_hold_log(family, hold, now_wall=now_wall)
 
 
+# ── Plan 00523: answering the rate-limit dialog ─────────────────────────────
+_RATE_LIMIT_ENV_VAR = "CCY_RATE_LIMIT_DIALOG"
+_RATE_LIMIT_OFF_VALUES = frozenset({"off", "0", "false", "no"})
+_RATE_LIMIT_STATE_PREFIX = "supervise-rate-limit-dialog"
+_RATE_LIMIT_UNRECOGNISED_FILE = "supervise-rate-limit-unrecognised.txt"
+_RATE_LIMIT_UNRECOGNISED_BYTES = 16 * 1024
+_RATE_LIMIT_SETTLE_SECONDS = 3.0
+_RATE_LIMIT_OCCURRENCE_KEY_CAP = 6
+_RATE_LIMIT_WINDOW_KEY_CAP = 30
+_RATE_LIMIT_STATE_TTL_SECONDS = 86400.0
+_RATE_LIMIT_RESUME_GRACE_SECONDS = 120.0
+_RATE_LIMIT_CLEAR_ATTEMPTS = 2
+_RATE_LIMIT_PREFILL = "continue"
+_RATE_LIMIT_BACKSPACES = "\x7f" * len(_RATE_LIMIT_PREFILL)
+_RATE_LIMIT_ENTER = "\r"
+_RATE_LIMIT_UP = "\x1b[A"
+_RATE_LIMIT_DOWN = "\x1b[B"
+_RATE_LIMIT_KEY_NAMES = {
+    _RATE_LIMIT_ENTER: "[enter]",
+    _RATE_LIMIT_UP: "[up]",
+    _RATE_LIMIT_DOWN: "[down]",
+}
+_RATE_LIMIT_LOG = f"{_NOOP_LOG_PREFIX}: rate-limit dialog"
+# Terminal reports the host forwards from stdin that are not the human typing:
+# focus in/out and SGR mouse reports.
+_RATE_LIMIT_TERMINAL_REPORTS = re.compile(rb"\x1b\[[IO]|\x1b\[<[\d;]*[Mm]")
+_PHASE_ANSWERED = "answered"
+_PHASE_CLEARED = "cleared"
+_PHASE_DONE = "done"
+_PHASE_ABANDONED = "abandoned"
+
+
+def _rate_limit_dialog_enabled() -> bool:
+    """False when ``CCY_RATE_LIMIT_DIALOG`` says off; the feature is on by default."""
+    raw = os.environ.get(_RATE_LIMIT_ENV_VAR, "")
+    return raw.strip().lower() not in _RATE_LIMIT_OFF_VALUES
+
+
+def _rate_limit_state_path(status_dir: Path, child_pid: int) -> Path:
+    """The per-instance state file: the sidecar directory is shared by every terminal."""
+    return status_dir / f"{_RATE_LIMIT_STATE_PREFIX}.{child_pid}.json"
+
+
+def _load_rate_limit_state(path: Path, now: float) -> dict[str, object]:
+    """The stored state, or ``{}`` when absent, unreadable or a day past its window."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        append_worker_error(f"rate-limit dialog state unreadable, starting afresh: {exc}")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    anchor = data.get("window_reset")
+    if not isinstance(anchor, (int, float)):
+        anchor = data.get("window_opened")
+    if not isinstance(anchor, (int, float)) or now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS:
+        return {}
+    return data
+
+
+def _save_rate_limit_state(path: Path, state: dict[str, object]) -> None:
+    """Write the state atomically (temporary file, then replace)."""
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _human_typed(raw_b64: str) -> bool:
+    """True when the forwarded stdin holds anything but terminal reports.
+
+    Undecodable input counts as typing, which leaves the dialog to the human.
+    """
+    if not raw_b64:
+        return False
+    try:
+        raw = base64.b64decode(raw_b64)
+    except (ValueError, TypeError):
+        return True
+    return bool(_RATE_LIMIT_TERMINAL_REPORTS.sub(b"", raw))
+
+
+def _new_rate_limit_window(reset: float | None, now: float) -> dict[str, object]:
+    """Fresh state for a reset window (``reset`` None when no time was parsed)."""
+    return {
+        "window_reset": reset,
+        "window_opened": now,
+        "occurrence_open": False,
+        "occurrence_keys": 0,
+        "window_keys": 0,
+        "last_signature": "",
+        "phase": "",
+        "answered_at": None,
+        "cleared_at": None,
+        "clear_attempts": 0,
+    }
+
+
+def _save_unrecognised_screen(status_dir: Path, dump: str) -> None:
+    """Keep the last near-miss screen, so a real capture can replace the fixtures."""
+    path = status_dir / _RATE_LIMIT_UNRECOGNISED_FILE
+    tail = dump.encode("utf-8")[-_RATE_LIMIT_UNRECOGNISED_BYTES:].decode("utf-8", "ignore")
+    try:
+        if path.exists() and path.read_text(encoding="utf-8") == tail:
+            return
+        path.write_text(tail, encoding="utf-8")
+    except OSError as exc:
+        append_worker_error(f"could not save the unrecognised rate-limit screen: {exc}")
+
+
+def _rate_limit_dialog_step(
+    machine: CompactStateMachine,
+    *,
+    facts: TickFacts,
+    dry_run: bool,
+    status_dir: Path,
+) -> tuple[TickOutcome | None, str | None]:
+    """Answer the rate-limit dialog with ``Stop and wait for limit to reset``.
+
+    Returns ``(outcome, note)``. An outcome decides the whole tick (a key, or a
+    NOOP that keeps every other family from typing over the dialog). A note is
+    a NOOP log line for the caller to use only if nothing else claims the tick.
+    One arrow per tick moves the pointer; Enter is pressed only when the
+    pointer has sat on the target row for two ticks with the same rendering.
+    State is per Claude child and per reset window, so a window is answered
+    once; a dialog still shown after the Enter is pressed again (the host may
+    have held the Enter), within the key caps.
+    """
+    if facts.child_pid is None or not _rate_limit_dialog_enabled():
+        return None, None
+    path = _rate_limit_state_path(status_dir, facts.child_pid)
+    note: str | None = None
+    if _human_typed(facts.human_raw_input) and path.exists():
+        state = _load_rate_limit_state(path, facts.now_wall)
+        phase = state.get("phase")
+        if phase in (_PHASE_ANSWERED, _PHASE_CLEARED) or (
+            phase == "" and state.get("occurrence_open")
+        ):
+            state["phase"] = _PHASE_ABANDONED
+            _save_rate_limit_state(path, state)
+            note = f"{_RATE_LIMIT_LOG}: the human typed, left to them for this window"
+    dump = facts.screen_dump
+    if not dump:
+        return None, note
+    dialog = recognise_rate_limit_dialog(dump)
+    if dialog is None:
+        if path.exists():
+            state = _load_rate_limit_state(path, facts.now_wall)
+            if state.get("occurrence_open"):
+                state["occurrence_open"] = False
+                state["occurrence_keys"] = 0
+                _save_rate_limit_state(path, state)
+        if rate_limit_dialog_near_miss(dump):
+            _save_unrecognised_screen(status_dir, dump)
+            note = note or (
+                f"{_RATE_LIMIT_LOG}: a screen like it was not recognised, nothing typed "
+                f"(saved to {_RATE_LIMIT_UNRECOGNISED_FILE})"
+            )
+        return None, note
+
+    def hold(reason: str) -> TickOutcome:
+        return TickOutcome(
+            decision_value=Decision.NOOP.value,
+            reason=f"rate-limit dialog: {reason}",
+            payload=None,
+            submit=False,
+            consume_signal_path=None,
+            deferred_log=None,
+            machine_state=machine.export_state(),
+            noop_reason_log=f"{_RATE_LIMIT_LOG}: {reason}",
+        )
+
+    now = facts.now_wall
+    reset = parse_rate_limit_reset(dump, now)
+    state = _load_rate_limit_state(path, now)
+    if not state or (reset is not None and reset != state.get("window_reset")):
+        state = _new_rate_limit_window(reset, now)
+    phase = state.get("phase")
+    if not state.get("occurrence_open"):
+        if phase and state.get("window_reset") is not None:
+            return hold("already answered for this reset window"), None
+        if phase:
+            # No reset time was parsed: each occurrence is answered once.
+            state.update(phase="", answered_at=None, cleared_at=None, clear_attempts=0)
+        state.update(occurrence_open=True, occurrence_keys=0, last_signature="")
+    elif phase in (_PHASE_ABANDONED, _PHASE_DONE):
+        return hold("left to the human for this window"), None
+    if not (
+        facts.idle
+        and facts.input_line_empty
+        and facts.main_focus_confirmed
+        and facts.output_quiet_seconds >= _RATE_LIMIT_SETTLE_SECONDS
+    ):
+        _save_rate_limit_state(path, state)
+        return hold("shown, waiting for a settled screen and an idle human"), None
+    occurrence_keys = _coerce_int(state.get("occurrence_keys"))
+    window_keys = _coerce_int(state.get("window_keys"))
+    if (
+        occurrence_keys >= _RATE_LIMIT_OCCURRENCE_KEY_CAP
+        or window_keys >= _RATE_LIMIT_WINDOW_KEY_CAP
+    ):
+        _save_rate_limit_state(path, state)
+        return hold("key cap reached, nothing more typed"), None
+    signature = dialog.signature
+    if dialog.selected == dialog.target:
+        if signature != state.get("last_signature"):
+            state["last_signature"] = signature
+            _save_rate_limit_state(path, state)
+            return hold("pointer on the target row, confirming"), None
+        key = _RATE_LIMIT_ENTER
+    else:
+        key = _RATE_LIMIT_UP if dialog.selected > dialog.target else _RATE_LIMIT_DOWN
+        state["last_signature"] = signature
+    name = _RATE_LIMIT_KEY_NAMES[key]
+    if dry_run:
+        _save_rate_limit_state(path, state)
+        return hold(f"would press {name} (dry-run, nothing typed)"), None
+    state.update(occurrence_keys=occurrence_keys + 1, window_keys=window_keys + 1)
+    if key == _RATE_LIMIT_ENTER:
+        state.update(phase=_PHASE_ANSWERED, answered_at=now)
+    _save_rate_limit_state(path, state)
+    return (
+        TickOutcome(
+            decision_value=Decision.WOULD_RATE_LIMIT_KEY.value,
+            reason=f"rate-limit dialog -> pressing {name} toward {_RATE_LIMIT_TARGET_LABEL!r}",
+            payload=key,
+            submit=False,
+            consume_signal_path=None,
+            deferred_log=None,
+            machine_state=machine.export_state(),
+        ),
+        None,
+    )
+
+
 def _usage_pause_outcome(
     machine: CompactStateMachine,
     pause: UsagePauseRecord,
@@ -8944,6 +9185,13 @@ def decide_once(
     # path (the passed machine is already the live authoritative one).
     if facts.machine_state is not None:
         machine.import_state(facts.machine_state)
+    # Plan 00523: the rate-limit dialog, when on screen, decides the whole tick.
+    # Ahead of the usage pause: answering it types no prompt and wakes nothing.
+    rate_limit_outcome, rate_limit_note = _rate_limit_dialog_step(
+        machine, facts=facts, dry_run=dry_run, status_dir=status_dir
+    )
+    if rate_limit_outcome is not None:
+        return rate_limit_outcome
     # Plan 00479 Task 4.5: a live usage pause for this session decides the whole
     # tick (one /compact, then silence) and bypasses every injection family below.
     usage_pause = load_usage_pause(sidecar_dir, now=facts.now_wall, own_sessions=own_sessions)
@@ -9953,7 +10201,11 @@ def decide_once(
         deferred_log=deferred_log,
         machine_state=machine.export_state(),
         noop_reason_log=(
-            pause_lifted_log or modes_error_log or continue_skipped_log or noop_reason_log
+            pause_lifted_log
+            or modes_error_log
+            or continue_skipped_log
+            or noop_reason_log
+            or rate_limit_note
         ),
         confirm_enters=confirm_enters,
         model_switch_family=model_switch_family,
