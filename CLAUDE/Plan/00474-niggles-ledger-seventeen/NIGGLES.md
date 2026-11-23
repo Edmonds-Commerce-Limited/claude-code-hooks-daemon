@@ -8368,6 +8368,8 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a kept merged branch is not named in the pool warning's "Finish or remove first" line; green by sharing the keep filter the sweep already applies.
 
+**Addendum (fedora-desktop.1 relay, UNVERIFIED there; the same shape was seen in this seat on 2026-11-23)**: the warning names `branch-sweep --clean --remote --apply` as the fix even where the sweep refuses the branch (a container seat whose worktree is at a host path absent from the container, an origin copy that is unmerged, or a worktree under `.claude/worktrees/` holding unarchived scratch that only a terminal `worktree-reap --reap` can clear). Also, `branch-keep` marks a branch kept but the pool count still includes it, so keeping does not relieve the cap. The warning should name an action the seat can actually take, or say plainly that the host or the owner has to act.
+
 ### N715 — `branch-sweep` blames a removal for "1 path a removal would lose" when the worktree path is absent or unreadable
 
 **Source**: same relay (UNVERIFIED here).
