@@ -328,7 +328,8 @@ def _rows(document: object) -> list[object] | ProbeReason:
     if not isinstance(document, dict):
         return ProbeReason.SHAPE_MISMATCH
     version = document.get("v")
-    if isinstance(version, bool) or version not in SUPPORTED_VERSIONS:
+    # ``type() is int``: a bool or a float (``1.0 == 1``) is not a version.
+    if type(version) is not int or version not in SUPPORTED_VERSIONS:
         return ProbeReason.VERSION_MISMATCH
     teams = document.get("teams")
     if not isinstance(teams, list):
@@ -413,6 +414,17 @@ def _nesting_exceeds(text: str, limit: int) -> bool:
     return False
 
 
+class _DuplicateKeyError(Exception):
+    """An object in ``whoami`` output repeats a key (review F4)."""
+
+
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    document = dict(pairs)
+    if len(document) != len(pairs):
+        raise _DuplicateKeyError
+    return document
+
+
 def parse_whoami(text: str) -> SeatContext:
     """Parse ``teamchat whoami --json`` output (exit 0). Never raises.
 
@@ -424,7 +436,11 @@ def parse_whoami(text: str) -> SeatContext:
     if _nesting_exceeds(text, MAX_JSON_DEPTH):
         return SeatContext.unresolved(ProbeReason.NOT_JSON)
     try:
-        document: object = json.loads(text)
+        document: object = json.loads(text, object_pairs_hook=_unique_keys)
+    except _DuplicateKeyError:
+        # json keeps the LAST duplicate silently, so a repeated key could turn a
+        # seat into "no team"; a document that says two things is unknown.
+        return SeatContext.unresolved(ProbeReason.SHAPE_MISMATCH)
     except (ValueError, RecursionError, MemoryError) as exc:
         # json.JSONDecodeError is a ValueError; the text itself is not logged.
         _LOGGER.debug("teamchat seat probe: output not decodable (%s)", type(exc).__name__)
@@ -511,10 +527,21 @@ def _from_outcome(outcome: CommandOutcome) -> SeatContext:
     return SeatContext.unresolved(ProbeReason.COMMAND_FAILED)
 
 
+def _is_plain_absolute(path: str) -> bool:
+    """Absolute, already normal (no ``..``, ``.`` or ``//``), no control characters.
+
+    A trailing ``/`` is allowed. Review F6: the kit names the binary that runs.
+    """
+    trimmed = path.rstrip("/")
+    if not trimmed.startswith("/") or any(ord(char) < 0x20 or char == "\x7f" for char in path):
+        return False
+    return os.path.normpath(trimmed) == trimmed
+
+
 def _probe(signals: SessionSignals, runner: CommandRunner, timeout: float) -> SeatContext:
     if not signals.kit:
         return SeatContext.unresolved(ProbeReason.KIT_MISSING)
-    if not (signals.runtime.startswith("/") and signals.kit.startswith("/")):
+    if not (_is_plain_absolute(signals.runtime) and _is_plain_absolute(signals.kit)):
         return SeatContext.unresolved(ProbeReason.SIGNAL_NOT_A_PATH)
     outcome = runner(whoami_argv(signals.kit), {RUNTIME_ENV_VAR: signals.runtime}, timeout)
     return _from_outcome(outcome)
