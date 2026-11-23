@@ -1215,3 +1215,43 @@ class TestApplyVeto:
         assert injected is False
         assert typed == []
         assert machine.export_state() == before
+
+
+# ── Review I4: the "You've hit your ... limit" row is required ───────────────
+
+
+def _bare_dialog(transcript: list[str], options: list[str], footer: tuple[str, ...]) -> str:
+    """The dialog rows under ``transcript`` instead of the limit message."""
+    body = ["What do you want to do?"]
+    body += [
+        f"{_POINTER if index == 0 else ' '} {index + 1}. {label}"
+        for index, label in enumerate(options)
+    ]
+    return "\n".join([*transcript, *body, *footer]) + "\n"
+
+
+class TestLimitRowRequired:
+    def test_a_model_written_question_of_the_same_shape_is_not_recognised(self) -> None:
+        screen = _bare_dialog(
+            ["● I need a decision before going on.", ""],
+            [_TARGET, "Type something."],
+            ("Enter to select · Esc to cancel",),
+        )
+        assert _mod.recognise_rate_limit_dialog(screen) is None
+
+    def test_limit_row_scrolled_out_of_the_window_is_not_recognised(self) -> None:
+        filler = [f"● step {n}" for n in range(10)]
+        screen = _bare_dialog(
+            ["  ⎿  You've hit your 5-hour limit · resets 3pm (Europe/London)", *filler],
+            _STANDARD,
+            ("Enter to confirm · Esc to cancel",),
+        )
+        assert _mod.recognise_rate_limit_dialog(screen) is None
+
+    def test_limit_row_just_above_is_recognised(self) -> None:
+        screen = _bare_dialog(
+            ["  ⎿  You've hit your weekly limit · resets Nov 29, 3pm"],
+            _STANDARD,
+            ("Enter to confirm · Esc to cancel",),
+        )
+        assert _mod.recognise_rate_limit_dialog(screen) is not None

@@ -1317,6 +1317,10 @@ _RATE_LIMIT_MAX_TRAILING_ROWS = 4
 _RATE_LIMIT_OPTION_ROW = re.compile(
     rf"^(?P<pointer>{_RATE_LIMIT_POINTER}\s+)?(?P<number>\d+)\.\s+(?P<label>.+?)(?:\s+✔)?$"
 )
+# Review I4: the limit message must sit above the title, which a model's own
+# AskUserQuestion of the same shape lacks (a model can still write the row,
+# so this narrows the risk rather than closing it).
+_RATE_LIMIT_CONTEXT_ROW = re.compile(rf"You[{chr(0x2019)}']ve hit your\b.*\blimit\b")
 _RATE_LIMIT_COMPOSER_ROW = re.compile(rf"^[>{_RATE_LIMIT_POINTER}](?:\s(?P<text>.*))?$")
 _RATE_LIMIT_RESET_TIME = re.compile(
     r"resets\s+"
@@ -1363,7 +1367,8 @@ def _strip_screen_borders(row: str) -> str:
 def recognise_rate_limit_dialog(dump: str) -> RateLimitDialog | None:
     """The rate-limit dialog if it is the foreground of ``dump``, else None.
 
-    Strict, because a match types keys: the exact title row, options numbered
+    Strict, because a match types keys: a ``You've hit your ... limit`` row
+    above the title within the inspected rows, the exact title row, options numbered
     1..n straight after it, exactly one pointer row, exactly one row labelled
     ``Stop and wait for limit to reset``, and at most a few footer rows after
     the options, none of them a prompt row or another option. Only the bottom
@@ -1373,6 +1378,8 @@ def recognise_rate_limit_dialog(dump: str) -> RateLimitDialog | None:
     window = rows[-_RATE_LIMIT_WINDOW_ROWS:]
     titles = [index for index, row in enumerate(window) if row == _RATE_LIMIT_DIALOG_TITLE]
     if len(titles) != 1:
+        return None
+    if not any(_RATE_LIMIT_CONTEXT_ROW.search(row) for row in window[: titles[0]]):
         return None
     options: list[str] = []
     pointers: list[int] = []
