@@ -85,6 +85,9 @@ MODE_READERS: Final[dict[str, str]] = {
     "stop/idle_workable_issue_stop_gate.py": (
         "work-driving stop gate: stands aside for a blocked or paused session"
     ),
+    "stop/owner_wait_stop_guard.py": (
+        "awaiting-human is its trigger: a coordinator waiting on a human must have told them"
+    ),
     "stop/usage_pause_stop_gate.py": "the usage-paused mode's own stop gate",
     "subagent_stop/cron_subagent_stop_enforcer.py": "driver: no cron demand while usage-paused",
     "user_prompt_submit/failsafe_cron_blockage_suppressor.py": "drops ticks per the mode policy",

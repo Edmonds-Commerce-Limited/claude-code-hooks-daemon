@@ -21,6 +21,7 @@ history carrying the notify flag and the thread relation.
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol
@@ -32,6 +33,8 @@ from claude_code_hooks_daemon.utils.teamchat_seat import SessionSignals
 BUMP_PROGRAM: Final[str] = "teamchat bump"
 #: R11's form that bumps every open thread the seat asked.
 BUMP_ALL_WAITING: Final[str] = f"{BUMP_PROGRAM} --waiting"
+#: v1's notifying thread post (``pingbus thread --help``: ``--ask`` mentions the humans).
+NOTIFY_PROGRAM: Final[str] = "pingbus thread"
 NO_HISTORY_CONTRACT: Final[str] = (
     "no teamchat history contract exposing the notify flag and the m.thread relation "
     "is verified yet (Plan 00636 Task 1.2), so the questions history is unverified "
@@ -57,6 +60,10 @@ class OwnerWaitBus(Protocol):
         """The ONE command that re-pings every thread in ``thread_ids``, notifying."""
         ...
 
+    def notify_commands(self, team: str) -> tuple[str, str]:
+        """The notifying reply, as templates: (open question asked, owner-started message)."""
+        ...
+
 
 class TeamchatOwnerWaitBus:
     """The production adapter (see the module docstring for what is unverified)."""
@@ -71,3 +78,12 @@ class TeamchatOwnerWaitBus:
         if not printable or any(item is None for item in printable):
             return BUMP_ALL_WAITING
         return " ".join([BUMP_PROGRAM, *(item for item in printable if item is not None)])
+
+    def notify_commands(self, team: str) -> tuple[str, str]:
+        """v1 ``pingbus thread ... --ask`` (``--ask`` mentions the humans, so Element notifies).
+
+        Templates, not runnable lines: the guard could not read which threads
+        are open, so ``Q<n>`` and ``<event id>`` are left for the coordinator.
+        """
+        prefix = f"{NOTIFY_PROGRAM} --team {shlex.quote(team)}"
+        return (f"{prefix} Q<n> --ask", f"{prefix} --re <event id> --ask")

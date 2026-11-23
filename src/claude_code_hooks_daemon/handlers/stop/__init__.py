@@ -19,6 +19,7 @@ from .auto_continue_stop import AutoContinueStopHandler
 from .branch_stop_guard import BranchStopGuardHandler
 from .cron_stop_enforcer import CronStopEnforcerHandler
 from .idle_workable_issue_stop_gate import IdleWorkableIssueStopGateHandler
+from .owner_wait_stop_guard import OwnerWaitStopGuardHandler
 from .teammate_reap_advisor import TeammateReapAdvisorHandler
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "BranchStopGuardHandler",
     "CronStopEnforcerHandler",
     "IdleWorkableIssueStopGateHandler",
+    "OwnerWaitStopGuardHandler",
     "TeammateReapAdvisorHandler",
 ]

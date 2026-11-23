@@ -94,7 +94,9 @@ def _question(thread_id: str = "Q61", *, open_: bool = True) -> OwnerThread:
     return OwnerThread(thread_id, f"${thread_id}root", ThreadKind.SEAT_QUESTION, is_open=open_)
 
 
-def _bump(thread_id: str = "Q61", *, at: float = NOW - 60, notifying: bool | None = True) -> BusPost:
+def _bump(
+    thread_id: str = "Q61", *, at: float = NOW - 60, notifying: bool | None = True
+) -> BusPost:
     return BusPost(
         event_id="$p",
         timestamp=at,
@@ -145,7 +147,7 @@ def _run(handler: _Handler, hook_input: dict[str, Any]) -> Any:
 class TestIdentity:
     def test_wiring(self) -> None:
         handler = OwnerWaitStopGuardHandler()
-        assert handler.handler_id == HandlerID.OWNER_WAIT_STOP_GUARD.config_key
+        assert handler.handler_id == HandlerID.OWNER_WAIT_STOP_GUARD
         assert handler.priority == Priority.OWNER_WAIT_STOP_GUARD
         assert handler.terminal is False
         assert handler.scope is HandlerScope.MAIN
@@ -182,9 +184,7 @@ class TestDeny:
         bus = _FakeBus(_snapshot(_question(), posts=(_bump(at=old),)))
         assert _run(_Handler(_seats(), bus), _stop(tmp_path)).decision is Decision.DENY
 
-    def test_owned_question_is_required_even_when_the_stop_names_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_owned_question_is_required_even_when_the_stop_names_none(self, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question("Q70")))
         text = "STOPPING BECAUSE: [awaiting-human] the owner must choose."
         result = _run(_Handler(_seats(), bus), _stop(tmp_path, text))
@@ -253,7 +253,6 @@ class TestAllow:
         hook_input = _stop(tmp_path, stop_hook_active=True)
         assert _run(handler, hook_input) is None
         assert handler.resolved == 0
-
 
 
 class _Broken(_FakeBus):
@@ -354,9 +353,7 @@ class TestUnreadableBusRefuse:
         handler = _Handler(None, _FakeBus(BusUnreadable("history timed out")))
         assert _run(handler, _stop(tmp_path, stop_hook_active=True)) is None
 
-    def test_stale_threads_and_an_unreadable_team_are_both_reported(
-        self, tmp_path: Path
-    ) -> None:
+    def test_stale_threads_and_an_unreadable_team_are_both_reported(self, tmp_path: Path) -> None:
         class _PerTeam(_FakeBus):
             def read(self, team: str, signals: SessionSignals) -> BusSnapshot | BusUnreadable:
                 self.reads.append(team)
@@ -417,9 +414,7 @@ class TestWaitingDetection:
         bus = _FakeBus(_snapshot(_question()))
         assert _run(_Handler(_seats(), bus), _stop(tmp_path, text)).decision is Decision.DENY
 
-    def test_waiting_phrase_inside_a_code_fence_is_not_a_declaration(
-        self, tmp_path: Path
-    ) -> None:
+    def test_waiting_phrase_inside_a_code_fence_is_not_a_declaration(self, tmp_path: Path) -> None:
         text = "STOPPING BECAUSE: done.\n```\nSTOPPING BECAUSE: waiting on the owner\n```"
         handler = _Handler(None, _FakeBus(_snapshot(_question())))
         assert _run(handler, _stop(tmp_path, text)) is None

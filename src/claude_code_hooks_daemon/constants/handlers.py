@@ -1271,6 +1271,13 @@ class HandlerID:
         config_key="cron_subagent_stop_enforcer",
         display_name="cron-subagent-stop-enforcer",
     )
+    # Plan 00636 Task 2.1a: a coordinator seat's stop that waits on a human is
+    # refused until each open owner-facing thread got a recent notifying post.
+    OWNER_WAIT_STOP_GUARD = HandlerIDMeta(
+        class_name="OwnerWaitStopGuardHandler",
+        config_key="owner_wait_stop_guard",
+        display_name="owner-wait-stop-guard",
+    )
     # Plan 00470 Phase 7: an idle stop that defers workable issues to the next
     # cron tick is refused on facts (work queue, cached workable issues).
     IDLE_WORKABLE_ISSUE_STOP_GATE = HandlerIDMeta(
