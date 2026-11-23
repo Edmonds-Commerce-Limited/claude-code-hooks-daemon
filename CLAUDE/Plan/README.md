@@ -46,6 +46,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - Not Started (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
+- [00638: hooks screen install and missing binary surface](00638-hooks-screen-install-and-missing-binary-surface/PLAN.md) - Not Started (child of the 00523 line, context 00630: release deploy installs verified hooks-screen-<triple> to untracked/bin; missing binary surfaced to a person, not only decision.log)
+
 - [00637: coordinator no-value remote branch retire](00637-coordinator-no-value-remote-branch-retire/PLAN.md) - Not Started (child (g) of 00630: logged coordinator retire of an unmerged remote branch on top of branch-reject, owner ruling Q17; depends on 00631)
 
 - [00464: commit gates judge the checkout the command runs in](00464-commit-gates-judge-the-checkout-the-command-runs-in/PLAN.md) - Not Started (from 00422 N23: commit gates pick their repo from the payload `cwd`, which for a teammate is the main checkout, so a worktree commit is judged on main's staged tree — false denies, and its own content, secret terms included, never checked)
@@ -335,7 +337,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 526 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 86 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 88 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
