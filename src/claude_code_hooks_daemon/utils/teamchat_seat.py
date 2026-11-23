@@ -45,6 +45,8 @@ import json
 import logging
 import os
 import re
+import selectors
+import signal
 import subprocess  # nosec B404 - fixed argv list, no shell
 import threading
 import time
@@ -138,6 +140,7 @@ class CommandStatus(StrEnum):
     NOT_FOUND = "not_found"
     TIMEOUT = "timeout"
     EXITED = "exited"  # ran and exited non-zero; ``exit_code`` says how
+    TOO_LARGE = "too_large"  # stdout passed MAX_OUTPUT_BYTES; the group was killed
 
 
 @dataclass(frozen=True)
@@ -478,31 +481,78 @@ def probe_environment(env_overlay: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def _kill_group(process: subprocess.Popen[bytes]) -> None:
+    """SIGKILL ``process``'s whole group, then reap the leader.
+
+    Called only before the leader is reaped, so the group id is still its own.
+    """
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        _LOGGER.debug("teamchat seat probe: process group already gone")
+    process.wait()
+
+
+def _read_capped(process: subprocess.Popen[bytes], deadline: float) -> bytes | CommandStatus:
+    """Stdout up to EOF, or TIMEOUT at ``deadline``, or TOO_LARGE past the cap."""
+    stdout = process.stdout
+    if stdout is None:  # pragma: no cover - Popen was given stdout=PIPE
+        return b""
+    chunks: list[bytes] = []
+    size = 0
+    with selectors.DefaultSelector() as selector:
+        selector.register(stdout, selectors.EVENT_READ)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                return CommandStatus.TIMEOUT
+            chunk = os.read(stdout.fileno(), MAX_OUTPUT_BYTES + 1 - size)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > MAX_OUTPUT_BYTES:
+                return CommandStatus.TOO_LARGE
+
+
 def default_command_runner(
     args: Sequence[str], env_overlay: Mapping[str, str], timeout: float
 ) -> CommandOutcome:
-    """Run ``args`` (no shell) in :func:`probe_environment` of ``env_overlay``."""
-    env = probe_environment(env_overlay)
+    """Run ``args`` (no shell) in :func:`probe_environment` of ``env_overlay``.
+
+    Review F5: the command gets no stdin (``/dev/null``) and no terminal, runs
+    in its own session, and its stdout is read to :data:`MAX_OUTPUT_BYTES`
+    only. On timeout or over-cap output the whole process group is killed, so
+    no grandchild outlives the probe.
+    """
+    deadline = time.monotonic() + timeout
     try:
-        completed = subprocess.run(  # nosec B603 - fixed argv, no shell
+        process = subprocess.Popen(  # nosec B603 - fixed argv, no shell
             list(args),
-            env=env,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout,
-            check=False,
+            env=probe_environment(env_overlay),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
     except FileNotFoundError:
         return CommandOutcome(CommandStatus.NOT_FOUND)
-    except subprocess.TimeoutExpired:
-        return CommandOutcome(CommandStatus.TIMEOUT)
     except OSError as exc:
         _LOGGER.debug("teamchat seat probe: command could not start (%s)", type(exc).__name__)
         return CommandOutcome(CommandStatus.NOT_FOUND)
-    if completed.returncode != 0:
-        return CommandOutcome(CommandStatus.EXITED, exit_code=completed.returncode)
-    return CommandOutcome(CommandStatus.OK, completed.stdout, 0)
+    with process:
+        output = _read_capped(process, deadline)
+        if isinstance(output, CommandStatus):
+            _kill_group(process)
+            return CommandOutcome(output)
+        try:
+            returncode = process.wait(max(deadline - time.monotonic(), 0.0))
+        except subprocess.TimeoutExpired:
+            _kill_group(process)
+            return CommandOutcome(CommandStatus.TIMEOUT)
+    if returncode != 0:
+        return CommandOutcome(CommandStatus.EXITED, exit_code=returncode)
+    return CommandOutcome(CommandStatus.OK, output.decode("utf-8", errors="replace"), 0)
 
 
 # --- probe -----------------------------------------------------------------------
@@ -520,6 +570,8 @@ def _from_outcome(outcome: CommandOutcome) -> SeatContext:
         return SeatContext.unresolved(ProbeReason.COMMAND_NOT_FOUND)
     if outcome.status is CommandStatus.TIMEOUT:
         return SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
+    if outcome.status is CommandStatus.TOO_LARGE:
+        return SeatContext.unresolved(ProbeReason.OUTPUT_TOO_LARGE)
     if outcome.exit_code == EXIT_NO_SESSION:
         return SeatContext.absent(ProbeReason.NO_SESSION)
     if outcome.exit_code == EXIT_UNREADABLE:
