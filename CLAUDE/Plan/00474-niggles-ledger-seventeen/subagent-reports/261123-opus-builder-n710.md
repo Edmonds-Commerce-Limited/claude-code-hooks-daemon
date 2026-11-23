@@ -40,7 +40,16 @@ The new file `tests/unit/handlers/pre_tool_use/test_secret_file_guard_glob_later
 - fail-closed cases: too many linked matches, too many listings, and an unlistable directory;
 - unchanged allows: literal paths, plain matches, no-match globs, and a quoted glob.
 
-The new tests and the link-loop tests pass. The full `test_secret_file_guard*.py` set was run; the results are in the PR.
+The new tests and the link-loop tests pass.
+
+**Existing tests that encoded the hole, now re-pinned.** Two fixtures asserted ALLOW for `cat */*`:
+
+- `test_secret_file_guard_link_resolution.py::TestGlobWildcardOnTheLinkComponent`, from both checkouts;
+- `test_secret_file_guard_cwd_fail_closed.py::TestGlobFromADirectoryThatIsALinkOut`, which also covered `cd clean && cat */*`.
+
+In both fixtures `*/*` matches `inner/ilink`, a link to the protected dummy, so the command really reads it. Both are now DENY. In the cwd fixture, the literal `cat inner/ilink` and `cd clean && cat inner/ilink` sit beside them as proof that the glob is judged like its literal, which was already denied.
+
+**One regression, fixed.** N117 expects a name past NAME_MAX (ENAMETOOLONG) to be "absent", and it now is again.
 
 ## Notes
 

@@ -4185,8 +4185,9 @@ _WORD_GLOB_TOO_WIDE: Final[str] = "a globbed word matches more than the guard fo
 _WORD_GLOB_UNREADABLE: Final[str] = (
     "a globbed word passes a directory or an entry that cannot be read"
 )
-#: What a stat or listing may answer for a path that is simply not there.
-_ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR})
+#: What a stat or listing may answer for a path that is simply not there; a name
+#: past NAME_MAX or PATH_MAX names nothing the shell could open either (N117).
+_ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ENAMETOOLONG})
 _GLOBSTAR: Final[str] = "**"
 
 

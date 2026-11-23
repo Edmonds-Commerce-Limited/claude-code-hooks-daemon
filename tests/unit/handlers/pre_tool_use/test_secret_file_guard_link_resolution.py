@@ -396,6 +396,9 @@ class TestGlobWildcardOnTheLinkComponent:
             "grep -r x dl*",
             "grep -r x pl*/sub",
             "(cd inner && cat idl*/*)",
+            # Ledger 00474 N710: `*/*` matches `inner/ilink`, a link to the
+            # protected file, so it reads it exactly as `cat inner/ilink` would.
+            "cat */*",
         ],
     )
     def test_wildcard_link_component_denied(
@@ -403,7 +406,7 @@ class TestGlobWildcardOnTheLinkComponent:
     ) -> None:
         assert _bash(checkouts, command) is Decision.DENY
 
-    @pytest.mark.parametrize("command", ["cat */*", "cat cle*/*", "ls cle*/*.txt"])
+    @pytest.mark.parametrize("command", ["cat cle*/*", "ls cle*/*.txt"])
     def test_wildcard_over_clean_or_nameless_allowed(
         self, checkouts: Checkouts, project: Path, command: str
     ) -> None:

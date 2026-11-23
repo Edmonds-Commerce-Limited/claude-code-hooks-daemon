@@ -354,10 +354,29 @@ class TestGlobFromADirectoryThatIsALinkOut:
 
     @pytest.mark.parametrize(
         "command",
-        ["cat *", "cat */*", "cd clean && cat *", "cd clean && cat */*", "cd inner && cat p*"],
+        ["cat *", "cd clean && cat *", "cd inner && cat p*"],
     )
     def test_glob_read_from_the_project_allowed(self, tree: Tree, command: str) -> None:
         assert _decision(tree, command) is Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat */*",
+            "cat inner/ilink",
+            "cd clean && cat */*",
+            "cd clean && cat inner/ilink",
+        ],
+    )
+    def test_a_glob_matching_a_link_in_the_project_is_denied_like_its_literal(
+        self, tree: Tree, command: str
+    ) -> None:
+        """Ledger 00474 N710: `*/*` matches `inner/ilink`, a link to a protected file.
+
+        It is judged as the literal path naming that match, from the same
+        directories (the move's start is one of them, as for the literal).
+        """
+        assert _decision(tree, command) is Decision.DENY
 
 
 class TestComputedDirectoryChange:
