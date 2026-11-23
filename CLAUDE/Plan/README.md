@@ -154,7 +154,7 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00502: merge requires approval](00502-merge-requires-approval/PLAN.md) - Not Started (owner rulings: the merge gate becomes "merge requires APPROVAL" with a configurable human or agent approver, default a clean sub-agent at minimum model `opus` or a named project review sub-agent; the core design is a daemon-written, tip-bound approval record the merging agent cannot forge, plus migration from the old human-approval boolean)
 
-- [00523: supervisor answers the rate limit menu](00523-supervisor-answers-the-rate-limit-menu/PLAN.md) - In Progress (owner request: answer Claude Code's rate-limit menu with "Stop and wait for limit to reset", then send one `continue` after the reset; built and pushed on `plan-00523-rate-limit-dialog`, live after the next ccy relaunch; independent review done and its findings fixed, PR open; open: full gate in CI, merge, live capture (Phase 1), Phase 2b, armed state (Task 2.4))
+- [00523: supervisor answers the rate limit menu](00523-supervisor-answers-the-rate-limit-menu/PLAN.md) - In Progress (owner request: answer Claude Code's rate-limit menu with "Stop and wait for limit to reset", then send one `continue` after the reset; merged via PR #223 (`42486817b`), live after the next ccy relaunch; open: live capture (Phase 1), Phase 2b, armed state (Task 2.4), live verify (Task 3.1), review follow-ups F1-F4)
 
 - [00524: foreground blocking wait goes to the background](00524-foreground-blocking-wait-goes-to-the-background/PLAN.md) - Not Started (#117, agent-needs-human: deny or advise a foreground wait-only Bash call; the existing liveness-loop fix text recommends one)
 

@@ -110,12 +110,24 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   answered, the session waits, and work resumes at the reset.
 - [x] ✅ **Task 3.2**: Add a release note for the new supervisor behaviour
   (`025-supervisor-answers-the-rate-limit-dialog.md`).
-- [ ] 🔄 **Task 3.3**: Independent review and the full QA gate, then merge.
+- [x] ✅ **Task 3.3**: Independent review and the full QA gate, then merge.
   The review is done
   (`untracked/agent-reports/261123-00523-independent-review.md`, not tracked),
   and every finding I1-I5 and L1-L4 is fixed test-first. L5 (one `--dump`
-  per output burst) is accepted. A pull request is open. The full gate runs in
-  GitHub CI. The merge is left to the owner.
+  per output burst) is accepted. PR #223 merged to main as `42486817b` (merge
+  commit, CI green). The opus delta review verdict was safe
+  (`subagent-reports/261123-opus-delta-review-pr223.md`). The Performance
+  sweeps flake `test_many_appends_each_run_are_judged_quickly` failed once on
+  this PR (1.68 s against 1.5 s) and passed on re-run.
+
+### Follow-ups from the delta review (open)
+
+- [ ] ⬜ **F1**: the sweep deletes open key-capped state at anchor+48h, though
+  load keeps it.
+- [ ] ⬜ **F2**: a held Enter skips the host apply veto.
+- [ ] ⬜ **F3**: the empty-box re-check abandons the window instead of retrying.
+- [ ] ⬜ **F4**: a same-window re-answer after a D2 take-back, within the key
+  cap.
 
 ## Success Criteria
 
@@ -157,6 +169,11 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   - L2, reset clamped to 300 s past and 8 days ahead: `0edb3bff3`
   - L3, awaiting-human test: `2aabccc73`
   - docs: `a3118578e`
+
+- Merged: PR #223, merge commit `42486817b`. Status stays In Progress: the
+  host part takes effect only after the next ccy relaunch, and the
+  `hooks-screen` build is the owner's v2-window action, deliberately not built
+  in /workspace.
 
   The host part (the screen dump and the apply veto) takes effect on the next
   ccy relaunch. Phase 1 (live capture), Phase 2b and Task 2.4 are still open.
