@@ -177,6 +177,12 @@ class TestParseCite:
             ("alpha", "$bad id"),
             ("alpha", "$bad\nid"),
             ("alpha", "$" + "a" * 300),
+            # Path-shaped ids (review finding 6): no `/`, `.` or `~` at all.
+            ("alpha", "$abc/../../x"),
+            ("alpha", "$abc/def"),
+            ("alpha", "$.."),
+            ("alpha", "$a.b"),
+            ("alpha", "$~user"),
             ("", fx.HUMAN_ID),
             ("-x", fx.HUMAN_ID),
             ("al pha", fx.HUMAN_ID),

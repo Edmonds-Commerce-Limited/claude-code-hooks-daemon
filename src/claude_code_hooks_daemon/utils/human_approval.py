@@ -56,7 +56,10 @@ VERIFY_ANSWER_VERSION: Final[int] = 1
 DEFAULT_RECORD_TTL_SECONDS: Final[float] = 300.0
 
 #: A teamchat event id. The leading ``$`` means it can never be read as an option.
-_EVENT_ID: Final[re.Pattern[str]] = re.compile(r"\$[A-Za-z0-9._~+/=-]{1,255}")
+#: No ``/``, ``.`` or ``~``, so an id can never be read as a path. Provisional:
+#: the real alphabet awaits the verify contract (fedora-desktop issue 369), and
+#: over-rejecting only refuses a cite.
+_EVENT_ID: Final[re.Pattern[str]] = re.compile(r"\$[A-Za-z0-9_+=-]{1,255}")
 #: The attached question tag (``Q7``). Anything else is dropped, never kept.
 _QUESTION_TAG: Final[re.Pattern[str]] = re.compile(r"Q[0-9]{1,9}")
 
