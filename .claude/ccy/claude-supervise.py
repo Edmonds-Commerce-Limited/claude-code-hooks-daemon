@@ -223,9 +223,10 @@ import traceback
 import tty
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Protocol, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if TYPE_CHECKING:
     from types import FrameType
@@ -1301,6 +1302,170 @@ def screen_shows_busy_footer(dump: str) -> bool:
     """True when the bottom rows of a hooks-screen ``--dump`` name work in flight."""
     rows = [row for row in dump.splitlines() if row.strip()]
     return any(_SCREEN_BUSY_FOOTER.search(row) for row in rows[-_SCREEN_FOOTER_ROWS:])
+
+
+# Plan 00523: Claude Code's rate-limit options dialog, read from the rendered
+# screen. Strings are from the Claude Code 2.1.330 bundle. The title alone is
+# shared with the trial-expired dialog, so the exact target label is required.
+_RATE_LIMIT_DIALOG_TITLE = "What do you want to do?"
+_RATE_LIMIT_TARGET_LABEL = "Stop and wait for limit to reset"
+_RATE_LIMIT_NEAR_MISS_PREFIX = "Stop and wait for limit to re"
+_RATE_LIMIT_POINTER = chr(0x276F)  # Claude Code's Select pointer glyph
+_RATE_LIMIT_BORDER_CHARS = "│╭╮╰╯─"
+_RATE_LIMIT_WINDOW_ROWS = 14
+_RATE_LIMIT_MAX_TRAILING_ROWS = 4
+_RATE_LIMIT_OPTION_ROW = re.compile(
+    rf"^(?P<pointer>{_RATE_LIMIT_POINTER}\s+)?(?P<number>\d+)\.\s+(?P<label>.+?)(?:\s+✔)?$"
+)
+_RATE_LIMIT_COMPOSER_ROW = re.compile(rf"^[>{_RATE_LIMIT_POINTER}](?:\s(?P<text>.*))?$")
+_RATE_LIMIT_RESET_TIME = re.compile(
+    r"resets\s+"
+    r"(?:(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2}),\s+(?:(?P<year>\d{4}),\s+)?)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?(?P<ampm>am|pm)"
+    r"(?:\s+\((?P<zone>[^)]+)\))?(?:\s|$)"
+)
+_RATE_LIMIT_MONTHS = {
+    name: index
+    for index, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        start=1,
+    )
+}
+# A yearless date this far in the past is next year's (the dialog never shows
+# a reset that has already happened).
+_RATE_LIMIT_YEAR_ROLL_SECONDS = 30 * 86400.0
+
+
+@dataclass(frozen=True)
+class RateLimitDialog:
+    """The rate-limit dialog as the screen shows it: rows, pointer row, target row."""
+
+    options: tuple[str, ...]
+    selected: int
+    target: int
+
+    @property
+    def signature(self) -> str:
+        """Identifies the rendering, so a key is only confirmed on a stable screen."""
+        return f"{self.selected}|" + "\x1f".join(self.options)
+
+
+def _strip_screen_borders(row: str) -> str:
+    """A row with box-drawing borders and padding removed from both edges."""
+    return row.strip().strip(_RATE_LIMIT_BORDER_CHARS).strip()
+
+
+def recognise_rate_limit_dialog(dump: str) -> RateLimitDialog | None:
+    """The rate-limit dialog if it is the foreground of ``dump``, else None.
+
+    Strict, because a match types keys: the exact title row, options numbered
+    1..n straight after it, exactly one pointer row, exactly one row labelled
+    ``Stop and wait for limit to reset``, and at most a few footer rows after
+    the options, none of them a prompt row or another option. Only the bottom
+    rows are inspected, so a dialog quoted in the transcript is not matched.
+    """
+    rows = [cleaned for cleaned in map(_strip_screen_borders, dump.splitlines()) if cleaned]
+    window = rows[-_RATE_LIMIT_WINDOW_ROWS:]
+    titles = [index for index, row in enumerate(window) if row == _RATE_LIMIT_DIALOG_TITLE]
+    if len(titles) != 1:
+        return None
+    options: list[str] = []
+    pointers: list[int] = []
+    position = titles[0] + 1
+    while position < len(window):
+        match = _RATE_LIMIT_OPTION_ROW.match(window[position])
+        if match is None:
+            break
+        if int(match.group("number")) != len(options) + 1:
+            return None
+        if match.group("pointer"):
+            pointers.append(len(options))
+        options.append(match.group("label").strip())
+        position += 1
+    trailing = window[position:]
+    if len(trailing) > _RATE_LIMIT_MAX_TRAILING_ROWS:
+        return None
+    for row in trailing:
+        if _RATE_LIMIT_OPTION_ROW.match(row) or _RATE_LIMIT_COMPOSER_ROW.match(row):
+            return None
+    targets = [index for index, label in enumerate(options) if label == _RATE_LIMIT_TARGET_LABEL]
+    if len(pointers) != 1 or len(targets) != 1:
+        return None
+    return RateLimitDialog(options=tuple(options), selected=pointers[0], target=targets[0])
+
+
+def rate_limit_dialog_near_miss(dump: str) -> bool:
+    """True when the target label (or a truncation of it) shows but no dialog is recognised."""
+    return _RATE_LIMIT_NEAR_MISS_PREFIX in dump and recognise_rate_limit_dialog(dump) is None
+
+
+def parse_rate_limit_reset(dump: str, now: float) -> float | None:
+    """When the limit resets, from the last ``You've hit your ... · resets <time>`` row.
+
+    Formats: ``3pm``, ``3:30pm``, ``Nov 29, 3pm``, ``Jan 2, 2027, 3:30pm``, each
+    with an optional ``(Area/City)`` zone (no zone means local time). A time
+    alone already past means tomorrow; a yearless date more than 30 days past
+    means next year. Anything else, an unknown zone included, gives None.
+    """
+    rows = [row for row in dump.splitlines() if "hit your" in row and "resets " in row]
+    if not rows:
+        return None
+    match = _RATE_LIMIT_RESET_TIME.search(rows[-1])
+    if match is None:
+        return None
+    zone: tzinfo | None = None
+    if match.group("zone"):
+        try:
+            zone = ZoneInfo(match.group("zone"))
+        except (ZoneInfoNotFoundError, ValueError):
+            return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    if not 1 <= hour <= 12 or minute > 59:
+        return None
+    hour = hour % 12 + (12 if match.group("ampm") == "pm" else 0)
+    today = datetime.fromtimestamp(now, zone)
+    try:
+        if match.group("month") is None:
+            day = today.date()
+            candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+            if candidate.timestamp() < now:
+                day += timedelta(days=1)
+                candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+            return candidate.timestamp()
+        month = _RATE_LIMIT_MONTHS.get(match.group("month"))
+        if month is None:
+            return None
+        day_of_month = int(match.group("day"))
+        if match.group("year") is not None:
+            year = int(match.group("year"))
+            return datetime(year, month, day_of_month, hour, minute, tzinfo=zone).timestamp()
+        candidate = datetime(today.year, month, day_of_month, hour, minute, tzinfo=zone)
+        if candidate.timestamp() < now - _RATE_LIMIT_YEAR_ROLL_SECONDS:
+            candidate = datetime(today.year + 1, month, day_of_month, hour, minute, tzinfo=zone)
+        return candidate.timestamp()
+    except ValueError:
+        return None
+
+
+def rate_limit_composer_text(dump: str) -> str | None:
+    """The text in Claude Code's input box: ``""`` when empty, None when none is visible.
+
+    The box is the last prompt row (``>`` or the pointer glyph) whose previous
+    non-blank row is a horizontal rule.
+    """
+    previous = ""
+    found: str | None = None
+    for raw in dump.splitlines():
+        row = raw.strip()
+        if not row:
+            continue
+        stripped = row.strip("│").strip()
+        match = _RATE_LIMIT_COMPOSER_ROW.match(stripped)
+        if match is not None and previous and set(previous) <= set("─╭╮╰╯"):
+            found = (match.group("text") or "").strip()
+        previous = row
+    return found
 
 
 class ScreenFocusCheck:
@@ -2618,6 +2783,11 @@ class TickFacts:
     # the screen buffer. False -- not idle -- from a host that predates it, so
     # idle compaction fails closed there.
     true_idle: bool = False
+    # Plan 00523: the bottom rows of the hooks-screen ``--dump`` rendering, sent
+    # only once output has settled, so the worker can recognise the rate-limit
+    # dialog. Empty from a legacy host or with no binary, which fails closed
+    # (nothing is answered).
+    screen_dump: str = ""
 
 
 @dataclass(frozen=True)
@@ -10126,6 +10296,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "focus_latch_bytes": facts.focus_latch_bytes,
             "child_pid": facts.child_pid,
             "true_idle": facts.true_idle,
+            "screen_dump": facts.screen_dump,
         }
     )
 
@@ -10150,6 +10321,7 @@ def _facts_from_json(line: str) -> TickFacts:
         focus_latch_bytes=str(data.get("focus_latch_bytes", "")),
         child_pid=int(data["child_pid"]) if data.get("child_pid") is not None else None,
         true_idle=bool(data.get("true_idle", False)),
+        screen_dump=str(data.get("screen_dump", "")),
     )
 
 
