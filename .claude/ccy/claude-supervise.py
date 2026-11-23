@@ -8976,6 +8976,30 @@ def _rate_limit_dialog_step(
     )
 
 
+def _rate_limit_prefill_blocks(facts: TickFacts, status_dir: Path) -> bool:
+    """True while Claude Code's pre-filled ``continue`` may sit in the input box.
+
+    The host's ``input_line_empty`` tracks typed keys only, so it cannot see
+    the pre-fill; anything typed now would be appended to it. Blocks while a
+    resume is pending (phase ``answered`` or ``cleared``, whatever the screen
+    shows) and, in any later phase, while the screen still shows the pre-fill.
+    """
+    if facts.child_pid is None or not _rate_limit_dialog_enabled():
+        return False
+    path = _rate_limit_state_path(status_dir, facts.child_pid)
+    if not path.exists():
+        return False
+    state = _load_rate_limit_state(path, facts.now_wall)
+    phase = state.get("phase")
+    if not phase or state.get("occurrence_open"):
+        return False
+    if phase in (_PHASE_ANSWERED, _PHASE_CLEARED):
+        return True
+    return bool(facts.screen_dump) and (
+        rate_limit_composer_text(facts.screen_dump) == _RATE_LIMIT_PREFILL
+    )
+
+
 @dataclass(frozen=True)
 class _RateLimitResume:
     """What the late resume types: the box-clearing backspaces or the ``continue``."""
@@ -9147,7 +9171,7 @@ def _usage_pause_outcome(
                 status_dir=status_dir,
             ),
         )
-    if not facts.input_line_empty:
+    if not facts.input_line_empty or _rate_limit_prefill_blocks(facts, status_dir):
         return outcome(
             Decision.NOOP,
             held,
@@ -9311,9 +9335,14 @@ def decide_once(
     # Plan 00537: and nothing is typed while the human's own keys say focus may
     # be off the main prompt; the sends that bypass `can_inject` are gated on
     # `focus_hold` explicitly below.
-    can_inject = facts.idle and facts.input_line_empty and facts.main_focus_confirmed
-    focus_hold = _focus_hold_of(facts)
     status_dir = sidecar_dir.parent
+    # Plan 00523: Claude Code's pre-filled `continue` after a rate-limit answer
+    # is invisible to `input_line_empty`; every family waits for the resume.
+    prefill_blocks = _rate_limit_prefill_blocks(facts, status_dir)
+    can_inject = (
+        facts.idle and facts.input_line_empty and facts.main_focus_confirmed and not prefill_blocks
+    )
+    focus_hold = _focus_hold_of(facts)
 
     def _held(family: str) -> str | None:
         if focus_hold is None:
@@ -9964,6 +9993,10 @@ def decide_once(
                     deferred_log, noop_reason_log = _held("model restore"), None
                 elif facts.idle and not facts.input_line_empty:
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (model restore pending)"
+                elif prefill_blocks:
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: model restore held behind the rate-limit continue"
+                    )
                 else:
                     noop_reason_log = f"{_NOOP_LOG_PREFIX}: model restore pending but session busy"
             else:

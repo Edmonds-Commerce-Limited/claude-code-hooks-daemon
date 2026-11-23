@@ -790,3 +790,96 @@ class TestHostScreenDump:
         monkeypatch.setenv("CCY_RATE_LIMIT_DIALOG", "off")
         assert _mod._rate_limit_screen_dump(check, output_quiet_seconds=10.0) == ""
         assert _runs(tmp_path) == 0
+
+
+# ── Open risk 1: nothing else is typed onto Claude Code's pre-filled box ─────
+
+
+def _prefill_state(status_dir: Path, *, phase: str, reset: float) -> None:
+    """A closed occurrence for this child, in ``phase``, resetting at ``reset``."""
+    state = _mod._new_rate_limit_window(reset, reset - 3600.0)
+    state.update(phase=phase)
+    _mod._save_rate_limit_state(_mod._rate_limit_state_path(status_dir, _CHILD), state)
+
+
+class TestPrefillHold:
+    """A restore or usage-pause compact must wait while ``continue`` sits in the box."""
+
+    def _ready(self, tmp_path: Path) -> tuple[Path, Any, float]:
+        from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
+        from tests.unit.supervise import test_model_restore as restore
+
+        sidecar_dir = tmp_path / SIGNAL_SUBDIR
+        machine, later = restore._restore_ready_machine(sidecar_dir)
+        return sidecar_dir, machine, later
+
+    def _facts(self, later: float, dump: str) -> Any:
+        return _mod.TickFacts(
+            now_wall=later,
+            idle=True,
+            input_line_empty=True,
+            human_compact_submitted=False,
+            work_idle=True,
+            child_pid=_CHILD,
+            screen_dump=dump,
+            output_quiet_seconds=_SETTLED,
+        )
+
+    def test_control_restore_fires_without_rate_limit_state(self, tmp_path: Path) -> None:
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        outcome = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("")))
+        assert outcome.decision_value == "would-model"
+
+    @pytest.mark.parametrize("phase", ["answered", "cleared"])
+    def test_restore_held_while_the_continue_is_pending(self, tmp_path: Path, phase: str) -> None:
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        _prefill_state(tmp_path, phase=phase, reset=later + 3600.0)
+        for dump in (_prompt_screen("continue"), ""):
+            outcome = _tick(sidecar_dir, machine, self._facts(later, dump))
+            assert outcome.payload is None
+            assert outcome.decision_value != "would-model"
+
+    @pytest.mark.parametrize("phase", ["abandoned", "done"])
+    def test_restore_held_while_the_prefill_is_left_in_the_box(
+        self, tmp_path: Path, phase: str
+    ) -> None:
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        _prefill_state(tmp_path, phase=phase, reset=later - 600.0)
+        outcome = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("continue")))
+        assert outcome.payload is None
+
+    def test_restore_fires_once_the_continue_was_sent(self, tmp_path: Path) -> None:
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        _prefill_state(tmp_path, phase="done", reset=later - 600.0)
+        outcome = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("")))
+        assert outcome.decision_value == "would-model"
+
+    def test_usage_pause_compact_held_while_the_continue_is_pending(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils import usage_pause
+        from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+        from tests.unit.supervise import test_model_restore as restore
+
+        sidecar_dir, machine, later = self._ready(tmp_path)
+        usage_pause.write_usage_pause(
+            tmp_path,
+            UsagePause(
+                session_id=restore._SESSION,
+                paused_at=later - 60.0,
+                resume_at=later + 3600.0,
+                window=usage_pause.WINDOW_FIVE_HOUR,
+                used_percentage=93.0,
+                ceiling=90.0,
+                reason="five_hour window at 93% (ceiling 90%)",
+            ),
+        )
+        assert _mod.load_usage_pause(sidecar_dir, now=later, own_sessions=None) is not None
+        control = _tick(
+            sidecar_dir,
+            _mod.CompactStateMachine(_mod.CompactPolicy()),
+            self._facts(later, _prompt_screen("")),
+        )
+        assert control.payload is not None
+        assert control.payload.startswith("/compact")
+        _prefill_state(tmp_path, phase="answered", reset=later + 3600.0)
+        held = _tick(sidecar_dir, machine, self._facts(later, _prompt_screen("continue")))
+        assert held.payload is None
