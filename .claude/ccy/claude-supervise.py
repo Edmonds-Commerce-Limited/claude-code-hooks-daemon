@@ -383,7 +383,28 @@ _SPINNER_INTERVAL_SECONDS = 0.08
 _BANNER_RULE = "━" * 46
 
 
-def render_startup_banner(*, version: str, armed: bool) -> str:
+def rate_limit_armed_status(*, dry_run: bool, screen_found: bool) -> str:
+    """One status line: is the rate-limit dialog answerer armed in this session?
+
+    Plan 00523 Task 2.4, for Plan 00632's readiness check. ``CCY_RATE_LIMIT_DIALOG``
+    turns it off (``off``, ``0``, ``false``, ``no``); dry-run logs without typing.
+    The answerer reads the dialog from a hooks-screen render, so with no binary
+    (``screen_found`` False) it is INERT whatever else is set.
+    """
+    prefix = "rate-limit dialog answerer: "
+    if not _rate_limit_dialog_enabled():
+        return f"{prefix}OFF ({_RATE_LIMIT_ENV_VAR} is off)"
+    if not screen_found:
+        return (
+            f"{prefix}INERT (no hooks-screen binary found: set {_SCREEN_BINARY_ENV_VAR} "
+            "or build it; the dialog is not read, nothing is typed)"
+        )
+    if dry_run:
+        return f"{prefix}dry-run (logs what it would press, types nothing)"
+    return f"{prefix}ARMED (answers the dialog, resumes after the reset)"
+
+
+def render_startup_banner(*, version: str, armed: bool, extra_lines: tuple[str, ...] = ()) -> str:
     """Return the multi-line ECHD ccy supervisor startup banner.
 
     Pure and deterministic: it takes the version + mode and returns text. The
@@ -410,6 +431,7 @@ def render_startup_banner(*, version: str, armed: bool) -> str:
             f"┏━ ECHD ⟐ ccy Supervisor {_BANNER_RULE[24:]}",
             f"┃  v{version}  ·  wrapping claude on a PTY",
             f"┃  {mode}",
+            *(f"┃  {line}" for line in extra_lines),
             "┗━ starting up ⏳",
         )
     )
@@ -1251,6 +1273,13 @@ def resolve_screen_binary(
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
     return None
+
+
+def rate_limit_session_status(*, dry_run: bool) -> str:
+    """``rate_limit_armed_status`` for this process: looks the screen binary up, never runs it."""
+    project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
+    found = resolve_screen_binary(project_dir, os.environ) is not None
+    return rate_limit_armed_status(dry_run=dry_run, screen_found=found)
 
 
 class ScreenBuffer:
@@ -8779,6 +8808,15 @@ _RATE_LIMIT_START_SLACK_SECONDS = 5.0
 _RATE_LIMIT_RESUME_GRACE_SECONDS = 120.0
 _RATE_LIMIT_RECHECK_SECONDS = 600.0
 _RATE_LIMIT_CLEAR_ATTEMPTS = 2
+# Enters the host took back (vetoed or held) per reset window before the
+# dialog is left alone: a take-back means the Enter never landed, so one
+# retry is right, but a dialog that keeps swallowing them is not ours to push.
+_RATE_LIMIT_TAKEBACK_CAP = 2
+# How long the status line shows that the cap tripped (the dialog stays the human's).
+_RATE_LIMIT_TAKEBACK_NOTICE_SECONDS = 600.0
+# Output within this long of a vetoed resume send is the redraw that caused
+# the veto, not fresh activity that needs the post-reset re-check.
+_RATE_LIMIT_VETO_REDRAW_SLACK_SECONDS = 5.0
 _RATE_LIMIT_PREFILL = "continue"
 _RATE_LIMIT_BACKSPACES = "\x7f" * len(_RATE_LIMIT_PREFILL)
 # The dim suggestion Claude Code draws in an empty input box, which
@@ -8895,8 +8933,21 @@ def _rate_limit_window_anchor(data: dict[str, object]) -> float | None:
     return None
 
 
+def _rate_limit_state_child_running(state_file: Path) -> bool:
+    """True when the child named by ``<prefix>.<pid>-<start ticks>.json`` still runs."""
+    ident = state_file.name.removeprefix(f"{_RATE_LIMIT_STATE_PREFIX}.").removesuffix(".json")
+    pid_text, _, ticks_text = ident.partition("-")
+    if not (pid_text.isdigit() and ticks_text.isdigit()):
+        return False
+    start = _rate_limit_child_start(int(pid_text))
+    return start is not None and start[0] == int(ticks_text)
+
+
 def _sweep_rate_limit_states(status_dir: Path, now: float) -> None:
     """Delete state files whose window ended more than twice the state TTL ago.
+
+    A state whose dialog is still open and that holds no resume (taken over,
+    key-capped, or awaiting its take-back) is kept, as the load keeps it.
 
     Delta review D1: judged on the STORED window, not the mtime. An answered
     state is not rewritten while it waits for its reset, which may be 8 days
@@ -8911,6 +8962,17 @@ def _sweep_rate_limit_states(status_dir: Path, now: float) -> None:
             except ValueError:
                 data = None
             anchor = _rate_limit_window_anchor(data) if isinstance(data, dict) else None
+            if (
+                isinstance(data, dict)
+                and data.get("occurrence_open")
+                and data.get("phase") not in (_PHASE_ANSWERED, _PHASE_CLEARED)
+                and _rate_limit_state_child_running(stale)
+            ):
+                # F1: the same keep rule as `_load_rate_limit_state`; a taken
+                # over or key-capped dialog still on screen holds its window.
+                # Only for a child that still runs: one quit with the dialog
+                # open can never close the occurrence, so its file ages out.
+                continue
             if anchor is None:
                 anchor = stale.stat().st_mtime
             if now - anchor > 2 * _RATE_LIMIT_STATE_TTL_SECONDS:
@@ -9121,6 +9183,21 @@ def _rate_limit_dialog_step(
             state["last_signature"] = signature
             _save_rate_limit_state(path, state)
             return hold("pointer on the target row, confirming"), None
+        if _coerce_int(state.get("enter_takebacks")) >= _RATE_LIMIT_TAKEBACK_CAP:
+            if not state.get("takeback_cap_noted"):
+                state["takeback_cap_noted"] = True
+                write_status_message(
+                    status_dir,
+                    text=(
+                        "rate-limit dialog: Enter did not land twice, "
+                        "the supervisor leaves it to you"
+                    ),
+                    expires_at=now + _RATE_LIMIT_TAKEBACK_NOTICE_SECONDS,
+                    level=_STATUS_LEVEL_WARNING,
+                    now=now,
+                )
+            _save_rate_limit_state(path, state)
+            return hold("Enter taken back too often this window, nothing more typed"), None
         key = _RATE_LIMIT_ENTER
     else:
         key = _RATE_LIMIT_UP if dialog.selected > dialog.target else _RATE_LIMIT_DOWN
@@ -9231,7 +9308,15 @@ def _rate_limit_resume_step(
     # a bounded re-check: only a settled screen still showing the pre-fill
     # proves nothing was submitted; an empty box stays ambiguous until the
     # deadline abandons the window.
-    recheck = phase == _PHASE_ANSWERED and facts.output_quiet_seconds < now - reset
+    # F3: output within a few seconds of a send the host vetoed on a redraw is
+    # that redraw, not fresh activity; the send is retried, not re-checked.
+    vetoed_at = state.get("resume_vetoed_at")
+    own_redraw = isinstance(vetoed_at, (int, float)) and (
+        now - facts.output_quiet_seconds <= vetoed_at + _RATE_LIMIT_VETO_REDRAW_SLACK_SECONDS
+    )
+    recheck = (
+        phase == _PHASE_ANSWERED and facts.output_quiet_seconds < now - reset and not own_redraw
+    )
     if recheck:
         until = state.get("resume_recheck_until")
         if not isinstance(until, (int, float)):
@@ -10730,11 +10815,9 @@ def _rate_limit_apply_veto(
     pointer on ``Stop and wait for limit to reset``. ``_rate_limit_host_veto``
     takes back the phase a vetoed Enter, clear or ``continue`` recorded, so
     the next tick decides afresh; a vetoed arrow only spends its key-cap slot.
-    An Enter held by the focus model in ``_apply_worker_outcome`` never
-    reaches this veto and keeps ``answered``: the dialog still shown gets the
-    Enter again, but one closed some other way meanwhile is still treated as
-    answered (a held focus means the human is elsewhere in the UI, a much
-    narrower path than a redraw).
+    A send held by the focus model in ``_apply_worker_outcome`` never reaches
+    this veto; ``on_held`` (``_rate_limit_host_held``) takes its phase back the
+    same way.
     """
     if outcome.payload is None or outcome.decision_value not in (
         Decision.WOULD_RATE_LIMIT_KEY.value,
@@ -10766,8 +10849,32 @@ def _rate_limit_undo_vetoed_enter(status_dir: Path, child_pid: int, now_wall: fl
     state = _load_rate_limit_state(path, now_wall, child_pid)
     if state.get("phase") != _PHASE_ANSWERED or not state.get("occurrence_open"):
         return
-    state.update(phase="", answered_at=None)
+    state.update(
+        phase="",
+        answered_at=None,
+        enter_takebacks=_coerce_int(state.get("enter_takebacks")) + 1,
+    )
     _save_vetoed_rate_limit_state(path, state)
+
+
+def _rate_limit_host_held(
+    outcome: TickOutcome, *, status_dir: Path, child_pid: int, now_wall: float
+) -> None:
+    """Take back what the worker recorded for a rate-limit send the focus model held.
+
+    F2: a held Enter was never typed, so it must not keep ``answered`` (which
+    would hold every family and earn a late ``continue`` for a dialog nobody
+    answered). Same take-back as a vetoed send.
+    """
+    if outcome.payload is None or outcome.decision_value not in (
+        Decision.WOULD_RATE_LIMIT_KEY.value,
+        Decision.WOULD_RATE_LIMIT_CONTINUE.value,
+    ):
+        return
+    if outcome.payload == _RATE_LIMIT_ENTER:
+        _rate_limit_undo_vetoed_enter(status_dir, child_pid, now_wall)
+    else:
+        _rate_limit_undo_vetoed_resume(outcome, status_dir, child_pid, now_wall)
 
 
 def _rate_limit_undo_vetoed_resume(
@@ -10795,6 +10902,7 @@ def _rate_limit_undo_vetoed_resume(
         state["phase"] = _PHASE_CLEARED if attempts else _PHASE_ANSWERED
     else:
         return
+    state["resume_vetoed_at"] = now_wall
     _save_vetoed_rate_limit_state(path, state)
 
 
@@ -10825,10 +10933,7 @@ def _rate_limit_host_veto(
     )
     if veto is None:
         return None
-    if outcome.payload == _RATE_LIMIT_ENTER:
-        _rate_limit_undo_vetoed_enter(status_dir, child_pid, now_wall)
-    else:
-        _rate_limit_undo_vetoed_resume(outcome, status_dir, child_pid, now_wall)
+    _rate_limit_host_held(outcome, status_dir=status_dir, child_pid=child_pid, now_wall=now_wall)
     return veto
 
 
@@ -10842,6 +10947,7 @@ def _apply_worker_outcome(
     main_focus_confirmed: bool,
     now_wall: float,
     apply_veto: Callable[[TickOutcome], str | None] | None = None,
+    on_held: Callable[[TickOutcome], None] | None = None,
 ) -> bool:
     """Perform a worker-decided outcome on the host and adopt what it decided.
 
@@ -10851,10 +10957,14 @@ def _apply_worker_outcome(
     model is not cleared, so the held send is retried rather than recorded as
     sent -- a held `/compact` would otherwise leave the machine awaiting a
     compaction that never started. ``apply_veto`` (Plan 00523) works the same
-    way: a reason from it types nothing and adopts nothing.
+    way: a reason from it types nothing and adopts nothing. ``on_held`` (Plan
+    00523 F2) is told of a payload the focus model held, so the worker's
+    record of a rate-limit send that was never typed can be taken back.
     """
     if outcome.payload is not None and not main_focus_confirmed:
         _apply_decision(outcome, master_writer=master_writer, log=log, main_focus_confirmed=False)
+        if on_held is not None:
+            on_held(outcome)
         return False
     veto = apply_veto(outcome) if apply_veto is not None else None
     if veto is not None:
@@ -12535,6 +12645,8 @@ def supervise(
             f"supervisor active ({mode}); polling {sidecar_dir} every "
             f"{poll_seconds}s; wrapping: {argv}"
         )
+        # Plan 00523 Task 2.4: readable without a TTY, unlike the banner.
+        log.write(rate_limit_session_status(dry_run=dry_run))
     arm_restarted_notice(machine, argv, marker_path=_restarted_marker_path(), now=time.time())
     # Plan 00487: host-side plugin handling is contained as a whole. The first
     # unexpected exception in it switches the handling off for the rest of the
@@ -12569,7 +12681,11 @@ def supervise(
     if _should_show_banner(sys.stderr):
         # Blank lines above and below set the banner apart from whatever the
         # terminal was showing, so the startup notice reads as a distinct block.
-        banner = render_startup_banner(version=__version__, armed=not dry_run)
+        banner = render_startup_banner(
+            version=__version__,
+            armed=not dry_run,
+            extra_lines=(rate_limit_session_status(dry_run=dry_run),),
+        )
         sys.stderr.write("\n\n" + banner + "\n\n")
         sys.stderr.flush()
         spinner = _StartupSpinner(sys.stderr)
@@ -12761,6 +12877,12 @@ def supervise(
                     stdin_pending=_fd_readable(resolved_stdin_fd),
                     child_output_pending=_fd_readable(master_fd),
                     shipped_dump=shipped_dump,
+                    status_dir=sidecar_dir.parent,
+                    child_pid=pid,
+                    now_wall=time.time(),
+                ),
+                on_held=lambda held: _rate_limit_host_held(
+                    held,
                     status_dir=sidecar_dir.parent,
                     child_pid=pid,
                     now_wall=time.time(),
