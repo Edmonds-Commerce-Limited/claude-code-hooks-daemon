@@ -8377,3 +8377,37 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: Low (wrong diagnosis; the safe default of keeping it is right).
 
 **Status**: ⬜ Open, non-blocking, queued behind v2. Test-first: red test that a registered worktree whose directory is absent or unreadable is reported as "path missing or unreadable", not as unsaved work; fail closed (keep it) unchanged.
+
+### N716 — secret-file guard globbing is narrower than bash for `nocaseglob`, extglob words the regex cannot capture, and implicit `dotglob`
+
+**Source**: independent Opus review of PR 230 (`subagent-reports/261123-opus-independent-review-pr230.md`, findings 1, 2 and 3). The reviewer's reproducers are bash-confirmed by the reviewer and UNVERIFIED here. All three are pre-existing: main allows every reproducer too. PR 230 (N710) deliberately does not fix them.
+
+**Evidence (reviewer's)**, run from a project root where `kit/bin/late` (and `kit/.hid/late2`) link to a protected dummy file:
+
+1. `nocaseglob` is never modelled (`_component_regex` and fnmatch match case-sensitively; `default_glob_semantics` in `shell_snapshot.py` only considers `globstar` and `dotglob`). Allowed on both routes, with and without the index: `shopt -s nocaseglob; cat kit/B?N/late`, `shopt -s nocaseglob; cat kit/bin/L*`, `shopt -s nocaseglob; cat kit/[B]in/late`, `shopt -s nocaseglob; cat K*/bin/late`.
+2. Extglob words that `_EXTGLOB_WORD` (run over `mask_quoted` text) does not capture whole, so the expansion is never reached. With `shopt -s extglob` on its own line, allowed on both routes: `cat "k"it/@(bin|zz)/late` (captured `"it/@(bin|zz)/late`), `cat k\it/@(bin|zz)/late` (captured `t/@(bin|zz)/late`), `cat kit/@("bin"|zz)/late` (nothing captured), `cat kit/@(b@(i)n)/late` and `cat kit/*(@(b)in)/late` (only the inner group), and `env BASHOPTS=extglob bash -c 'cat kit/@(b@(i)n)/late'` (nothing captured).
+3. Implicit `dotglob`: `_SWITCHES_OPTIONS` (`shell_snapshot.py`) recognises only `shopt` and `-O`/`+O`. Allowed on the Write-script route and on the Bash route without an index: `GLOBIGNORE=zz; cat kit/*/late2` and `env BASHOPTS=dotglob bash -c 'cat kit/*/late2'`. With a fresh index the Bash route denies only through the index fallback. Not bash-checked: `env BASHOPTS=globstar bash -c 'cat kit/**/late3'`.
+
+**Severity**: HIGH (security): each reads a protected file through a link by a glob the guard reads more narrowly than bash.
+
+**Status**: ⬜ Open. Fix by widening only, test-first: (1) case-insensitive component regexes whenever the command or script can enable `nocaseglob` (any `shopt`, `-O`, `BASHOPTS`) or bash defaults are uncertain; (2) fail closed on any unquoted `[?*+@!](`, take the whole word as the real tokenizer splits it, dequote it and widen every extglob component to any name, never carving the word with a regex; (3) count an assignment to `GLOBIGNORE`, or `BASHOPTS` in the environment, as switching options, the way `shopt` does now.
+
+### N717 — perf sweep `test_a_big_alias_chain_is_judged_quickly` passes its 1.5 s bound by a thin margin on CI
+
+**Source**: PR 230 CI, run 45246717371, job "Performance sweeps": failed at 1.518 s against `scaled_cpu_seconds(1.5)`, the first test of `test_subagent_full_qa_blocker.py` to run in a 65k-item collection. Main's perf sweep passed on the run before (job 137929069171).
+
+**Evidence**: the test exercises `subagent_full_qa_blocker.find_full_qa_invocation` only; a profile of the call spends no measurable time in `secret_file_matching` (PR 230's module), and locally the call takes 0.08-0.12 s on both main and the branch. So the CI time is runner load or heap size, not the change under test.
+
+**Severity**: Low (an intermittent red check that costs a diagnosis and a re-run).
+
+**Status**: ⬜ Open. Do not loosen the bound blindly: first measure on CI whether the first-in-file position (cold caches, a large heap after collecting 65k items) explains the time, e.g. by warming up with one small call before timing.
+
+### N718 — for a non-root user, a mid-word glob after a variable (`cat $V/*/name`) is always denied once the glob walk reaches `/root`
+
+**Source**: PR 230 CI, run 45254007557, both unit legs (`subagent-reports/261123-pr230-unit-failure.md`). The test failure is fixed on the branch by making the test hermetic. The behaviour below is left as it is.
+
+**Evidence**: the guard also judges `$V/*/name` with `$V` empty, so it judges `/*/name`, and `_GlobListings._probe` lstat-s `/<each top-level dir>/name`. As non-root, `lstat('/root/name')` is EACCES, and that fails closed (`a globbed word passes a directory or an entry that cannot be read`). This is consistent with the literal route's N663 rule (`cat /root/name` also fails closed), but every `$V/*/name` command becomes a false positive on a normal, non-root host. bash's own glob reads that EACCES as "no match". Sibling: `test_bash_command[double_star_glob]` in the hostile-input sweep walks the real `/`, so its verdict is host-tree dependent. It passes CI at `GLOB_LISTING_CAP` 4096, flips locally at 600, and `chdir` cannot isolate it.
+
+**Severity**: Medium (usability; fail-closed, so not a leak).
+
+**Status**: ⬜ Open. Decide whether an EACCES on a probe of a spelled path (not a listing) counts as no match, mirroring bash. If yes: test-first, uid-independent (monkeypatch `os.lstat` to raise EACCES), keep a reachable link denied, and get a security delta review because it loosens a fail-closed branch.
