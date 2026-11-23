@@ -72,8 +72,9 @@ from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.session_modes import declared_blocked_entry
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
+    STAND_IN_DELAY_OPTION,
     delay_hours_problem,
-    stand_in_verdict,
+    stand_in_requirement,
     validate_delay_hours,
 )
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
@@ -85,9 +86,6 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
-
-# The handler option whose setter validates the stand-in delay.
-_STAND_IN_DELAY_OPTION = "stand_in_delay_hours"
 
 # Plan 00181: stop-events.jsonl is append-only and was never bounded (644 KB
 # observed). Cap it after each write; on breach keep the newest half so a busy
@@ -704,10 +702,10 @@ class AutoContinueStopHandler(StopHandlerBase):
         the whole handler.
         """
         problems: dict[str, str] = {}
-        if _STAND_IN_DELAY_OPTION in options:
-            problem = delay_hours_problem(options[_STAND_IN_DELAY_OPTION])
+        if STAND_IN_DELAY_OPTION in options:
+            problem = delay_hours_problem(options[STAND_IN_DELAY_OPTION])
             if problem is not None:
-                problems[_STAND_IN_DELAY_OPTION] = problem
+                problems[STAND_IN_DELAY_OPTION] = problem
         return problems
 
     def _default_config_loader(self) -> Config:
@@ -730,12 +728,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         and under focus. A BLOCKED mode does not silence it: this very stop
         enters awaiting-human, and the stand-in is what answers it (Plan 00501).
         """
-        autonomy = autonomy_verdict(hook_input)
-        if not autonomy.environment_allowed or autonomy.session.focus_task is not None:
-            return None
-        if not self._config_loader().persistent_crons.enabled:
-            return None
-        verdict = stand_in_verdict(hook_input, delay_hours=self._stand_in_delay_hours)
+        verdict = stand_in_requirement(
+            hook_input, config=self._config_loader(), delay_hours=self._stand_in_delay_hours
+        )
         if verdict is None:
             return None
         return verdict.under_rule(self._rules_by_id[RuleID.STOP_STAND_IN_MISSING])

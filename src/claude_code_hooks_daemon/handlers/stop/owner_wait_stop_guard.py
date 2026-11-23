@@ -32,7 +32,10 @@ block. It also stands aside while the session is usage-paused.
 terminal ``auto_continue_stop`` (15 by default, 10 in this project's config);
 non-terminal, so those still run. Because
 it runs before ``auto_continue_stop`` enters the awaiting-human mode, it reads
-the current message for the declaration as well as the mode.
+the current message for the declaration as well as the mode. The chain shows
+only the first deny, so on an ``[awaiting-human]`` stop this deny also carries
+auto_continue_stop's stand-in requirement (one shared gate,
+:func:`utils.stand_in_cron.stand_in_requirement`).
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ from typing import Any, Final
 
 from pydantic import ValidationError
 
-from claude_code_hooks_daemon.config.models import TeamSeatConfig
+from claude_code_hooks_daemon.config.models import Config, TeamSeatConfig
 from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -56,6 +59,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectConte
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.daemon.synthetic_traffic import event_synthetic_source
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _declares_human_blocked,
     _declaring_lines,
@@ -72,6 +76,10 @@ from claude_code_hooks_daemon.utils.owner_wait_check import (
     BusSnapshot,
     printable_thread_id,
     stale_threads,
+)
+from claude_code_hooks_daemon.utils.stand_in_cron import (
+    configured_delay_hours,
+    stand_in_requirement,
 )
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
@@ -169,6 +177,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         self._bus: OwnerWaitBus = TeamchatOwnerWaitBus()
         self._clock: Callable[[], float] = time.time
         self._resolver: SeatContextResolver | None = None
+        self._config_loader: Callable[[], Config] = self._default_config_loader
 
     def get_default_enabled(self) -> bool:
         """On by default; inert outside a teamchat coordinator seat."""
@@ -208,19 +217,41 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
 
     # -- seams -------------------------------------------------------------------
 
-    def _team_seat_config(self) -> TeamSeatConfig:
+    def _default_config_loader(self) -> Config:
         root = getattr(self, "_workspace_root", None)
-        project_root = Path(root) if root is not None else ProjectContext.project_root()
-        config_path = project_root / ".claude" / "hooks-daemon.yaml"
         try:
-            return load_config_cached(config_path).team_seat
+            project_root = Path(root) if root is not None else ProjectContext.project_root()
+            return load_config_cached(project_root / ".claude" / "hooks-daemon.yaml")
         except (ValidationError, OSError, ValueError, RuntimeError) as exc:
             log_and_continue(
                 logger,
                 exc,
-                reason=f"an unloadable config {config_path} falls back to the default team_seat block, which still probes a session carrying a teamchat runtime",
+                reason="an unlocatable or unloadable project config falls back to the defaults: the team_seat block still probes a session carrying a teamchat runtime, and no stand-in cron is asked for",
             )
-            return default_config().team_seat
+            return default_config()
+
+    def _team_seat_config(self) -> TeamSeatConfig:
+        return self._config_loader().team_seat
+
+    def _stand_in_reason(self, hook_input: dict[str, Any]) -> str | None:
+        """auto_continue_stop's stand-in requirement for this stop, which this deny would hide.
+
+        The chain shows only the first restrictive reason and the re-stop is a
+        confirmed re-entry, so unless this deny carries it the stand-in cron is
+        never asked for (Plan 00636 F1). Same gate as auto_continue_stop: the
+        current message declares ``[awaiting-human]`` and the event is real.
+        """
+        if event_synthetic_source(hook_input) is not None:
+            return None
+        reader = get_transcript_reader(hook_input)
+        text = reader.get_last_assistant_text() if reader is not None else ""
+        if not text or not _declares_human_blocked(text):
+            return None
+        config = self._config_loader()
+        requirement = stand_in_requirement(
+            hook_input, config=config, delay_hours=configured_delay_hours(config)
+        )
+        return None if requirement is None else requirement.reason
 
     def _resolve_seats(self, signals: SessionSignals) -> SeatContext:
         """The 00631 seat context for this session (TTL-cached by the resolver)."""
@@ -306,7 +337,11 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
                 stale.append(_Stale(gate.team, ids))
         if not stale and not unconfirmed:
             return BlockingResult(decision=Decision.ALLOW)
-        return BlockingResult.deny(self._render(stale, unconfirmed, window)).under_rule(_RULE)
+        reason = self._render(stale, unconfirmed, window)
+        stand_in = self._stand_in_reason(hook_input)
+        if stand_in:
+            reason = f"{reason}\n\nALSO REQUIRED BEFORE STOPPING AGAIN:\n\n{stand_in}"
+        return BlockingResult.deny(reason).under_rule(_RULE)
 
     def _render(self, stale: list[_Stale], unconfirmed: list[_Unconfirmed], window: float) -> str:
         minutes = int(window // _SECONDS_PER_MINUTE)
