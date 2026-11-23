@@ -242,6 +242,47 @@ class TestNoAnswer:
         assert "SYNTHETIC-SECRET-VALUE" not in text
 
 
+# --- hostile output: never raises, always unknown (review F1) -----------------------
+
+
+class TestHostileOutput:
+    def test_deep_nesting_never_raises(self) -> None:
+        context = parse_whoami("[" * 200000)
+        assert context.state is SeatState.UNRESOLVED
+
+    def test_depth_guard_rejects_a_small_deep_document(self) -> None:
+        text = '{"v": 1, "teams": ' + "[" * 40 + "]" * 40 + "}"
+        context = parse_whoami(text)
+        assert context.state is SeatState.UNRESOLVED
+        assert context.reason is ProbeReason.NOT_JSON
+
+    def test_brackets_inside_strings_do_not_count_as_depth(self) -> None:
+        deep_text = "[" * 200 + '\\"{' * 50
+        context = parse_whoami(fx.whoami(fx.seat("alpha", "worker"), note=deep_text))
+        assert context.role_for_team("alpha").holds_role("worker")
+
+    def test_recursion_error_from_the_decoder_is_caught(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def explode(*_args: Any, **_kwargs: Any) -> Any:
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(teamchat_seat.json, "loads", explode)
+        context = parse_whoami(fx.WORKER_ONLY)
+        assert context.state is SeatState.UNRESOLVED
+        assert context.reason is ProbeReason.NOT_JSON
+
+    def test_oversized_output_is_unknown(self) -> None:
+        padding = "x" * teamchat_seat.MAX_OUTPUT_BYTES
+        context = parse_whoami(fx.whoami(fx.seat("alpha", "worker"), pad=padding))
+        assert context.state is SeatState.UNRESOLVED
+        assert context.reason is ProbeReason.OUTPUT_TOO_LARGE
+
+    def test_probe_of_deep_output_never_raises(self) -> None:
+        context = probe("[" * 200000)
+        assert context.state is SeatState.UNRESOLVED
+
+
 # --- roles and duties ------------------------------------------------------------
 
 

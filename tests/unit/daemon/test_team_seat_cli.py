@@ -104,6 +104,13 @@ class TestText:
         assert "unresolved" in out
         assert "command_timeout" in out
 
+    @pytest.mark.parametrize("text", ["[" * 200000, '{"v": 1, "teams": ' + "[" * 100 + "]" * 100])
+    def test_hostile_output_exits_unresolved_without_raising(self, text: str) -> None:
+        """Review F1: a deeply nested document is exit 3, never a traceback."""
+        code, out = _run(_ok(text))
+        assert code == EXIT_UNRESOLVED
+        assert "unresolved" in out
+
     def test_exit_69_is_absent(self) -> None:
         code, out = _run(_Runner(CommandOutcome(CommandStatus.EXITED, exit_code=69)))
         assert code == EXIT_OK
