@@ -515,6 +515,7 @@ class ConfigTemplate:
             "  # handlers on nitpick. cron_stop_enforcer sits BELOW it (priority 7)\n"
             "  # deliberately, so it is not shadowed.\n"
             "  stop:\n"
+            "    owner_wait_stop_guard: {enabled: true, priority: 3}  # Refuse a coordinator seat's waiting stop until each open owner thread got a notifying bus post. Inert unless this seat probes as a team coordinator\n"
             "    idle_workable_issue_stop_gate: {enabled: true, priority: 4}  # Refuse an idle stop while a workable issue is cached and nothing is in flight. Inert unless the project declares an issue-sdlc persistent cron\n"
             "    goal_loop_detector: {enabled: true, priority: 5}  # Detect a session looping on an unmet goal: goal-blocks it and clears the goal (mode: act, the default; observe only logs); never blocks a Stop\n"
             "    usage_pause_stop_gate: {enabled: true, priority: 6}  # A usage-paused session stops only once its crons are exactly the one resume cron. Inert unless a pause is recorded\n"

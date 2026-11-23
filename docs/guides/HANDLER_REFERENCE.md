@@ -4846,6 +4846,36 @@ branches:
     mode: block
 ```
 
+#### owner_wait_stop_guard
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `owner_wait_stop_guard` |
+| **Priority**   | 3                       |
+| **Type**       | Blocking                |
+| **Event**      | Stop                    |
+
+**Description:** A coordinator seat that stops waiting on a human must have told them on the team bus. A main-thread stop whose `STOPPING BECAUSE:` text waits on a human (or whose session is in the awaiting-human mode) is refused (rule `R-STOP-OWNER-WAIT-UNBUMPED`) unless every open owner-facing thread the seat asked or owns got a NOTIFYING post from this seat, with a real body, within `window_minutes`. The refusal names the threads and the `pingbus thread ... --ask` commands, never restates the waits. It applies only per team where the role probe says this seat is `coordinator`; a worker, an unknown role or no team reads nothing. A re-entered stop is always allowed, and it stands aside while the session is usage-paused. Never terminal. Design: [00630 DESIGN.md section 20.1](../../CLAUDE/Plan/00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md).
+
+**Unreadable bus:** with the default `on_unreadable_bus: refuse`, a bus the adapter cannot read (or an adapter that raises) refuses the waiting stop once, saying why nothing could be confirmed. On pingbus v1 the adapter cannot read the notify flag, so every waiting coordinator stop is refused once until a v2 adapter lands; `allow` fails open with a WARNING instead.
+
+| Option              | Default  | Description                                                               |
+| ------------------- | -------- | ------------------------------------------------------------------------- |
+| `window_minutes`    | `30`     | A notifying post older than this does not count (integer 1..1440)         |
+| `on_unreadable_bus` | `refuse` | `refuse` denies a wait the bus cannot confirm; `allow` fails open, logged |
+
+**Config example:**
+
+```yaml
+handlers:
+  stop:
+    owner_wait_stop_guard:
+      enabled: true   # default
+      priority: 3
+      options:
+        on_unreadable_bus: refuse
+```
+
 #### goal_loop_detector
 
 | Property       | Value                |

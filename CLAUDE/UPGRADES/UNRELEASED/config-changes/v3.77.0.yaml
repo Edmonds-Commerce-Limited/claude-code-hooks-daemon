@@ -1,4 +1,4 @@
-# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth) and Plan 00631 (team_seat).
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth), Plan 00631 (team_seat) and Plan 00636 (owner_wait_stop_guard).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -215,6 +215,54 @@ config_changes:
         team_seat:
           detection: auto
           resolve_ttl_seconds: 60
+    - key: handlers.stop.owner_wait_stop_guard
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00636). Refuses a coordinator seat's stop that waits on a
+        human until every open owner-facing thread the seat asked or owns got
+        a notifying bus post from it, with a real body, within window_minutes.
+        Applies only per team where the role probe says this seat is
+        coordinator; a worker, an unknown role or no team is untouched. A
+        re-entered stop is always allowed. Never terminal.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              enabled: true
+              priority: 3
+      migration_note: >-
+        Keep it at priority 3, before auto_continue_stop (the terminal Stop
+        handler) so it is not shadowed.
+    - key: handlers.stop.owner_wait_stop_guard.options.window_minutes
+      recommended: false
+      dormant: false
+      description: >-
+        window_minutes (30, integer 1 to 1440): a notifying post older than
+        this does not count. An invalid value falls back to 30 with a WARNING.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              options:
+                window_minutes: 30
+    - key: handlers.stop.owner_wait_stop_guard.options.on_unreadable_bus
+      recommended: false
+      dormant: false
+      description: >-
+        on_unreadable_bus (refuse | allow, default refuse): what a waiting
+        coordinator stop gets when the bus cannot confirm the notifying posts.
+        refuse denies once and says why; allow fails open with a WARNING. On
+        pingbus v1 the adapter cannot read the notify flag, so refuse refuses
+        every waiting coordinator stop once until a v2 adapter lands; allow is
+        the escape hatch. An invalid value is treated as refuse, with a
+        WARNING.
+      example_yaml: |
+        handlers:
+          stop:
+            owner_wait_stop_guard:
+              options:
+                on_unreadable_bus: allow
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-
