@@ -333,6 +333,7 @@ class TestExtglobWords:
         assert "kit/@(bin|zz)/late" in sfm._extglob_words(command)
         assert _every_route(command, project.root) == _DENIED_EVERYWHERE
 
+    @pytest.mark.perf_sweep
     @pytest.mark.parametrize(
         "command",
         ["$(" * 20000 + "x", "@(" * 20000 + "x", "'$(" * 5000 + "x", '"$(' * 5000, "(" * 40000],
