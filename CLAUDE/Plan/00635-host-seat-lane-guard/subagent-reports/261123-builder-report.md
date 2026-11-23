@@ -60,7 +60,8 @@ Updated:
 - `test_claude_md_guidance_coverage`
 - `test_pretooluse_fail_closed_tagging` (`_AUDITED_BLOCKING_ONLY_REASONS`)
 - `test_blocking_handler_evasion`
-- `CLAUDE.md`: the marker and the rule row
+- `CLAUDE.md`: the marker and the rule row, both in the generator's
+  display-name order (after host-command-guard, before human-approval-check)
 - `.claude/HOOKS-DAEMON.md`: the row and the count, inserted by hand to the
   generator's shape because the markdown formatter reflowed the whole file on
   Edit
@@ -70,12 +71,41 @@ Not updated:
 - `_EXPECTED_MAIN` in `test_handler_scope_defaults.py`: no handler scope is
   declared.
 - The CONTRIBUTING.md and HANDLER_DEVELOPMENT.md band tables: the band is
-  unchanged.
+  unchanged, and `test_priority_bands_match_the_code.py` passes.
+
+## Review fixes (second commit)
+
+- An unknown-duty refusal no longer says the seat has duty host. It says the
+  duty cannot be read and the guard stays armed on every refusal; "the probe
+  gave no answer" is added only to the first refusal in a session.
+- `python -m unittest` added to the lane.
+- Tests added for the lazy resolver, the noted-sessions cap and a non-list
+  `extra_lane_patterns`.
 
 ## QA (targeted only, nice -n 19)
 
-- ruff, black, and mypy on the changed source: clean.
+- ruff and black over every changed `.py` file, mypy over every changed
+  source file: clean.
+
+- Second pytest batch, run after the review fixes: 1349 passed. It covered:
+
+  - the importers of `long_running_command`, including
+    `test_default_enabled_template_consistency` and
+    `test_long_running_command_guard`
+  - `test_documented_commands_are_not_self_denied`
+  - `test_priority_bands_match_the_code`
+  - `test_pending_release_notes_holding_area`
+  - `test_declared_behaviour_matches_source`
+  - `test_british_english_check`
+  - `test_documented_hook_probes_are_marked`
+  - `test_pseudo_event_handler_visibility`
+  - `test_rule_parity`
+  - the docs and reference checks
+
+  The handler file was re-run alone afterwards: 95 passed.
+
 - `check_magic_values.py`: 0 violations. `audit_error_hiding.py`: clean.
+
 - pytest over the new and changed tests plus the drift-list integration tests:
   see the result line appended below.
 
@@ -84,4 +114,8 @@ Not updated:
 - Live verification in a host-duty seat, then the owner's ruling to promote to
   `block` (Task 2.1).
 
-Result: 3391 passed (tests/unit/handlers/pre_tool_use/test_host_seat_lane_guard.py, tests/unit/utils/test_long_running_command.py, test_long_running_command_guard.py, test_pretooluse_fail_closed_tagging.py, test_blocking_handler_evasion.py, tests/unit/constants, tests/unit/daemon/test_init_config.py, tests/unit/qa/test_audit_error_hiding.py, and integration test_claude_md_guidance_coverage, test_handler_scope_defaults, test_acceptance_*, test_all_handlers_response_validation, test_config_changes_manifest_examples, test_dogfooding_config, test_example_config, test_handler_config_blocking, test_handler_instantiation, test_handler_reference_check, test_handlers_do_not_match_prose, test_every_handler_response_validates, test_generated_docs_are_path_agnostic, test_doc_truth_check).
+Result: 3391 passed (tests/unit/handlers/pre_tool_use/test_host_seat_lane_guard.py, tests/unit/utils/test_long_running_command.py, test_long_running_command_guard.py, test_pretooluse_fail_closed_tagging.py, test_blocking_handler_evasion.py, tests/unit/constants, tests/unit/daemon/test_init_config.py, tests/unit/qa/test_audit_error_hiding.py, and integration test_claude_md_guidance_coverage, test_handler_scope_defaults, test_acceptance\_\*, test_all_handlers_response_validation, test_config_changes_manifest_examples, test_dogfooding_config, test_example_config, test_handler_config_blocking, test_handler_instantiation, test_handler_reference_check, test_handlers_do_not_match_prose, test_every_handler_response_validates, test_generated_docs_are_path_agnostic, test_doc_truth_check).
+
+## llm_qa.py changed
+
+Result: 42 of 43 passed. The one failure is `test_safety_handlers_hostile_input_performance.py::...test_bash_command[double_star_glob]`. It is in `secret_file_guard` (block-secret-file-read), not in this change, and it fails the same way on the main checkout (`c80c096d5`) on this host. It looks host-dependent: a glob crosses an entry this host cannot read. The unmapped files reported are the too-broad constants, config and generated docs; their drift tests ran in the batches above.

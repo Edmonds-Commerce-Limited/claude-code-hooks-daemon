@@ -82,6 +82,8 @@ LINT_PATTERNS: Final[tuple[str, ...]] = (
     r"^(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:llm:)?(?:lint|typecheck|type-check|qa)\S*",
     r"^npx\s+(?:jest|vitest|playwright|mocha|tsc|eslint|prettier)\b",
     r"^cargo\s+fmt\b",
+    # `python -m unittest` peels to `unittest`.
+    r"^unittest\b",
 )
 #: ``make`` alone, or a test/build/lint target. ``make deploy`` is untouched.
 LANE_MAKE_PATTERNS: Final[tuple[str, ...]] = (
@@ -112,10 +114,12 @@ _REFUSAL: Final[str] = (
     "Host seat lane: this session holds a teamchat seat with duty host, and this is a "
     f"test, build, lint or QA command. {_LANE}"
 )
-_NO_ANSWER: Final[str] = (
-    "The teamchat whoami probe gave no answer, so this seat's duty is unknown and the "
-    "guard stays armed."
+_UNKNOWN_REFUSAL: Final[str] = (
+    "Host seat lane: this session holds a teamchat seat whose duty cannot be read, so "
+    "the guard stays armed, and this is a test, build, lint or QA command. If this is a "
+    f"host seat: {_LANE}"
 )
+_NO_ANSWER: Final[str] = "The teamchat whoami probe gave no answer."
 _HANDLER_ERROR: Final[str] = (
     "Host seat lane: the guard could not judge this command, so it is treated as a "
     f"test, build, lint or QA command. {_LANE}"
@@ -269,8 +273,10 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         verdict = self._verdict(hook_input)
         if verdict is GateVerdict.NOT_APPLICABLE or not self._is_lane(hook_input):
             return GatingResult(decision=Decision.ALLOW)
-        if verdict is GateVerdict.ROLE_UNKNOWN and self._first_note(hook_input):
-            return self._refuse(f"{_REFUSAL} {_NO_ANSWER}")
+        if verdict is GateVerdict.ROLE_UNKNOWN:
+            if self._first_note(hook_input):
+                return self._refuse(f"{_UNKNOWN_REFUSAL} {_NO_ANSWER}")
+            return self._refuse(_UNKNOWN_REFUSAL)
         return self._refuse(_REFUSAL)
 
     def _first_note(self, hook_input: Mapping[str, Any]) -> bool:

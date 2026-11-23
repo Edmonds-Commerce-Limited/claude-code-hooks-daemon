@@ -168,6 +168,7 @@ class TestLaneCommands:
             "timeout 20 pytest tests/",
             "pytest tests/ &",
             "nice -n 19 pytest tests/",
+            "python3 -m unittest discover",
             "echo start; pytest",
         ],
     )
@@ -328,6 +329,31 @@ class TestDecision:
         assert _NO_ANSWER in _text(first)
         assert _NO_ANSWER not in _text(second)
         assert _NO_ANSWER in _text(other_session)
+
+    def test_unknown_duty_refusal_never_claims_duty_host(self) -> None:
+        handler, _ = make(UNRESOLVED)
+        for _ in range(2):
+            text = _text(handler.handle(bash(PYTEST)))
+            # The rule's own summary names both cases; the situation line must not claim host.
+            assert "holds a teamchat seat with duty host" not in text
+            assert "cannot be read" in text
+            assert "worker seat" in text
+
+    def test_lazy_resolver_is_built_from_team_seat(self) -> None:
+        handler = HostSeatLaneGuardHandler()
+        assert handler._resolver is None
+        assert handler._seat_resolver() is handler._seat_resolver()
+
+    def test_noted_sessions_are_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(module, "_MAX_NOTED_SESSIONS", 2)
+        handler, _ = make(UNRESOLVED)
+        for session in ("a", "b", "c"):
+            handler.handle(bash(PYTEST, session=session))
+        assert len(handler._noted_sessions) <= 2
+
+    def test_non_list_extra_patterns_are_named(self) -> None:
+        problems = HostSeatLaneGuardHandler.validate_options({"extra_lane_patterns": "x"})
+        assert "extra_lane_patterns" in problems
 
     def test_declared_host_never_reports_no_answer(self) -> None:
         handler, _ = make(HOST)
