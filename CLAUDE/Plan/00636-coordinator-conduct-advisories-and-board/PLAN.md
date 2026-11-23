@@ -24,6 +24,11 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 - s4 a Stop check that an owner-facing ask was mirrored to the bus, and
   `AskUserQuestion` denied on coordinator seats (extends
   `R-ASK-USER-QUESTION-UNJUSTIFIED`).
+- s4 owner directive (the team chat is the only human surface): a coordinator
+  Stop that waits on the owner is refused unless every thread it names got a
+  bus post this turn; terminal-only status counts as unsent. Detail, test
+  criteria and Q18 (how the handler learns the named threads) in
+  [00630 DESIGN.md section 20](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md).
 - s5 a ci-state reading that tells GitHub "queued" from stuck, and guidance
   never to assert another seat's code without asking it.
 - s7 a coordinator board: peers' state in one view, from `teamchat status`
@@ -47,12 +52,19 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   00632 (liveness, B5); prior art 00117 (`AskUserQuestion` blocker, s4) and
   00601 (session-state contract, s11). Its "merge into 00630" verdict is
   declined: 00630 is the umbrella and planned this child (its Task 1.2).
-  Settle Q3 (skill home) and Q6 (supervisor action).
-- [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop.
+  Settle Q3 (skill home), Q6 (supervisor action) and Q18 (how the Stop
+  handler learns which threads a stop names).
+- [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop, and
+  the multi-thread bump request (one bus call posts to N threads; open
+  teamchat-side dependency of Task 2.1; ask fedora-desktop.1).
 
 ### Phase 2: TDD, one item per branch
 
-- [ ] ⬜ **Task 2.1**: s4 (Stop mirror check, `AskUserQuestion` deny).
+- [ ] ⬜ **Task 2.1**: s4 (Stop mirror check, `AskUserQuestion` deny, and the
+  owner-directive Stop handler). Tests first: a coordinator stop with an
+  unposted thread is denied; a worker or unknown role is untouched; a posted
+  thread passes; an unreadable bus fails open with a log line. "Posted this
+  turn" is read from the read-only teamchat CLI history, no secrets.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
@@ -74,7 +86,8 @@ land here. Not gated on a seat. Each task starts with a failing test.
 
 ## Dependencies
 
-- Plan 00631 (probe). Related: 00470, 00501, 00523, 00283; fedora-desktop
+- Plan 00631 (probe). Open, teamchat side: multi-thread bump (Task 1.2).
+  Related: 00470, 00501, 00523, 00283; fedora-desktop
   Plan 00251.
 
 ## Success Criteria

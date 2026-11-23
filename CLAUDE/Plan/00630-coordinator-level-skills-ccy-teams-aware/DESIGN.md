@@ -469,7 +469,7 @@ and s6 is not known here.
 | s1  | Logged coordinator "no-value" retire path for unmerged branches, plus regenerable ignored globs          | Owner decision (Q17); listed, not built. Prior art: the daemon's existing `branch-reject` reviewer route (`R-BRANCH-REJECT-DISPATCH`) and the worktree-remove guard's regenerable-content rule.              |
 | s2  | Standing-authorisation presets and the HUMAN-id check                                                    | Plan 00634 (HUMAN check); presets are the `standing_authorisations` store switched on by Plan 00633's profile.                                                                                               |
 | s3  | Directives register (one owner directive given about 8 times)                                            | New child Plan 00636.                                                                                                                                                                                        |
-| s4  | Stop check mirroring any owner ask to the bus; deny `AskUserQuestion` on coordinator seats               | New child Plan 00636 (extends `R-ASK-USER-QUESTION-UNJUSTIFIED`).                                                                                                                                            |
+| s4  | Stop check mirroring any owner ask to the bus; deny `AskUserQuestion` on coordinator seats               | New child Plan 00636 (extends `R-ASK-USER-QUESTION-UNJUSTIFIED`); owner directive on the chat surface: section 20.                                                                                           |
 | s5  | ci-state: GitHub "queued" versus stuck; never assert another seat's code without asking                  | New child Plan 00636.                                                                                                                                                                                        |
 | s7  | Coordinator board: parallel peers' state in one view                                                     | New child Plan 00636, consuming `teamchat status` / fedora-desktop Plan 00251.                                                                                                                               |
 | s8  | Work-queue on dispatch, and a wind-down mode (109 failed stops around background agents)                 | Work-queue on dispatch: Plan 00633 profile (existing mechanism, Plan 00470). Wind-down mode: new child Plan 00636.                                                                                           |
@@ -490,3 +490,50 @@ filed; reversing that is an owner call, not a defect.
 **Q17** (owner, s1): adopt a logged coordinator "no-value" retire path for
 unmerged branches and regenerable ignored globs, and if so, is it the existing
 `branch-reject` reviewer route extended to coordinator seats?
+
+## 20. Owner directive: the team chat is the only human surface
+
+Source: lts-infra bus id `$TKI9gtxdX7GstI6J_SuBS8vTEmm3bjt7T-yrSdUkOVI`,
+recorded upstream in lts-infra `CLAUDE/owner-directives.md` (8461e6045). A
+"STOPPING BECAUSE: waiting on X" that reaches only the Claude Code terminal is
+never seen by the owner. This extends the s4 Stop mirror (Plan 00636 Task 2.1).
+
+Rules for the coordinator-seat Stop handler:
+
+1. Applies per team, to a seat whose role from the 00631 probe is coordinator.
+   A worker seat, an unknown role or an absent probe leaves the stop untouched.
+2. A stop whose reason waits on the owner is refused unless every thread it
+   names got a bus post earlier this turn.
+3. Terminal-only status counts as unsent. The stop message is an echo of what
+   went to the bus, never the only copy.
+4. The deny message names each unposted thread and the one post that fixes it.
+
+Verifying "posted this turn", transport-agnostically: the handler reads the
+team's history through the read-only teamchat CLI (`pingbus --team <t> history`
+today; the handler calls whatever the teamchat CLI documents, behind one
+adapter), takes outbound entries stamped after this turn's start, and matches
+them to the named threads. No secrets are read and no bus file is opened. An
+unreadable bus (CLI absent, error, timeout) fails OPEN and logs the failure
+to the daemon log; it never blocks a stop on the handler's own fault.
+
+Open dependency (teamchat side, ask fedora-desktop.1): a multi-thread bump, one
+bus call that posts the same status to N threads, so the refusal costs one call
+rather than N. Until it exists the deny names the per-thread posts. Filed with
+Plan 00636 Task 1.2 alongside the wake-coalescing request.
+
+Open question Q18: how does the handler learn which threads a stop names?
+Options: (a) parse thread ids or names out of the stop reason text; (b) require
+a structured line in the stop message (`THREADS: a, b`); (c) treat every thread
+with an unanswered owner ask in the history as named. (a) is fragile, (b) adds a
+format agents must remember, (c) needs no cooperation but can over-refuse.
+Unsettled; Plan 00636 Task 1.1 settles it before Task 2.1 starts.
+
+Test-first acceptance criteria (each red before the handler exists):
+
+- A coordinator stop waiting on the owner with one unposted named thread is
+  denied, and the deny names that thread.
+- A worker seat stop, and a stop with an unknown role, are untouched.
+- A stop whose every named thread has a bus post this turn passes.
+- A stop with terminal-only status (no post anywhere) counts as unsent.
+- An unreadable bus passes and writes a log line.
+- A stop that does not wait on the owner is untouched.
