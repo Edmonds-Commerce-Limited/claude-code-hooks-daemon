@@ -1,0 +1,33 @@
+"""The owner-wait bus adapter (Plan 00636 Task 2.1a): history reads and the bump command."""
+
+from __future__ import annotations
+
+from claude_code_hooks_daemon.utils.owner_wait_bus import (
+    BusUnreadable,
+    TeamchatOwnerWaitBus,
+)
+from claude_code_hooks_daemon.utils.teamchat_seat import SessionSignals
+
+
+class TestBumpCommand:
+    def test_one_command_names_every_thread(self) -> None:
+        bus = TeamchatOwnerWaitBus()
+        assert bus.bump_command("alpha", ("Q61", "Q64")) == "teamchat bump Q61 Q64"
+
+    def test_event_ids_are_single_quoted(self) -> None:
+        bus = TeamchatOwnerWaitBus()
+        assert bus.bump_command("alpha", ("Q61", "$abc")) == "teamchat bump Q61 '$abc'"
+
+    def test_an_untrusted_id_falls_back_to_waiting(self) -> None:
+        bus = TeamchatOwnerWaitBus()
+        assert bus.bump_command("alpha", ("Q61", "$x; rm -rf ~")) == "teamchat bump --waiting"
+
+
+class TestRead:
+    def test_history_is_unreadable_until_teamchat_documents_the_fields(self) -> None:
+        # No teamchat history contract exposing the notify flag and the m.thread
+        # relation is verified, so the adapter reports unreadable (fail open
+        # upstream) rather than parsing an invented format.
+        result = TeamchatOwnerWaitBus().read("alpha", SessionSignals("/run/x", "/opt/kit"))
+        assert isinstance(result, BusUnreadable)
+        assert "unverified" in result.reason
