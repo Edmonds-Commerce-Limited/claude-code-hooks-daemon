@@ -50,11 +50,16 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 ### Phase 1: Scope
 
 - [ ] ⬜ **Task 1.1**: Dedupe each item against the overlaps the scout named
-  (it opened 13 of 86 plans, so this is not exhaustive): Plans 00470
+  (unverified here: no scout report for 00636 exists; the only scout report
+  on disk is `CLAUDE/Plan/00630-*/subagent-reports/hooks-daemon-plan-dedupe-scout-haiku.md`,
+  which says "Checked 79 live plans" and "proceed. Nothing to merge or
+  supersede", so this list is the author's own, not exhaustive; re-dispatch
+  the scout for 00636 before filing): Plans 00470
   (durable state, s8/s11), 00479 (usage, B6), 00501 (modes, s8 wind-down),
-  00632 (liveness, B5); prior art 00117 (`AskUserQuestion` blocker, s4) and
-  00601 (session-state contract, s11). Its "merge into 00630" verdict is
-  declined: 00630 is the umbrella and planned this child (its Task 1.2).
+  00632 (liveness, B5; weak owner, it covers the unattended readiness gate);
+  prior art 00117 (`AskUserQuestion` blocker, s4) and
+  00601 (session-state contract, s11). 00630 is the umbrella and planned this
+  child (its Task 1.2).
   Settle Q3 (skill home), Q6 (supervisor action), the default N minutes for
   the recent-bump window, and Q18's second half. Q18's first half is settled
   by DESIGN.md 20.1: every open question the seat asked or owns, no parsing
@@ -62,7 +67,8 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 - [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop.
   The multi-thread bump is already requested: fedora-desktop request 00209
   R11 (`teamchat bump <ids> [--note ...]`, `teamchat bump --waiting`,
-  notifying by default); track it landing in teamchat, the dependency of
+  notifying by default; unverified here: relayed bus text only, no teamchat
+  binary or clone in this checkout); track it landing in teamchat, the dependency of
   Task 2.1. Ask fedora-desktop.1 whether history marks a bump post (and any
   post) as notifying, which settles Q18's second half. Open item: `pingbus history --help` documents only `--team`, `--limit` and `--room`, no notify
   field, so v1 is not shown to supply the flag; the fail-closed rule applies
@@ -107,7 +113,7 @@ land here. Not gated on a seat. Each task starts with a failing test.
   as well as the number (red: a slug-named call is refused today).
 - [ ] ⬜ **Task 3.2**: The one-line synopsis names the valid journal categories
   and the `--ref` format (red: the synopsis lacks them; 8 of the 9 relayed
-  errors were `progress` as a category or a correction without `--ref`).
+  errors were (unverified here: the relayed retrospective is not on disk) `progress` as a category or a correction without `--ref`).
 - [ ] ⬜ **Task 3.3**: `find-plan --body` searches PLAN.md bodies, `Completed/`
   included (red: a body-only term finds nothing today).
 

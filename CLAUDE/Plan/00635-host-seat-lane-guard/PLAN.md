@@ -55,7 +55,14 @@ An unreadable `whoami` means role unknown and the guards stay armed.
 
 ### Phase 2: Handler
 
-- [ ] ⬜ **Task 2.1**: Handler reusing command classification, advisory first;
+- [ ] ⬜ **Task 2.1**: Handler reusing the slow-command classification
+  (`classify` and `FindingKind` in
+  `src/claude_code_hooks_daemon/utils/long_running_command.py`, as used by
+  `handlers/pre_tool_use/long_running_command_guard.py`), advisory first. Name
+  it distinctly from the existing `host_command_guard.py` (docker root mount,
+  gh auth token, pip index, `crontab -r`; Plan 00483), e.g.
+  `host_seat_lane_guard.py`. The fedora-desktop `cc-deny.json` half is
+  unverified here;
   live verification in a host-duty seat; promote to block when ruled.
   Targeted QA green.
 

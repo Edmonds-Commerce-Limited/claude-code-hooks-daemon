@@ -1,0 +1,3 @@
+## 12:39 · action · —
+
+Fact-checker report (261123-plan-fact-checker-sonnet.md) applied. 00636 Task 1.1: removed the invented "13 of 86 plans" and "merge into 00630" scout claim, cited the only scout report on disk (00630, 79 plans, proceed). Marked as unverified here: R11 teamchat bump, 8 of 9 relayed errors, notify-in-history (Q18). 00635 Task 2.1: named the reused classification (utils/long_running_command.py classify/FindingKind) and required a name distinct from host_command_guard.py; cc-deny.json half marked unverified. 00631 pr222-ci-fix.md left uncommitted: written seconds ago, possibly still in progress.
