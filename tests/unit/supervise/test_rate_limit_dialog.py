@@ -1333,6 +1333,49 @@ class TestApplyVeto:
     def test_other_families_are_never_vetoed(self) -> None:
         assert self._veto("/compact", "would-compact", stdin_pending=True) is None
 
+    def test_a_vetoed_enter_does_not_record_answered(self, sidecar_dir: Path, machine: Any) -> None:
+        # Delta review D2: the worker records `answered` before the host
+        # decides; a vetoed Enter must take that back, or a dialog closed by
+        # some other route holds every family and earns a late `continue`.
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        enter = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1))
+        assert enter.payload == "\r"
+        veto = _mod._rate_limit_host_veto(
+            enter,
+            stdin_pending=False,
+            child_output_pending=True,
+            shipped_dump=_ON_TARGET,
+            status_dir=sidecar_dir.parent,
+            child_pid=_CHILD,
+            now_wall=_NOW + 1,
+        )
+        assert veto
+        assert _phase(sidecar_dir) == ""
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), now=_NOW + 5))
+        assert not _mod._rate_limit_prefill_blocks(
+            _resume_facts("", now=_NOW + 6), sidecar_dir.parent
+        )
+        resumed = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert resumed.decision_value != _CONTINUE
+
+    def test_a_vetoed_enter_is_pressed_again_while_the_dialog_stays(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        enter = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1))
+        _mod._rate_limit_host_veto(
+            enter,
+            stdin_pending=False,
+            child_output_pending=True,
+            shipped_dump=_ON_TARGET,
+            status_dir=sidecar_dir.parent,
+            child_pid=_CHILD,
+            now_wall=_NOW + 1,
+        )
+        again = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 2))
+        assert again.payload == "\r"
+        assert _phase(sidecar_dir) == "answered"
+
     def test_a_vetoed_outcome_types_nothing_and_is_not_adopted(self) -> None:
         typed: list[bytes] = []
         machine = _mod.CompactStateMachine(_mod.CompactPolicy())

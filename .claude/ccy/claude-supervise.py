@@ -10715,8 +10715,10 @@ def _rate_limit_apply_veto(
     vetoed while a human byte waits on stdin. An Enter (which confirms the
     highlighted row, possibly a billing option) is also vetoed while child
     output waits unread, and unless the dump shipped this tick shows the
-    pointer on ``Stop and wait for limit to reset``. A vetoed send is not
-    retried: the worker already recorded it, so the window fails closed.
+    pointer on ``Stop and wait for limit to reset``. A vetoed arrow, clear or
+    ``continue`` is not retried: the worker already recorded it, so the
+    window fails closed. A vetoed Enter is taken back by
+    ``_rate_limit_host_veto`` (delta review D2).
     """
     if outcome.payload is None or outcome.decision_value not in (
         Decision.WOULD_RATE_LIMIT_KEY.value,
@@ -10733,6 +10735,48 @@ def _rate_limit_apply_veto(
     if dialog is None or dialog.selected != dialog.target:
         return "the highlighted row is not verified as the target"
     return None
+
+
+def _rate_limit_undo_vetoed_enter(status_dir: Path, child_pid: int, now_wall: float) -> None:
+    """Take back the ``answered`` the worker recorded for an Enter the host did not type.
+
+    The occurrence stays open, so a dialog still shown is answered again
+    (within the key caps), a human key abandons it as before, and a dialog
+    closed by some other route leaves no pending resume.
+    """
+    path = _rate_limit_state_path(status_dir, child_pid)
+    if path is None or not path.exists():
+        return
+    state = _load_rate_limit_state(path, now_wall, child_pid)
+    if state.get("phase") != _PHASE_ANSWERED or not state.get("occurrence_open"):
+        return
+    state.update(phase="", answered_at=None)
+    try:
+        _save_rate_limit_state(path, state)
+    except OSError as exc:
+        append_worker_error(f"could not take back a vetoed rate-limit Enter: {exc}")
+
+
+def _rate_limit_host_veto(
+    outcome: TickOutcome,
+    *,
+    stdin_pending: bool,
+    child_output_pending: bool,
+    shipped_dump: str,
+    status_dir: Path,
+    child_pid: int,
+    now_wall: float,
+) -> str | None:
+    """The host's apply-time veto: ``_rate_limit_apply_veto``, undoing a vetoed Enter."""
+    veto = _rate_limit_apply_veto(
+        outcome,
+        stdin_pending=stdin_pending,
+        child_output_pending=child_output_pending,
+        shipped_dump=shipped_dump,
+    )
+    if veto is not None and outcome.payload == _RATE_LIMIT_ENTER:
+        _rate_limit_undo_vetoed_enter(status_dir, child_pid, now_wall)
+    return veto
 
 
 def _apply_worker_outcome(
@@ -12659,11 +12703,14 @@ def supervise(
                 # Plan 00523 review I3: the select loop reads nothing during
                 # the worker round trip, so waiting bytes are new since the
                 # tick's facts were taken.
-                apply_veto=lambda decided: _rate_limit_apply_veto(
+                apply_veto=lambda decided: _rate_limit_host_veto(
                     decided,
                     stdin_pending=_fd_readable(resolved_stdin_fd),
                     child_output_pending=_fd_readable(master_fd),
                     shipped_dump=shipped_dump,
+                    status_dir=sidecar_dir.parent,
+                    child_pid=pid,
+                    now_wall=time.time(),
                 ),
             )
             _handle_plugin_outcome(outcome)
