@@ -87,6 +87,8 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
         # messages; a subagent's Bash call blocks nobody, and `PreToolUse` fires
         # for both roles, so MAIN is the whole role test.
         "long-running-command-guard",
+        # Plan 00636: judges the coordinator seat's own waiting stop.
+        "owner-wait-stop-guard",
     }
 )
 
