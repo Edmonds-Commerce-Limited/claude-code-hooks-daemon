@@ -75,7 +75,10 @@ writing the keystroke.
   clears only when the menu leaves the screen. Each press is logged to the
   decision log, and dry-run mode logs it without sending. As built, the latch
   is per reset window, and the keys are capped per occurrence and per window.
-- [x] ✅ **Task 2.4** (added): after the reset, clear the pre-filled box and
+- [ ] ⬜ **Task 2.4**: A readable armed state for Plan 00632's readiness check
+  (Plan 00630 vet M-9): a config key that turns the answerer on, plus a
+  supervisor status line saying whether it is armed in this session. TDD.
+- [x] ✅ **Task 2.5** (added): after the reset, clear the pre-filled box and
   send one `continue`. Two guards go with it:
   - every other family is held while the pre-fill may be in the box;
   - output after the reset opens a bounded re-check rather than abandoning the
@@ -96,7 +99,8 @@ weekly limit · resets <time>", and the supervisor retried regardless.
 - [ ] ⬜ **Task 2b.2**: A pause caused by a hard limit injects nothing, not even
   the single usage-pause `/compact` (`_usage_pause_outcome`), because every
   request fails until the reset. A ceiling pause keeps its `/compact`. TDD in
-  the supervisor suite.
+  the supervisor suite. (Whether the owner's "no usage ceiling" ruling retires
+  the Plan 00479 ceiling, and with it this branch, is Plan 00630 Q16.)
 - [ ] ⬜ **Task 2b.3**: With no reset time known, back off rather than retrying
   every tick: double the interval after each identical failure, up to a cap.
 

@@ -32,7 +32,21 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in this order:
 
-- [00630: coordinator-level skills, ccy-teams aware](00630-coordinator-level-skills-ccy-teams-aware/PLAN.md) - Not Started (owner order via the lts-infra coordinator: detect a pingbus team seat's role and seat kind, and switch on coordinator skills, advisories and guards only there; absent teams change nothing; Phase 0 ingests the unreachable lts-infra/fedora-desktop inputs and needs owner rulings Q1-Q8 in DESIGN.md)
+- [00630: coordinator-level skills, ccy-teams aware (umbrella)](00630-coordinator-level-skills-ccy-teams-aware/PLAN.md) - In Progress (owner order via the lts-infra coordinator: teamchat v2 only, per-team roles; coordinator skills, advisories and guards switch on only where a team seat says so; absent teams change nothing; roadmap over children 00631-00636; fedora-desktop vet dispositioned; open questions Q2-Q17 in DESIGN.md)
+
+- [00631: teamchat role probe core](00631-teamchat-role-probe-core/PLAN.md) - Not Started (child (a) of 00630: per-team role and duty from teamchat whoami --json, role gate; every sibling depends on it)
+
+- [00634: HUMAN-approval check with a cited questions id](00634-human-approval-check-cited-questions-id/PLAN.md) - Not Started (child (d) of 00630: destructive acts need a cited questions id verified with teamchat verify (fedora-desktop issue 369); depends on 00631)
+
+- [00632: unattended readiness, GO gate, expiring mode](00632-unattended-readiness-gate-and-expiring-mode/PLAN.md) - Not Started (child (b) of 00630: readiness command, GO gate on set-mode unattended, mode that expires; depends on 00631 and 00634; limit answering is Plan 00523)
+
+- [00633: coordinator profile and peer-branch gate recipe](00633-coordinator-profile-and-peer-branch-gate-recipe/PLAN.md) - Not Started (child (c) of 00630: one-switch coordinator profile and a declared gate_command recorded per merged branch; depends on 00631)
+
+- [00635: host-seat lane guard](00635-host-seat-lane-guard/PLAN.md) - Not Started (child (e) of 00630: refuse QA, test and build where a held team has duty host; owner decision lts-infra Q64 pending; depends on 00631)
+
+- [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - Not Started (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
+
+- [00637: coordinator no-value remote branch retire](00637-coordinator-no-value-remote-branch-retire/PLAN.md) - Not Started (child (g) of 00630: logged coordinator retire of an unmerged remote branch on top of branch-reject, owner ruling Q17; depends on 00631)
 
 - [00464: commit gates judge the checkout the command runs in](00464-commit-gates-judge-the-checkout-the-command-runs-in/PLAN.md) - Not Started (from 00422 N23: commit gates pick their repo from the payload `cwd`, which for a teammate is the main checkout, so a worktree commit is judged on main's staged tree — false denies, and its own content, secret terms included, never checked)
 
@@ -317,11 +331,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 630 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 636 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 526 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 86 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
