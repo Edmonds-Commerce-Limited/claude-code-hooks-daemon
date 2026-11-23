@@ -48,10 +48,13 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import TeamSeatConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -454,8 +457,26 @@ class SeatContextResolver:
         self._timeout = timeout
         self._lock = threading.Lock()
         self._cache: dict[SessionSignals, tuple[float, SeatContext]] = {}
+        self._detection_enabled = True
 
-    def resolve(self, signals: SessionSignals, *, detection_enabled: bool = True) -> SeatContext:
+    @classmethod
+    def from_config(
+        cls,
+        config: TeamSeatConfig,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        runner: CommandRunner = default_command_runner,
+    ) -> SeatContextResolver:
+        """A resolver honouring the ``team_seat`` config block's TTL and detection."""
+        resolver = cls(ttl_seconds=float(config.resolve_ttl_seconds), clock=clock, runner=runner)
+        resolver._detection_enabled = config.detection_enabled
+        return resolver
+
+    def resolve(
+        self, signals: SessionSignals, *, detection_enabled: bool | None = None
+    ) -> SeatContext:
+        if detection_enabled is None:
+            detection_enabled = self._detection_enabled
         if not signals.runtime or not detection_enabled:
             return probe_seat_context(signals, detection_enabled=detection_enabled)
         now = self._clock()

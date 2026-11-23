@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import TeamSeatConfig
 from claude_code_hooks_daemon.utils import teamchat_seat
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     KIT_ENV_VAR,
@@ -460,6 +461,28 @@ class TestResolver:
         resolver = self._resolver(runner, Clock())
         assert resolver.resolve(SessionSignals()).state is SeatState.ABSENT
         assert resolver.resolve(SIGNALS, detection_enabled=False).state is SeatState.ABSENT
+        assert runner.calls == []
+
+    def test_from_config_takes_the_ttl(self) -> None:
+        runner, clock = ok(fx.WORKER_ONLY), Clock()
+        config = TeamSeatConfig(resolve_ttl_seconds=10)
+        resolver = SeatContextResolver.from_config(config, clock=clock, runner=runner)
+        resolver.resolve(SIGNALS)
+        clock.now += 9
+        resolver.resolve(SIGNALS)
+        assert len(runner.calls) == 1
+        clock.now += 2
+        resolver.resolve(SIGNALS)
+        assert len(runner.calls) == 2
+
+    def test_from_config_detection_off_probes_nothing(self) -> None:
+        runner = ok(fx.WORKER_ONLY)
+        resolver = SeatContextResolver.from_config(
+            TeamSeatConfig(detection="off"), clock=Clock(), runner=runner
+        )
+        context = resolver.resolve(SIGNALS)
+        assert context.state is SeatState.ABSENT
+        assert context.reason is ProbeReason.DETECTION_OFF
         assert runner.calls == []
 
 
