@@ -347,6 +347,14 @@ class HandlerID:
         config_key="merge_to_main_approval",
         display_name="merge-to-main-approval",
     )
+    # Human approval check (Plan 00634): a coordinator team seat's push,
+    # delete, world-writable chmod or merge into main needs a cited
+    # questions-room line a declared human sent.
+    HUMAN_APPROVAL_CHECK = HandlerIDMeta(
+        class_name="HumanApprovalCheckHandler",
+        config_key="human_approval_check",
+        display_name="human-approval-check",
+    )
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.
