@@ -34,7 +34,7 @@ WARNING log. ``auto`` (default) is ``refuse`` where the adapter's
 ``flags_readable()`` is True, and otherwise (pingbus v1, where no post could
 ever be confirmed) fails open by design with an ADVISORY in the stop's context
 naming the team and the thread classes left unchecked. The WARNING is always
-written.
+written. An invalid value fails CLOSED to ``refuse`` (not to the default).
 
 **A fault fails closed.** Any exception while checking (seat probe, wait
 detection, stale check, rendering) denies an armed coordinator's stop once,
@@ -305,16 +305,17 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         return float(value * _SECONDS_PER_MINUTE)
 
     def _unreadable_policy(self) -> str:
+        """The configured policy; an invalid value fails CLOSED to ``refuse``, not the default."""
         value = self._on_unreadable_bus
         if isinstance(value, str) and value in _ON_UNREADABLE_VALUES:
             return value
         logger.warning(
             "owner_wait_stop_guard: options.on_unreadable_bus=%r is not 'auto', 'refuse' or "
-            "'allow'; using the default %r",
+            "'allow'; failing closed to %r",
             value,
-            DEFAULT_ON_UNREADABLE_BUS,
+            ON_UNREADABLE_REFUSE,
         )
-        return DEFAULT_ON_UNREADABLE_BUS
+        return ON_UNREADABLE_REFUSE
 
     def _refuses_unreadable(self, policy: str) -> bool:
         """Whether an unreadable team is refused: ``auto`` refuses only where flags are readable.
@@ -667,7 +668,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             "thread classes it could not check. Either way: post a notifying reply in each "
             "thread (`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
             "owner-started message). `refuse` always refuses it once; `allow` lets it through "
-            "with a log line only.\n\n"
+            "with a log line only. An invalid value fails closed to `refuse`.\n\n"
             "An unreadable role or an unresolved seat probe stays armed and is treated like an "
             "unreadable bus.\n\n"
             "**Stands aside** for a declared worker, no team, a sub-agent, a usage pause "

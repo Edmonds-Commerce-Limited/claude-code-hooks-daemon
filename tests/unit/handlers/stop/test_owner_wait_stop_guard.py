@@ -526,13 +526,13 @@ class TestUnreadableBusAuto:
 
     @pytest.mark.parametrize("flags", [True, False])
     @pytest.mark.parametrize("bad", ["deny", "", None, 1, True])
-    def test_invalid_value_falls_back_to_auto_and_logs(
+    def test_invalid_value_fails_closed_to_refuse_even_on_v1(
         self, bad: object, flags: bool, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         bus = _FakeBus(BusUnreadable("history timed out"), flags=flags)
         with caplog.at_level(logging.WARNING):
             result = _run(_Handler(_seats(), bus, on_unreadable_bus=bad), _stop(tmp_path))
-        assert result.decision is (Decision.DENY if flags else Decision.ALLOW)
+        assert result.decision is Decision.DENY
         assert any("on_unreadable_bus" in rec.getMessage() for rec in caplog.records)
 
     def test_example_config_writes_no_literal_refuse(self) -> None:

@@ -122,7 +122,8 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   on a coordinator seat once. The coordinator chose `auto` as the default:
   refuse where the adapter reports the flags readable, allow with an advisory
   on v1 (fail-open by design there; the advisory is its only effect and costs
-  one extra continue turn).
+  one extra continue turn). An INVALID value is not the default: it fails
+  closed to `refuse`, as the first independent review asked.
 - [x] ✅ **Task 2.1b**: fix the PR 226 independent review
   (`subagent-reports/261123-opus-independent-review-pr226.md`), each finding
   test-first: F1 stand-in requirement carried on the deny, F2 wider waiting

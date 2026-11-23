@@ -259,7 +259,8 @@ config_changes:
         auto allows with the advisory, which costs one extra continue turn
         per waiting coordinator stop. refuse always refuses an unconfirmed
         wait once (on v1, every waiting coordinator stop); allow fails open
-        with a WARNING. An invalid value falls back to auto, with a WARNING.
+        with a WARNING. An invalid value fails closed to refuse (not to the
+        default auto), with a WARNING.
       example_yaml: |
         handlers:
           stop:
