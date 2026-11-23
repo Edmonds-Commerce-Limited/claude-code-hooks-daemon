@@ -404,9 +404,7 @@ def rate_limit_armed_status(*, dry_run: bool, screen_found: bool) -> str:
     return f"{prefix}ARMED (answers the dialog, resumes after the reset)"
 
 
-def render_startup_banner(
-    *, version: str, armed: bool, extra_lines: tuple[str, ...] = ()
-) -> str:
+def render_startup_banner(*, version: str, armed: bool, extra_lines: tuple[str, ...] = ()) -> str:
     """Return the multi-line ECHD ccy supervisor startup banner.
 
     Pure and deterministic: it takes the version + mode and returns text. The

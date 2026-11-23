@@ -1672,7 +1672,9 @@ class TestHeldResumeSends:
         )
         assert _phase(sidecar_dir) == "answered"
         assert _state(sidecar_dir)["resume_vetoed_at"] == _AFTER + 1
-        again = _resume(sidecar_dir, machine, _resume_facts("continue", now=_AFTER + 30, quiet=30.0))
+        again = _resume(
+            sidecar_dir, machine, _resume_facts("continue", now=_AFTER + 30, quiet=30.0)
+        )
         assert again.payload == _BACKSPACES
 
     def test_a_held_continue_is_taken_back_and_retried(
