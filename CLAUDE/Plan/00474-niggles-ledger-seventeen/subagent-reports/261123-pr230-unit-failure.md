@@ -42,8 +42,17 @@ failure.
   probe as "no match", which is what bash's own glob does. If the second, it needs a
   security delta review.
 - **Latent sibling.** `test_bash_command[double_star_glob]` (`/**/` repeated) walks
-  the real `/`, and flips at small caps (600). It passes CI at the real cap of 4096,
-  and chdir cannot help it, since the path is absolute.
+  the real `/`. It passes CI at the real cap of 4096, but on this dev container it
+  fails at the real cap too, with or without this commit (the `/workspace` scratch
+  tree is large). chdir cannot help it, since the path is absolute.
+
+## Targeted QA
+
+The glob-later-parts, cwd-fail-closed and link-resolution guard test files, plus
+the whole `TestCombinatorialSmallInputShapesStayLinear` class: 725 passed, 11
+skipped, 1 failed. The failure is `test_bash_command[double_star_glob]`, which is
+pre-existing on this host: it fails the same way on the pre-change test file.
+
 - **Observed, outside this change.** `D=kit; cat $D/bin/late` is ALLOWED even
   though `kit/bin/late` links to a protected file: the guard does not follow `D=kit`.
   The test only asserts that the glob is judged the same as the literal.
