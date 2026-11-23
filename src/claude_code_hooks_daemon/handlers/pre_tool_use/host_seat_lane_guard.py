@@ -60,6 +60,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     DUTY_HOST,
     SeatContext,
     SeatContextResolver,
+    SeatState,
     SessionSignals,
 )
 
@@ -91,12 +92,23 @@ LANE_MAKE_PATTERNS: Final[tuple[str, ...]] = (
     r"^make(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|all|ci)\b",
 )
 #: A script named for tests, QA or lint: ``run_tests.sh``, ``llm_qa.py``, ``test_x.py``.
+#: A deploy, smoke, health, publish or connection check is triage even when its
+#: name carries ``test`` or ``qa`` (``deploy-qa.sh``, ``smoke_test.sh``).
 QA_SCRIPT_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?:[\w.-]*[_.-])?(?:tests?|qa|lint|typecheck|type_check)(?:[_.-][\w.-]*)?\.(?:sh|bash|py)\b",
+    r"^(?![\w.-]*(?:deploy|smoke|health|publish|connection))"
+    r"(?:[\w.-]*[_.-])?(?:tests?|qa|lint|typecheck|type_check)(?:[_.-][\w.-]*)?\.(?:sh|bash|py)\b",
+)
+#: The shared build group, except that a JVM build tool is judged by its goal:
+#: ``mvn deploy`` and ``gradle publish`` ship an artefact and are deployment.
+_SHIPPING_GOAL: Final[str] = r"(?!(?:.*\s)?(?:deploy|publish)(?:\s|$))"
+LANE_BUILD_PATTERNS: Final[tuple[str, ...]] = (
+    r"^(?:tsc|webpack|ant|cmake|ninja|bazel)\b",
+    rf"^(?:gradle|gradlew|mvn){_SHIPPING_GOAL}\b",
+    *BUILD_PATTERNS[1:],
 )
 LANE_PATTERNS: Final[tuple[str, ...]] = (
     *TEST_PATTERNS,
-    *BUILD_PATTERNS,
+    *LANE_BUILD_PATTERNS,
     *QA_PATTERNS,
     *LINT_PATTERNS,
     *LANE_MAKE_PATTERNS,
@@ -120,6 +132,7 @@ _UNKNOWN_REFUSAL: Final[str] = (
     f"host seat: {_LANE}"
 )
 _NO_ANSWER: Final[str] = "The teamchat whoami probe gave no answer."
+_NULL_DUTY: Final[str] = "The teamchat probe answered, but the seat's duty is not declared."
 _HANDLER_ERROR: Final[str] = (
     "Host seat lane: the guard could not judge this command, so it is treated as a "
     f"test, build, lint or QA command. {_LANE}"
@@ -210,13 +223,16 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             self._resolver = SeatContextResolver.from_config(config)
         return self._resolver
 
-    def _verdict(self, hook_input: Mapping[str, Any]) -> GateVerdict:
-        """The duty gate on ``host``; NOT_APPLICABLE with no teamchat runtime (no probe)."""
+    def _verdict(self, hook_input: Mapping[str, Any]) -> tuple[GateVerdict, SeatState | None]:
+        """The duty gate on ``host`` and the probe state behind it.
+
+        NOT_APPLICABLE (state None) with no teamchat runtime, and no probe run.
+        """
         signals = SessionSignals.from_hook_input(hook_input)
         if not signals.runtime:
-            return GateVerdict.NOT_APPLICABLE
+            return GateVerdict.NOT_APPLICABLE, None
         context = self._seat_resolver().resolve(signals)
-        return duty_gate(hook_input, context, duty=DUTY_HOST).verdict
+        return duty_gate(hook_input, context, duty=DUTY_HOST).verdict, context.state
 
     def _is_lane(self, hook_input: Mapping[str, Any]) -> bool:
         command = get_bash_command(dict(hook_input)) or ""
@@ -233,7 +249,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         if self.is_dormant() or hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         try:
-            verdict = self._verdict(hook_input)
+            verdict, _state = self._verdict(hook_input)
         except Exception as exc:
             log_and_continue(
                 logger,
@@ -270,10 +286,13 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             return self._refuse(_HANDLER_ERROR)
 
     def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
-        verdict = self._verdict(hook_input)
+        verdict, state = self._verdict(hook_input)
         if verdict is GateVerdict.NOT_APPLICABLE or not self._is_lane(hook_input):
             return GatingResult(decision=Decision.ALLOW)
         if verdict is GateVerdict.ROLE_UNKNOWN:
+            if state is not SeatState.UNRESOLVED:
+                # The probe answered; the seat's duty is null on the wire.
+                return self._refuse(f"{_UNKNOWN_REFUSAL} {_NULL_DUTY}")
             if self._first_note(hook_input):
                 return self._refuse(f"{_UNKNOWN_REFUSAL} {_NO_ANSWER}")
             return self._refuse(_UNKNOWN_REFUSAL)

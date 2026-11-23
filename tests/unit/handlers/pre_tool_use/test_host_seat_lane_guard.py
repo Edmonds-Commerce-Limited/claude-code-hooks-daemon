@@ -170,6 +170,15 @@ class TestLaneCommands:
             "nice -n 19 pytest tests/",
             "python3 -m unittest discover",
             "echo start; pytest",
+            '"pytest" tests/',
+            "'pytest' tests/",
+            "mvn test",
+            "mvn verify",
+            "gradle build",
+            "./gradlew test",
+            "mvn deploy && pytest",
+            "./run_tests.sh",
+            "./qa.sh",
         ],
     )
     def test_refused_shapes(self, command: str) -> None:
@@ -196,6 +205,18 @@ class TestLaneCommands:
             "echo pytest",
             "git commit -m 'run pytest later'",
             "cat latest.sh",
+            "mvn deploy",
+            "mvn clean deploy -DskipTests",
+            "gradle publish",
+            "./gradlew publish",
+            "./deploy-qa.sh",
+            "./deploy_test.sh",
+            "./smoke_test.sh",
+            "./test-connection.sh",
+            "command -v pytest",
+            "command -v make",
+            "which pytest",
+            "type pytest",
             "",
         ],
     )
@@ -338,6 +359,13 @@ class TestDecision:
             assert "holds a teamchat seat with duty host" not in text
             assert "cannot be read" in text
             assert "worker seat" in text
+
+    def test_null_duty_does_not_claim_the_probe_gave_no_answer(self) -> None:
+        handler, _ = make(NULL_DUTY)
+        text = _text(handler.handle(bash(PYTEST)))
+        assert _NO_ANSWER not in text
+        assert "duty is not declared" in text
+        assert "worker seat" in text
 
     def test_lazy_resolver_is_built_from_team_seat(self) -> None:
         handler = HostSeatLaneGuardHandler()

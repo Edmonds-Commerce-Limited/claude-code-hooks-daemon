@@ -67,6 +67,23 @@ An unreadable `whoami` means role unknown and the guards stay armed.
   unverified here;
   live verification in a host-duty seat; promote to block when ruled.
   Targeted QA green.
+  **Preconditions for switching to `mode: block`** (independent review of
+  PR #233, `subagent-reports/261123-opus-independent-review-pr233.md`; fixed
+  in advise: findings 1, 4, 6, 7; OPEN: 2 and 3):
+  - Finding 2, about 40 wrapper and launcher bypasses the classifier misses:
+    `xargs`, `eval`, `$(...)` and backticks in argument position,
+    `echo pytest | bash`, `python -I/-X ... -m pytest`, `python -c`,
+    `coverage run -m`, `uv run -p/--python`, value options of `stdbuf`,
+    `exec`, `env -C`, `sudo -h/-T`, unpeeled wrappers (`taskset`, `flock`,
+    `chronic`, `unbuffer`, `script -qc`), `make -C/-f`, `gmake`/`just`/
+    `task`/`hatch`, package-manager spellings (`npm t`, `run-script`,
+    `pnpm vitest`, `yarn jest`, `bunx`), `cargo +nightly test`,
+    `pre-commit run`, `run_autofix.sh`, and container or remote execution
+    (`docker exec`, `ssh`; owner to rule). Close or accept each.
+  - Finding 3, sub-agents of a host seat are never judged (`duty_gate`
+    returns NOT_APPLICABLE off the main thread): needs an owner ruling to
+    accept (and document) or to arm sub-agents.
+  - Also check the teamchat kit emits `duty` (finding 10) before promoting.
 
 ## Dependencies
 

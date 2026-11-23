@@ -359,6 +359,11 @@ def _peel_wrapper(words: list[str]) -> list[str] | None:
         while index < len(rest) and (rest[index].startswith("-") or _ASSIGNMENT.match(rest[index])):
             index += 2 if rest[index] == "-u" else 1
         return rest[index:]
+    if head == "command" and any(
+        re.fullmatch(r"-[pP]*[vV][pP]*", option) for option in rest[:2] if option.startswith("-")
+    ):
+        # `command -v pytest` only looks the name up: it is `type pytest`, not a run.
+        return ["type", *rest]
     if head in _SIMPLE_WRAPPERS:
         valued = _WRAPPER_VALUE_OPTIONS.get(head, frozenset())
         index = 0
@@ -392,10 +397,22 @@ def _shell_command_string(arguments: list[str]) -> list[str] | None:
     return None
 
 
+def _dequote_program(word: str) -> str:
+    """``word`` as bash resolves a program name: quotes and backslashes removed.
+
+    ``"pytest"``, ``'pytest'`` and ``p\\ytest`` all run ``pytest``. Only the
+    program word is touched; a ``$``-expansion stays unresolved text.
+    """
+    if word == _UNRESOLVED_WORD or not any(char in word for char in "'\"\\"):
+        return word
+    return word.replace("'", "").replace('"', "").replace("\\", "")
+
+
 def _peel(segment: str) -> _Peeled:
     words, loop_head = _skip_prefix(_segment_words(segment))
     peeled = _Peeled(words=words, loop_head=loop_head)
     while peeled.words and peeled.words[0] != _UNRESOLVED_WORD:
+        peeled.words[0] = _dequote_program(peeled.words[0])
         if peeled.words[0].rsplit("/", 1)[-1] == _TIMEOUT:
             seconds, remainder = _peel_timeout(peeled.words)
             peeled.timeouts.append(seconds)

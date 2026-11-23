@@ -342,6 +342,29 @@ def test_wrapper_option_values_are_peeled(command: str) -> None:
     assert FindingKind.SLOW_COMMAND in kinds
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"pytest" tests/',
+        "'pytest' tests/",
+        "p\\ytest tests/",
+        '"/usr/bin/pytest" -x',
+        "env FOO=1 'pytest'",
+        "nice -n 19 \"pytest\" tests/",
+        "'sleep' 600",
+    ],
+)
+def test_quoted_program_name_is_classified_like_the_bare_one(command: str) -> None:
+    """Plan 00635 review: quoting the program word ran the same command unseen."""
+    assert classify(command, POLICY, include_background=True)
+
+
+@pytest.mark.parametrize("command", ["command -v pytest", "command -V make", "command -pv make"])
+def test_command_lookup_is_not_a_run(command: str) -> None:
+    kinds = {finding.kind for finding in classify(command, POLICY)}
+    assert FindingKind.SLOW_COMMAND not in kinds
+
+
 class TestIncludeBackground:
     """Plan 00635: a lane guard judges backgrounded work too."""
 
