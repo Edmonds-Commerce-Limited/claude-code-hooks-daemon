@@ -10722,10 +10722,14 @@ def _rate_limit_apply_veto(
     (the dialog may have closed: an arrow would recall history into the
     box). An Enter (which confirms the highlighted row, possibly a billing
     option) is also vetoed unless the dump shipped this tick shows the
-    pointer on ``Stop and wait for limit to reset``. A vetoed arrow, clear or
-    ``continue`` is not retried: the worker already recorded it, so the
-    window fails closed. A vetoed Enter is taken back by
-    ``_rate_limit_host_veto`` (delta review D2).
+    pointer on ``Stop and wait for limit to reset``. ``_rate_limit_host_veto``
+    takes back the phase a vetoed Enter, clear or ``continue`` recorded, so
+    the next tick decides afresh; a vetoed arrow only spends its key-cap slot.
+    An Enter held by the focus model in ``_apply_worker_outcome`` never
+    reaches this veto and keeps ``answered``: the dialog still shown gets the
+    Enter again, but one closed some other way meanwhile is still treated as
+    answered (a held focus means the human is elsewhere in the UI, a much
+    narrower path than a redraw).
     """
     if outcome.payload is None or outcome.decision_value not in (
         Decision.WOULD_RATE_LIMIT_KEY.value,
@@ -10758,10 +10762,43 @@ def _rate_limit_undo_vetoed_enter(status_dir: Path, child_pid: int, now_wall: fl
     if state.get("phase") != _PHASE_ANSWERED or not state.get("occurrence_open"):
         return
     state.update(phase="", answered_at=None)
+    _save_vetoed_rate_limit_state(path, state)
+
+
+def _rate_limit_undo_vetoed_resume(
+    outcome: TickOutcome, status_dir: Path, child_pid: int, now_wall: float
+) -> None:
+    """Take back the phase the resume recorded for a clear or ``continue`` not typed.
+
+    The resume step saves ``cleared`` or ``done`` before the host applies the
+    send; a send vetoed on a redraw would otherwise never be retried, which
+    leaves an unattended session stalled after the reset.
+    """
+    path = _rate_limit_state_path(status_dir, child_pid)
+    if path is None or not path.exists():
+        return
+    state = _load_rate_limit_state(path, now_wall, child_pid)
+    attempts = _coerce_int(state.get("clear_attempts"))
+    if outcome.payload == _RATE_LIMIT_BACKSPACES and state.get("phase") == _PHASE_CLEARED:
+        state.update(
+            phase=_PHASE_CLEARED if attempts > 1 else _PHASE_ANSWERED,
+            clear_attempts=max(attempts - 1, 0),
+        )
+    elif outcome.decision_value == Decision.WOULD_RATE_LIMIT_CONTINUE.value and (
+        state.get("phase") == _PHASE_DONE
+    ):
+        state["phase"] = _PHASE_CLEARED if attempts else _PHASE_ANSWERED
+    else:
+        return
+    _save_vetoed_rate_limit_state(path, state)
+
+
+def _save_vetoed_rate_limit_state(path: Path, state: dict[str, object]) -> None:
+    """Save a state the host's veto took back; a failure is logged, never raised."""
     try:
         _save_rate_limit_state(path, state)
     except OSError as exc:
-        append_worker_error(f"could not take back a vetoed rate-limit Enter: {exc}")
+        append_worker_error(f"could not take back a vetoed rate-limit send: {exc}")
 
 
 def _rate_limit_host_veto(
@@ -10781,8 +10818,12 @@ def _rate_limit_host_veto(
         child_output_pending=child_output_pending,
         shipped_dump=shipped_dump,
     )
-    if veto is not None and outcome.payload == _RATE_LIMIT_ENTER:
+    if veto is None:
+        return None
+    if outcome.payload == _RATE_LIMIT_ENTER:
         _rate_limit_undo_vetoed_enter(status_dir, child_pid, now_wall)
+    else:
+        _rate_limit_undo_vetoed_resume(outcome, status_dir, child_pid, now_wall)
     return veto
 
 

@@ -1404,6 +1404,35 @@ class TestApplyVeto:
         resumed = _resume(sidecar_dir, machine, _resume_facts(""))
         assert resumed.decision_value != _CONTINUE
 
+    @pytest.mark.parametrize("box", ["", "continue"])
+    def test_a_vetoed_resume_send_is_retried(
+        self, sidecar_dir: Path, machine: Any, box: str
+    ) -> None:
+        # A redraw during the worker round trip must not cost the only
+        # `continue` (or a clear attempt) of an unattended session.
+        _answer_and_close(sidecar_dir, machine)
+        before = machine.export_state()
+        sent = _resume(sidecar_dir, machine, _resume_facts(box))
+        assert sent.payload is not None
+        # The host adopts no machine state from a vetoed outcome.
+        machine.import_state(before)
+        veto = _mod._rate_limit_host_veto(
+            sent,
+            stdin_pending=False,
+            child_output_pending=True,
+            shipped_dump=_prompt_screen(box),
+            status_dir=sidecar_dir.parent,
+            child_pid=_CHILD,
+            now_wall=_AFTER,
+        )
+        assert veto
+        again = _resume(sidecar_dir, machine, _resume_facts(box, now=_AFTER + 1))
+        assert again.decision_value == sent.decision_value
+        expected = sent.payload if box else _mod._CONTINUE_BODY
+        assert expected in (again.payload or "")
+        state = json.loads(_state_path(sidecar_dir).read_text(encoding="utf-8"))
+        assert state["clear_attempts"] == (1 if box else 0)
+
     def test_a_vetoed_enter_is_pressed_again_while_the_dialog_stays(
         self, sidecar_dir: Path, machine: Any
     ) -> None:
