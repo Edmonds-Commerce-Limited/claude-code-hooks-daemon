@@ -285,10 +285,12 @@ here).
   commands.
 - **Q13** Should the GO gate on `set-mode unattended` apply to every session, or
   only a coordinator seat? Recommendation: coordinator seats only.
-- **Q14** (lts-infra Q64, pending) Build the B7 handler at all? The layer
-  ownership is no longer open: if built, the dynamic by-duty check is this
-  daemon's handler (Plan 00635) and the static deny set is fedora-desktop's
-  `cc-deny.json`.
+- **Q14** (lts-infra Q64 D3, SETTLED, owner decision relayed by the
+  coordinator): build the B7 handler. On a seat whose duty (per team, from
+  `whoami`) is host, the guard refuses test, build, lint and QA commands. The
+  static deny rule is fedora-desktop's `cc-deny.json` (host-seat entries added
+  by fedora-desktop.1); this daemon's handler (Plan 00635) owns only the
+  dynamic by-duty check and adds no deny-rule task.
 - **Q15** Role profile (B11): which switches, and do explicit per-key overrides
   win?
 - **Q16** NEW (vet m-6): does the "no usage ceiling" ruling retire Plan 00479's
@@ -391,7 +393,9 @@ nothing. A host `cc` session with no team has no duty, so it is outside this
 guard (fedora-desktop's static layer is the only cover there). A probe with no
 answer follows Q9.
 
-**Decision pending: lts-infra Q64** (here Q14) on building the handler.
+**Settled: lts-infra Q64 D3** (here Q14): build the handler. It refuses test,
+build, lint and QA commands on a host-duty seat; unreadable `whoami` means role
+unknown and the guards stay armed.
 
 ## 16. HUMAN-approval check (B2)
 
@@ -572,6 +576,70 @@ Test-first acceptance criteria (each red before the handler exists):
 - An unreadable bus passes and writes a log line.
 
 - A stop that does not wait on the owner is untouched.
+
+### 20.1 Owner HARD requirement: deterministic recent-bump check (supersedes "this turn" and Q18)
+
+Relayed by the coordinator as the owner's HARD requirement (a peer note, so no
+authority of its own until the owner confirms). Intent: a STOPPING BECAUSE that
+says it is waiting for answers is countered by a deterministic check that the
+threads in question were recently bumped, and that it is very clear to a human
+on Lightning what is awaited. Telling the owner in the Claude Code session
+breaks the rule that Lightning is the only human surface. MUST, not advisory.
+
+1. Trigger: a Stop on a coordinator seat (00631 probe) whose reason text waits
+   on a human, or whose session is in the awaiting-human mode.
+2. The handler reads the bus (`pingbus --team <t> history --room questions`
+   today; `teamchat` history on v2, behind the one adapter) and, for EVERY open
+   question this seat asked or owns, requires a NOTIFYING post (v1 `thread --ask`; v2 `teamchat bump`) in that thread within the last N minutes
+   (configurable, default N to be settled in Task 1.1) whose text names what is
+   awaited.
+3. Otherwise the stop is refused and the deny prints the exact bump command
+   for the stale threads (one call; `teamchat bump <ids>` on v2).
+4. Deterministic: ids, timestamps and the notify flag only. No LLM judgement.
+   "Names what is awaited" means the post body is non-empty after the
+   command's own boilerplate, not a semantic check.
+5. The stop text must not restate the waits; it points at the threads (ids).
+
+Reconciliation with the rest of section 20:
+
+- Rule 2 above ("every thread it names got a post this turn") is REPLACED by
+  "every open question the seat asked or owns got a notifying post within N
+  minutes". This settles Q18's first half as option (c) outright: the handler
+  never parses the reason text for thread names, and (b) `THREADS:` and (a)
+  are dropped. Over-refusal costs one bump call.
+- "This turn" is replaced by the N-minute window, because a turn boundary is
+  not readable from history while a timestamp is.
+- Rule 3 (stop message is an echo) is tightened by item 5: it is a pointer.
+- The notifying-only filter and its fail-closed rule stand unchanged.
+- The unreadable-bus fail-open stands, but is logged loudly and is distinct
+  from an unreadable notify flag, which fails closed.
+
+Open item (Q18 second half, recorded 2026-11-23): whether pingbus v1 `history`
+can supply the notify flag. `pingbus history --help` (read-only) lists only
+`--team`, `--limit` (default 50, max 500) and `--room {main,questions}`, and
+`pingbus questions --help` lists only `--all` and `--retitle-closed`; neither
+documents a per-entry notify or mention field. So it is NOT shown that v1 can.
+Until fedora-desktop.1 confirms a notify marker (option d), the rule is
+fail-closed: an entry with no readable notify flag counts as non-notifying, so
+on v1 the check may refuse even after a `thread --ask` post. Mitigation
+(option e, inference from the command the turn ran) is a fallback only if the
+owner accepts it, since it is not read from the bus.
+
+Additional test-first criteria (each red first):
+
+- A waiting-on-human stop (by reason text) and an awaiting-human-mode stop are
+  both detected; a stop that is neither is untouched.
+- An open question with a notifying post inside N minutes passes; the same post
+  older than N minutes is stale and denied with the bump command.
+- A notifying post with an empty or boilerplate-only body does not count.
+- A question this seat neither asked nor owns is ignored; one it owns is
+  required even when the stop names no thread.
+- Several stale threads produce one command naming all of them.
+- A history entry with no readable notify flag counts as non-notifying.
+- The deny text names thread ids only and does not restate the awaited
+  content; a stop text that restates the waits is not required to be rejected.
+- N is read from config; an invalid N falls back to the default and logs.
+- Unreadable bus: stop passes, loud log line.
 
 ## 21. Coordinator no-value remote branch retire (Q17, settled)
 

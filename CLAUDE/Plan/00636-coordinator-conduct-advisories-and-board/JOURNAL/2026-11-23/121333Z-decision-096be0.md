@@ -1,0 +1,3 @@
+## 12:13 · decision · — — Owner HARD requirement: recent notifying bump Stop check
+
+Owner HARD requirement (relayed by the coordinator, peer note): a STOPPING BECAUSE waiting on answers must be countered by a deterministic check that every open question the seat owns got a NOTIFYING post within N minutes, with the stop text pointing at threads rather than restating waits (Lightning is the only human surface). Folded in as Task 2.1a and 00630 DESIGN.md 20.1, which replaces "posted this turn" and settles Q18's first half as option (c). Open: pingbus v1 history --help documents no notify field, so v1 is not shown to supply the flag; fail-closed applies until fedora-desktop.1 confirms.

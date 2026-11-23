@@ -56,7 +56,7 @@ Vet: [subagent-reports/261123-fedora-desktop-vet.md](subagent-reports/261123-fed
 | Plan 00523 (existing)                                                         | limit resilience (B9) and its armed state                 | independent                     |
 
 Order: 00631 first; then 00634, 00633 and 00636 in parallel; 00632 after
-00634; 00635 when Q64 is ruled. B8 thread hygiene is suspended (DESIGN.md
+00634; 00635 (Q64 D3 settled: build the handler). B8 thread hygiene is suspended (DESIGN.md
 section 17).
 
 ## Tasks

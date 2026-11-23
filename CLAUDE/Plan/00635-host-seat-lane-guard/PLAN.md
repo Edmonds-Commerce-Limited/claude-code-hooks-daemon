@@ -1,6 +1,6 @@
 # Plan 00635: host-seat lane guard
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: Medium
@@ -22,11 +22,12 @@ classification. The static layer is fedora-desktop's: `cc-run` writes
 `cc-deny.json` from the seat's duty and passes it on a host launch. This plan
 builds no deny rules.
 
-## DECISION PENDING (owner, lts-infra Q64)
+## Decision (owner, lts-infra Q64 D3, settled; 00630 Q14)
 
-Build the handler (recommended by fedora-desktop Plan 00263 and here)? Phase 2
-waits for the ruling. If the owner chooses the static layer alone, this plan is
-cancelled.
+Build the handler. On a seat whose duty (per team, from `teamchat whoami --json`) is host, the guard refuses test, build, lint and QA commands. The
+static deny rule is fedora-desktop's `cc-deny.json` (the coordinator is having
+fedora-desktop.1 add the host-seat entries); this plan adds no deny-rule task.
+An unreadable `whoami` means role unknown and the guards stay armed.
 
 ## Goals
 
@@ -44,11 +45,13 @@ cancelled.
 
 ### Phase 1: Decision and RED
 
-- [ ] ⬜ **Task 1.1**: Record the Q64 ruling in the umbrella DESIGN.md.
-- [ ] ⬜ **Task 1.2**: RED fixtures: duty `host` in any held team denies
-  test/QA/build incl. `sh -c` and scripts; deploy and triage allowed; worker,
-  coordinator, unknown duty and absent team unchanged; probe with no answer
-  reports once (Q9).
+- [x] ✅ **Task 1.1**: Record the Q64 ruling in the umbrella DESIGN.md
+  (Q14 and section 15, settled).
+- [ ] ⬜ **Task 1.2** (test-first, red before the handler): duty `host` in any
+  held team denies pytest, npm test, build, lint and QA commands incl. `sh -c`
+  and scripts; deploy and triage allowed; worker and coordinator unaffected;
+  unreadable `whoami` = role unknown, guards armed; absent team unchanged;
+  probe with no answer reports once (Q9).
 
 ### Phase 2: Handler
 

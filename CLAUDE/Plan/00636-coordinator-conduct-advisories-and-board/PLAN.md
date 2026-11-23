@@ -29,6 +29,9 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   bus post this turn; terminal-only status counts as unsent. Detail, test
   criteria and Q18 (how the handler learns the named threads) in
   [00630 DESIGN.md section 20](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md).
+- s4 MUST (owner HARD requirement): a waiting-on-human stop is countered by a
+  deterministic recent-notifying-bump check on every open question the seat
+  owns; the stop text points at threads, never restates the waits (Task 2.1a).
 - s5 a ci-state reading that tells GitHub "queued" from stuck, and guidance
   never to assert another seat's code without asking it.
 - s7 a coordinator board: peers' state in one view, from `teamchat status`
@@ -52,14 +55,18 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   00632 (liveness, B5); prior art 00117 (`AskUserQuestion` blocker, s4) and
   00601 (session-state contract, s11). Its "merge into 00630" verdict is
   declined: 00630 is the umbrella and planned this child (its Task 1.2).
-  Settle Q3 (skill home), Q6 (supervisor action) and Q18 (how the Stop
-  handler learns which threads a stop names).
+  Settle Q3 (skill home), Q6 (supervisor action), the default N minutes for
+  the recent-bump window, and Q18's second half. Q18's first half is settled
+  by DESIGN.md 20.1: every open question the seat asked or owns, no parsing
+  of the stop reason.
 - [ ] ⬜ **Task 1.2**: File the wake-coalescing request with fedora-desktop.
   The multi-thread bump is already requested: fedora-desktop request 00209
   R11 (`teamchat bump <ids> [--note ...]`, `teamchat bump --waiting`,
   notifying by default); track it landing in teamchat, the dependency of
   Task 2.1. Ask fedora-desktop.1 whether history marks a bump post (and any
-  post) as notifying, which settles Q18's second half.
+  post) as notifying, which settles Q18's second half. Open item: `pingbus history --help` documents only `--team`, `--limit` and `--room`, no notify
+  field, so v1 is not shown to supply the flag; the fail-closed rule applies
+  until confirmed (DESIGN.md 20.1).
 
 ### Phase 2: TDD, one item per branch
 
@@ -74,6 +81,17 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   remedy is ONE call: a refused stop prints the exact
   `teamchat bump <ids>` command naming every unposted thread (R11). Depends
   on R11 landing in teamchat.
+- [ ] ⬜ **Task 2.1a** (MUST, owner HARD requirement, test-first; extends
+  2.1 and supersedes its "posted this turn" rule): the waiting-on-human Stop
+  check of DESIGN.md 20.1. Red tests first: detect a waiting stop by reason
+  text or awaiting-human mode; for every open question the seat asked or
+  owns require a NOTIFYING post within N minutes (configurable) with a
+  non-boilerplate body; otherwise deny and print the one bump command for the
+  stale threads; deny text names ids only and never restates the waits;
+  unreadable notify flag counts as non-notifying; worker and unknown role
+  untouched; unreadable bus fails open with a loud log. Deterministic: ids,
+  timestamps, notify flag; no LLM judgement. Acceptance tests are the
+  20.1 list.
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
