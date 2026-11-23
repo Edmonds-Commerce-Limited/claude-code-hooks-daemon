@@ -21,6 +21,8 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.dangerous_permissions import
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 _DECLARED_DEFAULT = TeamSeatConfig()
+# Patched onto the class at test time, so the static type does not carry it.
+_SEAT_ATTR = "_team_seat"
 
 
 def _registered(team_seat: TeamSeatConfig | None) -> DangerousPermissionsHandler:
@@ -43,12 +45,12 @@ def declares_team_seat(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.usefixtures("declares_team_seat")
 def test_the_block_is_injected() -> None:
     team_seat = TeamSeatConfig()
-    assert _registered(team_seat)._team_seat is team_seat
+    assert getattr(_registered(team_seat), _SEAT_ATTR) is team_seat
 
 
 @pytest.mark.usefixtures("declares_team_seat")
 def test_absent_block_leaves_the_declared_default() -> None:
-    assert _registered(None)._team_seat is _DECLARED_DEFAULT
+    assert getattr(_registered(None), _SEAT_ATTR) is _DECLARED_DEFAULT
 
 
 def test_undeclared_handler_receives_nothing() -> None:
