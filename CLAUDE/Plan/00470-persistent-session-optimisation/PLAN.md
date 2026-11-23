@@ -188,7 +188,8 @@ waited on one bandit decision.
   pending question and the options the agent laid out, chooses one, and the
   session carries on.
   - The stand-in's choice is recorded in the plan journal as the stand-in's ruling,
-    never as the owner's, and a later real message can overturn it.
+    never as the owner's, and a later real message can overturn it. A decline with nothing changed since the
+    last recorded decline is not journalled again: Plan 00639 (bug) changes this rule.
   - It may only choose among engineering options. Decisions this repository
     reserves for a human stay blocked: releases, force deletes, QA suppressions,
     history rewrites, and anything the guards say to ask the user for.
