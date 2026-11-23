@@ -27,9 +27,12 @@ Three states, kept apart in the types because they mean different things:
 Role and duty are PER TEAM; there is no session-wide role. Role is the wire
 set ``coordinator | worker | probe`` (``null`` is unknown); a well-formed role
 outside it is carried as declared and switches nothing on. Duty is an open set
-(``null`` is unknown). A seat declaring role ``coordinator`` with duty ``host``
-is a contradiction teamchat itself refuses, so its role reads as unknown: a
-host seat is never a coordinator here.
+(``null`` is unknown). Team, role and duty names are compared stripped and
+case folded (:func:`normalise_name`); a name with odd characters is unknown.
+A coordinator role stands only beside a readable duty that is not ``host``:
+a host duty, an unreadable one, or rows that disagree make it unknown, so a
+seat that is (or might be) a host is never a coordinator here. Rows for one
+team merge to the most restrictive reading (see ``_merge``).
 
 Invariant 5: nothing under teamchat's seat store, state root or run directory
 is opened or statted; the only act is running the binary. Log lines carry a
@@ -225,8 +228,12 @@ class SeatContext:
         return tuple(seat.team for seat in self.seats)
 
     def _seat(self, team: str) -> TeamSeat | None:
+        """The seat for ``team``, matched in :func:`normalise_name` form."""
+        wanted = normalise_name(team)
+        if not wanted:
+            return None
         for seat in self.seats:
-            if seat.team == team:
+            if seat.team == wanted:
                 return seat
         return None
 
@@ -275,10 +282,17 @@ class SeatContext:
 # --- parsing -----------------------------------------------------------------
 
 
-def _name(value: object) -> str:
-    """``value`` if it is a well-formed name, else ``""`` (null included)."""
-    if isinstance(value, str) and _NAME.fullmatch(value):
-        return value
+def normalise_name(value: object) -> str:
+    """A team, role or duty name in its one comparable form, or ``""`` (unknown).
+
+    Surrounding whitespace is stripped and case folded. A value that then fails
+    the plain token grammar (null, a non-string, odd characters) is ``""``.
+    """
+    if not isinstance(value, str):
+        return ""
+    stripped = value.strip()
+    if _NAME.fullmatch(stripped):
+        return stripped.casefold()
     return ""
 
 
@@ -312,24 +326,48 @@ def _rows(document: object) -> list[object] | ProbeReason:
 def _row(raw: object) -> _Row | ProbeReason:
     if not isinstance(raw, dict):
         return ProbeReason.SHAPE_MISMATCH
-    team = _name(raw.get("team"))
+    team = normalise_name(raw.get("team"))
     if not team:
         # A row we cannot attribute to a team could be any team's: the whole
         # answer becomes unknown rather than silently dropping it.
         return ProbeReason.SHAPE_MISMATCH
-    return _Row(team, _name(raw.get("role")), _handle(raw.get("handle")), _name(raw.get("duty")))
+    return _Row(
+        team,
+        normalise_name(raw.get("role")),
+        _handle(raw.get("handle")),
+        normalise_name(raw.get("duty")),
+    )
+
+
+def _merged_duty(duties: set[str]) -> str:
+    """Host if any row says host; else the one agreed duty; else unknown."""
+    if DUTY_HOST in duties:
+        return DUTY_HOST
+    return duties.pop() if len(duties) == 1 else ""
 
 
 def _merge(team: str, rows: list[_Row]) -> TeamSeat:
-    """One team's rows -> one seat. Disagreement is unknown."""
+    """One team's rows -> one seat, at the most restrictive reading.
+
+    Restrictiveness, most first: ``host > unknown > worker > coordinator``.
+
+    - Duty: any row declaring host makes the team host. Otherwise an
+      unreadable duty on any row, or rows that disagree, is unknown.
+    - Role: an unreadable role on any row, or rows that disagree, is unknown.
+      A conflict is itself an unknown reading, and unknown outranks both
+      worker and coordinator, so coordinator-plus-worker rows are unknown.
+    - A coordinator stands only with a positively readable duty that is not
+      host; anything else reads as unknown, so a seat whose duty is (or might
+      be) host is never a coordinator here.
+    """
     roles = {row.role for row in rows}
     duties = {row.duty for row in rows}
     handles = {row.handle for row in rows}
-    duty = duties.pop() if len(duties) == 1 else ""
+    duty = _merged_duty(duties)
     handle = handles.pop() if len(handles) == 1 else ""
     role = roles.pop() if len(roles) == 1 else ""
-    host_as_coordinator = role.casefold() == ROLE_COORDINATOR and duty.casefold() == DUTY_HOST
-    if not role or host_as_coordinator:
+    coordinator_unproven = role == ROLE_COORDINATOR and duty in ("", DUTY_HOST)
+    if not role or coordinator_unproven:
         return TeamSeat(team, RoleKind.UNKNOWN, "", handle, duty)
     return TeamSeat(team, RoleKind.DECLARED, role, handle, duty)
 

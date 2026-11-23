@@ -32,7 +32,12 @@ from enum import StrEnum
 from typing import Any
 
 from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
-from claude_code_hooks_daemon.utils.teamchat_seat import RoleKind, SeatContext, SeatState
+from claude_code_hooks_daemon.utils.teamchat_seat import (
+    RoleKind,
+    SeatContext,
+    SeatState,
+    normalise_name,
+)
 
 
 class GateVerdict(StrEnum):
@@ -57,8 +62,12 @@ def role_gate(
         hook_input: The event payload (for the main-thread test).
         context: The session's resolved seat context.
         team: The team the ACTION concerns; ``""`` when it cannot be determined.
+            Matched in :func:`normalise_name` form (stripped, case folded), so
+            ``Alpha`` finds teamchat's ``alpha``. A name that does not
+            normalise (blank, odd characters) is undetermined: ROLE_UNKNOWN.
         role: The role whose conduct the caller would add.
     """
+    team = normalise_name(team)
     if context.state is SeatState.ABSENT:
         return RoleGateDecision(GateVerdict.NOT_APPLICABLE, team, "session holds no team seat")
     if not acts_as_main_thread(hook_input):

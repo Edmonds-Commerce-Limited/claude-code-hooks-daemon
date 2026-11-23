@@ -349,9 +349,7 @@ class TestRolesAndDuties:
             [(" alpha", "host"), ("alpha", "coordinator")],
         ],
     )
-    def test_coordinator_needs_a_readable_non_host_duty(
-        self, rows: list[tuple[str, Any]]
-    ) -> None:
+    def test_coordinator_needs_a_readable_non_host_duty(self, rows: list[tuple[str, Any]]) -> None:
         seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
         context = probe(fx.whoami(*seats))
         answer = context.role_for_team("alpha")
@@ -362,7 +360,9 @@ class TestRolesAndDuties:
     @pytest.mark.parametrize("duty", ["host", " host ", "HOST", "Host"])
     def test_any_host_row_makes_the_team_host(self, duty: str) -> None:
         context = probe(
-            fx.whoami(fx.seat("alpha", "worker", duty="worker"), fx.seat("alpha", "worker", duty=duty))
+            fx.whoami(
+                fx.seat("alpha", "worker", duty="worker"), fx.seat("alpha", "worker", duty=duty)
+            )
         )
         assert context.duty_in("alpha") == "host"
         assert context.any_duty("host") is True
