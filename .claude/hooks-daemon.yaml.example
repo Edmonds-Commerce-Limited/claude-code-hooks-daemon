@@ -211,6 +211,12 @@ handlers:
         mode: advise           # off | advise | block
         coordinator_seats_only: true   # arm only coordinator seats (and unreadable roles)
 
+    host_seat_lane_guard:   # A teamchat seat with duty host runs no test, build, lint or QA
+      enabled: true          # command: host seats are for deployment and triage.
+      priority: 21            # Silent with no team seat; an unreadable duty keeps it armed.
+      options:
+        mode: advise           # off | advise | block
+
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
       priority: 19

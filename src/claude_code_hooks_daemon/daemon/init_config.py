@@ -316,6 +316,8 @@ class ConfigTemplate:
             "# A human approves a parent-to-main merge when worktree.merge_to_main_requires_human_approval is true\n"
             "    human_approval_check: {enabled: true, priority: 21, options: {mode: advise, coordinator_seats_only: true}}  "
             "# A coordinator team seat's push/delete/chmod/merge-to-main cites a human's questions-room line (block denies all until issue 369)\n"
+            "    host_seat_lane_guard: {enabled: true, priority: 21, options: {mode: advise}}  "
+            "# A teamchat seat with duty host runs no test/build/lint/QA command\n"
             "\n"
             "    # CODE QUALITY HANDLERS (Priority 25-35)\n"
             "    qa_suppression: {enabled: true, priority: 30}  # Unified multi-language QA suppression blocker (11 languages)\n"

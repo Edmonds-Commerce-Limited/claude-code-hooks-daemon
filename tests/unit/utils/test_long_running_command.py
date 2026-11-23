@@ -8,10 +8,20 @@ prompted the plan are in the first corpus.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from claude_code_hooks_daemon.utils.long_running_command import (
+    BUILD_PATTERNS,
+    CONTAINER_PATTERNS,
+    DEFAULT_SLOW_PATTERNS,
     DEFAULT_THRESHOLD_SECONDS,
+    INSTALL_PATTERNS,
+    MAKE_PATTERNS,
+    QA_PATTERNS,
+    TEST_PATTERNS,
+    WATCH_PATTERNS,
     FindingKind,
     LongRunningPolicy,
     classify,
@@ -271,3 +281,103 @@ def test_missed_shape_is_found(command: str, kind: FindingKind) -> None:
 def test_still_allowed_after_the_corrections(command: str) -> None:
     kinds = {finding.kind for finding in classify(command, POLICY)}
     assert kinds <= {FindingKind.UNBOUNDED}
+
+
+class TestPatternGroups:
+    """Plan 00635: the slow list is named groups, so a guard can take a subset."""
+
+    def test_default_is_every_group_in_order(self) -> None:
+        assert DEFAULT_SLOW_PATTERNS == (
+            *TEST_PATTERNS,
+            *BUILD_PATTERNS,
+            *MAKE_PATTERNS,
+            *QA_PATTERNS,
+            *INSTALL_PATTERNS,
+            *CONTAINER_PATTERNS,
+            *WATCH_PATTERNS,
+        )
+
+    @pytest.mark.parametrize(
+        ("command", "group"),
+        [
+            ("pytest tests/", TEST_PATTERNS),
+            ("npm test", TEST_PATTERNS),
+            ("npm run test:unit", TEST_PATTERNS),
+            ("cargo test", TEST_PATTERNS),
+            ("go test ./...", TEST_PATTERNS),
+            ("npm run build", BUILD_PATTERNS),
+            ("cargo clippy", BUILD_PATTERNS),
+            ("uv build", BUILD_PATTERNS),
+            ("tsc -p .", BUILD_PATTERNS),
+            ("make", MAKE_PATTERNS),
+            ("llm_qa.py all", QA_PATTERNS),
+            ("npm install", INSTALL_PATTERNS),
+            ("cargo install ripgrep", INSTALL_PATTERNS),
+            ("pip install x", INSTALL_PATTERNS),
+            ("docker compose up", CONTAINER_PATTERNS),
+            ("gh run watch 1", WATCH_PATTERNS),
+        ],
+    )
+    def test_each_shape_sits_in_one_group(self, command: str, group: tuple[str, ...]) -> None:
+        groups = (
+            TEST_PATTERNS,
+            BUILD_PATTERNS,
+            MAKE_PATTERNS,
+            QA_PATTERNS,
+            INSTALL_PATTERNS,
+            CONTAINER_PATTERNS,
+            WATCH_PATTERNS,
+        )
+        hits = [g for g in groups if any(re.search(p, command) for p in g)]
+        assert hits == [group]
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["nice -n 19 pytest tests/", "ionice -c 3 pytest", "sudo -u ci pytest", "nice -n 19 make"],
+)
+def test_wrapper_option_values_are_peeled(command: str) -> None:
+    """Plan 00635: `nice -n 19 pytest` ran `19`, so the slow test run went unseen."""
+    kinds = {finding.kind for finding in classify(command, POLICY)}
+    assert FindingKind.SLOW_COMMAND in kinds
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"pytest" tests/',
+        "'pytest' tests/",
+        "p\\ytest tests/",
+        '"/usr/bin/pytest" -x',
+        "env FOO=1 'pytest'",
+        'nice -n 19 "pytest" tests/',
+        "'sleep' 600",
+    ],
+)
+def test_quoted_program_name_is_classified_like_the_bare_one(command: str) -> None:
+    """Plan 00635 review: quoting the program word ran the same command unseen."""
+    assert classify(command, POLICY, include_background=True)
+
+
+@pytest.mark.parametrize("command", ["command -v pytest", "command -V make", "command -pv make"])
+def test_command_lookup_is_not_a_run(command: str) -> None:
+    kinds = {finding.kind for finding in classify(command, POLICY)}
+    assert FindingKind.SLOW_COMMAND not in kinds
+
+
+class TestIncludeBackground:
+    """Plan 00635: a lane guard judges backgrounded work too."""
+
+    @pytest.mark.parametrize("command", ["pytest tests/ &", "echo a; pytest &", "pytest | cat &"])
+    def test_background_is_skipped_by_default(self, command: str) -> None:
+        kinds = {finding.kind for finding in classify(command, POLICY)}
+        assert FindingKind.SLOW_COMMAND not in kinds
+
+    @pytest.mark.parametrize("command", ["pytest tests/ &", "echo a; pytest &", "pytest | cat &"])
+    def test_background_is_judged_when_asked(self, command: str) -> None:
+        findings = classify(command, POLICY, include_background=True)
+        assert FindingKind.SLOW_COMMAND in {finding.kind for finding in findings}
+
+    def test_no_wait_finding_when_background_is_judged(self) -> None:
+        findings = classify("echo a & wait", POLICY, include_background=True)
+        assert all(finding.subject != "wait for a background job" for finding in findings)

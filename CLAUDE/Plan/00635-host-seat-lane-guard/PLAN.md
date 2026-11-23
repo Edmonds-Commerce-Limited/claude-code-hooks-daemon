@@ -47,7 +47,8 @@ An unreadable `whoami` means role unknown and the guards stay armed.
 
 - [x] ✅ **Task 1.1**: Record the Q64 ruling in the umbrella DESIGN.md
   (Q14 and section 15, settled).
-- [ ] ⬜ **Task 1.2** (test-first, red before the handler): duty `host` in any
+- [x] ✅ **Task 1.2** (test-first, red before the handler; tests in
+  `tests/unit/handlers/pre_tool_use/test_host_seat_lane_guard.py`): duty `host` in any
   held team denies pytest, npm test, build, lint and QA commands incl. `sh -c`
   and scripts; deploy and triage allowed; worker and coordinator unaffected;
   unreadable `whoami` = role unknown, guards armed; absent team unchanged;
@@ -55,7 +56,8 @@ An unreadable `whoami` means role unknown and the guards stay armed.
 
 ### Phase 2: Handler
 
-- [ ] ⬜ **Task 2.1**: Handler reusing the slow-command classification
+- [ ] 🔄 **Task 2.1** (built, advise mode, targeted QA green; live verification
+  in a host-duty seat and the promote-to-block ruling remain): Handler reusing the slow-command classification
   (`classify` and `FindingKind` in
   `src/claude_code_hooks_daemon/utils/long_running_command.py`, as used by
   `handlers/pre_tool_use/long_running_command_guard.py`), advisory first. Name
@@ -65,6 +67,23 @@ An unreadable `whoami` means role unknown and the guards stay armed.
   unverified here;
   live verification in a host-duty seat; promote to block when ruled.
   Targeted QA green.
+  **Preconditions for switching to `mode: block`** (independent review of
+  PR #233, `subagent-reports/261123-opus-independent-review-pr233.md`; fixed
+  in advise: findings 1, 4, 6, 7; OPEN: 2 and 3):
+  - Finding 2, about 40 wrapper and launcher bypasses the classifier misses:
+    `xargs`, `eval`, `$(...)` and backticks in argument position,
+    `echo pytest | bash`, `python -I/-X ... -m pytest`, `python -c`,
+    `coverage run -m`, `uv run -p/--python`, value options of `stdbuf`,
+    `exec`, `env -C`, `sudo -h/-T`, unpeeled wrappers (`taskset`, `flock`,
+    `chronic`, `unbuffer`, `script -qc`), `make -C/-f`, `gmake`/`just`/
+    `task`/`hatch`, package-manager spellings (`npm t`, `run-script`,
+    `pnpm vitest`, `yarn jest`, `bunx`), `cargo +nightly test`,
+    `pre-commit run`, `run_autofix.sh`, and container or remote execution
+    (`docker exec`, `ssh`; owner to rule). Close or accept each.
+  - Finding 3, sub-agents of a host seat are never judged (`duty_gate`
+    returns NOT_APPLICABLE off the main thread): needs an owner ruling to
+    accept (and document) or to arm sub-agents.
+  - Also check the teamchat kit emits `duty` (finding 10) before promoting.
 
 ## Dependencies
 
@@ -73,8 +92,10 @@ An unreadable `whoami` means role unknown and the guards stay armed.
 
 ## Success Criteria
 
-- [ ] Fixtures above pass; absent-team fixture passes.
-- [ ] Release-bound items recorded in the pending-release holding area.
+- [x] Fixtures above pass; absent-team fixture passes.
+- [x] Release-bound items recorded in the pending-release holding area
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/091-host-seat-lane-guard.md`
+  and the `host_seat_lane_guard` entry in `config-changes/v3.77.0.yaml`).
 
 ## Delivery & Milestones
 

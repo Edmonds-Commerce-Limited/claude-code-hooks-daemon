@@ -355,6 +355,13 @@ class HandlerID:
         config_key="human_approval_check",
         display_name="human-approval-check",
     )
+    # Host seat lane guard (Plan 00635): a session holding a teamchat seat
+    # with duty host runs no test, build, lint or QA command.
+    HOST_SEAT_LANE_GUARD = HandlerIDMeta(
+        class_name="HostSeatLaneGuardHandler",
+        config_key="host_seat_lane_guard",
+        display_name="host-seat-lane-guard",
+    )
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.

@@ -786,6 +786,15 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
         "respellings: tests/unit/handlers/pre_tool_use/test_human_approval_check.py "
         "(TestClassifyActs.test_respelled_command_still_classifies)"
     ),
+    "HostSeatLaneGuardHandler": (
+        "matches only once a live teamchat seat resolves with duty host (a runtime "
+        "signal in the payload plus a seat probe), which this harness's bare "
+        "command payload cannot supply. Its classification is the shared "
+        "long_running_command one, and its own suite pins `sh -c`, `bash -c`, "
+        "`uv run`, `python3 -m`, `nice -n 19`, `timeout` and `&` respellings: "
+        "tests/unit/handlers/pre_tool_use/test_host_seat_lane_guard.py "
+        "(TestLaneCommands.test_refused_shapes)"
+    ),
 }
 
 # Per-handler setup for anything that needs configuration to match at all.

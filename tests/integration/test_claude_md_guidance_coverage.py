@@ -153,6 +153,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "main under mode: block, and the guidance carries the cite syntax the "
         "agent must type before the act, which a deny can only teach after it"
     ),
+    "HostSeatLaneGuardHandler": (
+        "T1 denies a host-duty seat's test, build, lint or QA command under mode: "
+        "block, and the guidance tells the agent before it reaches for pytest that "
+        "the work belongs in a worker seat, which a deny can only teach after it"
+    ),
     "PipBreakSystemHandler": "T1 denies --break-system-packages",
     "PipeBlockerHandler": "T1 denies expensive pipes to head/tail",
     "DocsQaEditHandler": "T1 denies documentation writes that break the docs QA rules",
