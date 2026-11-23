@@ -294,8 +294,9 @@ here).
 - **Q16** NEW (vet m-6): does the "no usage ceiling" ruling retire Plan 00479's
   ceiling mechanism, or only mean readiness sets none? This plan reads it as
   the latter until ruled.
-- **Q17** NEW (retrospective s1): a coordinator "no-value" retire path; see
-  section 19.
+- **Q17** SETTLED by the owner (lts-infra Q66 (a), yes): a logged coordinator
+  "no-value" retire path for unmerged remote branches; see section 21. The
+  regenerable-ignored-glob half of s1 was not ruled and stays unbuilt.
 
 Q66 (owner) settles: v2 only; roles per team; consume declared roles; the
 usage-limit "stop and wait" answer is Plan 00523; all of it is to be built.
@@ -487,9 +488,8 @@ anyway, DELIBERATELY", because `-n` and `-i` differ by one character, and names
 `Read` with offset/limit or `awk 'NR>=a && NR<=b'` as the route. No niggle was
 filed; reversing that is an owner call, not a defect.
 
-**Q17** (owner, s1): adopt a logged coordinator "no-value" retire path for
-unmerged branches and regenerable ignored globs, and if so, is it the existing
-`branch-reject` reviewer route extended to coordinator seats?
+**Q17** (owner, s1): settled for branches, see section 21; the
+regenerable-ignored-glob part is still unruled.
 
 ## 20. Owner directive: the team chat is the only human surface
 
@@ -537,3 +537,120 @@ Test-first acceptance criteria (each red before the handler exists):
 - A stop with terminal-only status (no post anywhere) counts as unsent.
 - An unreadable bus passes and writes a log line.
 - A stop that does not wait on the owner is untouched.
+
+## 21. Coordinator no-value remote branch retire (Q17, settled)
+
+Owner ruling (lts-infra Q66 (a), bus id
+`$QQsVGb5BLX2KG-aRLIcMW_CIV7xpXDn1YbRfrepOZV0`): a coordinator may delete an
+UNMERGED remote branch it has judged to hold no value. It must log the
+verdict, list the branch in the daily report, and must NEVER delete a branch
+with open review comments. Built by Plan 00637.
+
+**What exists (read, not changed).** Plan 00620's `branch-reject` route
+(`core/branch_reject.py`, `branch-reject request|digest`, the dispatch gate
+`R-BRANCH-REJECT-DISPATCH`, the SubagentStop verdict recorder and the
+`hooks-daemon-branch-reject-reviewer` agent, config `branches.reject`): an
+admitted request prints the exact reviewer prompt; a separate at-least-Opus
+reviewer judges every unique commit and content-unique path; a verdict plus a
+guard-written, verified recovery bundle let `delete-branch` remove an
+`unproven` LOCAL branch; verdicts are single-use and expire; removals are
+rate-limited and ledgered (`.claude/branch-removals.jsonl`). Its module
+header states "No remote delete. R-GIT-PUSH-DELETE-REMOTE is unchanged".
+`delete-branch --remote-only` deletes a remote branch only on the merged or
+no-unique-file proof, under a lease on the proven tip.
+
+**What is new.**
+
+1. A remote variant: `branch-reject request` accepts a branch that exists only
+   on the remote (fetch the tip, same inventory and prompt); an accepted
+   `no-value` verdict plus bundle lets a leased remote delete proceed. Today
+   an unmerged remote branch with unique work has no route at all.
+2. A seat gate: the remote variant requires `role == coordinator` (Plan 00631)
+   in a held team. Worker, unknown and absent-probe seats keep the current
+   behaviour (refused).
+3. The open-review-comments refusal: before the request is admitted and again
+   at delete time, read the branch's pull requests and their review threads
+   and comments through `gh`. Any open (unresolved) review comment on any PR
+   from the branch refuses. An unreadable answer (gh absent, auth, error,
+   timeout, truncated page, ambiguous PR lookup) refuses: fail CLOSED.
+4. A daily-report line per retired branch (name, tip, verdict id, reviewer),
+   fed from the ledger entry (`remote: true`).
+
+**Not weakened.** The independent reviewer verdict, its single use and
+lifetime, the bundle, the rate limits, the dispatch gate's exact-prompt rule
+and the lease are all reused as is. `R-GIT-PUSH-DELETE-REMOTE` and
+`R-GIT-BRANCH-FORCE-DELETE` still deny every other route; the new route is a
+subcommand the guards already know how to prove, not an exemption by role. A
+coordinator's own judgment is never the evidence: the reviewer's verdict is.
+
+**Open for the child to settle, no owner input needed.** Whether the remote
+variant counts against the same removal-rate window as local removals
+(recommendation: yes, one window).
+
+## 22. Upgrade as a standing-authorisation preset (Q66 (b))
+
+Owner ruling: upgrading hooks-daemon to the latest tag is a default standing
+authorisation in every project, shipped as a preset. Refinement (bus id
+`$vXu1JaVjHLZ1Kc5av0-zniJ0g81Rxz0NQTE6YKazliY`): a config key controls how far
+an AUTOMATIC upgrade may go. Built by Plan 00633 (it already owns the
+`standing_authorisations` store; Plan 00632 is the unattended gate and does
+not touch the store).
+
+**Existing pieces.** `standing_authorisations` (Plan 00223/00283) replays
+recorded authorisations as short text, every built-in ships DISABLED
+("nothing is authorised by default"), and text is a recorded request, never a
+countermand. A preset is a built-in entry that ships enabled for this one
+act, with the same revocable config key. Plan 00625 (automatic upgrade
+standing approval and upgrade lock) is an unfilled template: it names no
+switch, no signing key and no lock design yet, so there is nothing to reuse
+and nothing to be blocked on mechanically.
+
+**Key.** Proposed `upgrade.automatic_scope`, values `major | minor | patch | none`, default `major` (the coordinator's reading of the owner's "b yes").
+Plan 00625 must reuse this name for its switch rather than coin another.
+
+**Semantics.** The "current" version is the installed daemon version read from
+the installed package (not from git history). The target is the highest
+release tag the rule admits:
+
+| value   | admitted target                               |
+| ------- | --------------------------------------------- |
+| `major` | the latest tag                                |
+| `minor` | the latest tag with the same major as current |
+| `patch` | the latest tag with the same major and minor  |
+| `none`  | nothing: every upgrade is triggered by hand   |
+
+At a boundary the setting forbids (a newer tag exists but is out of scope),
+surface a one-line notice naming the current version, the newer tag and the
+setting; never block, and a manual upgrade is never affected by the key. An
+unparseable version or tag list admits nothing and logs why (fail closed,
+notice only).
+
+**Interplay with signature verification.** Earlier owner-side ruling:
+unattended upgrades must verify the tag signature. The scope key decides
+WHICH tag is eligible; verification decides whether an eligible tag may be
+applied unattended. They compose with AND.
+
+**Decision (recommendation).** Ship the preset now, enabled, with the
+verification the upgrade path already performs, and have the preset's text
+authorise only an upgrade the agent runs through the documented upgrade
+procedure (an attended session act). Do NOT ship an unattended, no-human
+upgrade until Plan 00625 lands its signed-tag verification and upgrade lock:
+the preset authorises the act, 00625 is what makes it safe to fire without a
+human. Rationale: the preset only records consent for attended sessions, which
+does not weaken the signature ruling; the unattended trigger is a different
+mechanism and stays gated on 00625 and the owner's signing key.
+
+**Open point for the owner.** The default `major` is the coordinator's
+reading of "b yes", and it sits against the signature-verification ruling:
+with `major` and an unsigned or unverifiable latest tag, nothing unattended
+may apply it. Confirm `major`, or choose `minor` as the default until 00625's
+verification ships.
+
+**Acceptance (tests first, per value; current 1.4.2, tags 1.4.3, 1.5.0, 2.0.0
+as the fixture):** `major` selects 2.0.0; `minor` selects 1.5.0 and emits the
+notice naming 2.0.0; `patch` selects 1.4.3 and emits the notice naming 1.5.0
+and 2.0.0; `none` selects nothing and emits one notice; no newer tag in scope
+emits no notice; a manual upgrade ignores the key in all four; an unparseable
+tag list selects nothing and logs; the preset text is a recorded request that
+names `upgrade.automatic_scope` and contains no "ignore/override" wording; an
+unsigned latest tag is never applied unattended once 00625 lands.

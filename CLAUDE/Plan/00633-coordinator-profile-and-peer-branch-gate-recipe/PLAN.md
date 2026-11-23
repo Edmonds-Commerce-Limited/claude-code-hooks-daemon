@@ -55,6 +55,20 @@ still gates on that team, through Plan 00634.
 - [ ] ⬜ **Task 3.1**: `gate_command` config and per-branch record in
   `merge_qa_advisor` / work-queue. Targeted QA green; live check.
 
+### Phase 4: Upgrade preset (owner ruling Q66 (b))
+
+Design: [00630 DESIGN.md section 22](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md).
+Not seat-gated: a default in every project.
+
+- [ ] ⬜ **Task 4.1**: Tests first: the four `upgrade.automatic_scope` values
+  (major, minor, patch, none) against a fixed current version and tag list;
+  one-line notice at a forbidden boundary, never a block; manual upgrade
+  unaffected; unparseable tags select nothing.
+- [ ] ⬜ **Task 4.2**: `upgrade` built-in preset in `standing_authorisations`,
+  shipped enabled, recorded-request wording naming the key, default `major`
+  (owner to confirm, DESIGN.md section 22). Does not authorise an unattended
+  upgrade; that waits on Plan 00625's signed-tag verification.
+
 ## Dependencies
 
 - Plan 00631. Related Plans 00470 (work-queue), 00502 (merge gate).

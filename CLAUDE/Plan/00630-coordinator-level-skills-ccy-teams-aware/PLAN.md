@@ -52,6 +52,7 @@ Vet: [subagent-reports/261123-fedora-desktop-vet.md](subagent-reports/261123-fed
 | [00633](../00633-coordinator-profile-and-peer-branch-gate-recipe/PLAN.md) (c) | coordinator profile and `gate_command` recipe (B11, B12)  | 00631                           |
 | [00635](../00635-host-seat-lane-guard/PLAN.md) (e)                            | host-seat lane guard (B7), by duty                        | 00631, Q64                      |
 | [00636](../00636-coordinator-conduct-advisories-and-board/PLAN.md) (f)        | B1, B4-B6 and retrospective situations s3-s5, s7, s8, s11 | 00631                           |
+| [00637](../00637-coordinator-no-value-remote-branch-retire/PLAN.md) (g)       | coordinator no-value remote branch retire (Q17, s1)       | 00631, 00620                    |
 | Plan 00523 (existing)                                                         | limit resilience (B9) and its armed state                 | independent                     |
 
 Order: 00631 first; then 00634, 00633 and 00636 in parallel; 00632 after
