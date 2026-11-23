@@ -47,12 +47,14 @@ import os
 import re
 import selectors
 import signal
+import stat
 import subprocess  # nosec B404 - fixed argv list, no shell
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants import Timeout
@@ -116,6 +118,7 @@ class ProbeReason(StrEnum):
     NO_TEAMS = "no_teams"
     KIT_MISSING = "kit_missing"
     SIGNAL_NOT_A_PATH = "signal_not_a_path"
+    KIT_UNTRUSTED = "kit_untrusted"
     COMMAND_NOT_FOUND = "command_not_found"
     COMMAND_TIMEOUT = "command_timeout"
     SEAT_UNREADABLE = "seat_unreadable"
@@ -141,6 +144,7 @@ class CommandStatus(StrEnum):
     TIMEOUT = "timeout"
     EXITED = "exited"  # ran and exited non-zero; ``exit_code`` says how
     TOO_LARGE = "too_large"  # stdout passed MAX_OUTPUT_BYTES; the group was killed
+    UNTRUSTED = "untrusted"  # binary relative, outside its kit, or world-writable
 
 
 @dataclass(frozen=True)
@@ -481,6 +485,33 @@ def probe_environment(env_overlay: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def _binary_trust(binary: str) -> CommandStatus | None:
+    """Why ``binary`` (``<kit>/bin/<name>``) must not run, or None when it may.
+
+    Review F6: the binary must be absolute, must resolve (symlinks followed) to
+    a path inside its own kit, and neither it, its directory nor the kit may be
+    world-writable. A missing binary is NOT_FOUND.
+    """
+    given = Path(binary)
+    if not given.is_absolute():
+        return CommandStatus.UNTRUSTED
+    real_binary = given.resolve()
+    real_kit = given.parent.parent.resolve()
+    if not real_binary.is_relative_to(real_kit):
+        return CommandStatus.UNTRUSTED
+    for path in (real_binary, real_binary.parent, real_kit):
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
+            return CommandStatus.NOT_FOUND
+        except OSError as exc:
+            _LOGGER.debug("teamchat seat probe: kit not inspectable (%s)", type(exc).__name__)
+            return CommandStatus.UNTRUSTED
+        if mode & stat.S_IWOTH:
+            return CommandStatus.UNTRUSTED
+    return None
+
+
 def _kill_group(process: subprocess.Popen[bytes]) -> None:
     """SIGKILL ``process``'s whole group, then reap the leader.
 
@@ -520,12 +551,17 @@ def default_command_runner(
 ) -> CommandOutcome:
     """Run ``args`` (no shell) in :func:`probe_environment` of ``env_overlay``.
 
+    ``args[0]`` must pass :func:`_binary_trust` first, or nothing runs.
+
     Review F5: the command gets no stdin (``/dev/null``) and no terminal, runs
     in its own session, and its stdout is read to :data:`MAX_OUTPUT_BYTES`
     only. On timeout or over-cap output the whole process group is killed, so
     no grandchild outlives the probe.
     """
     deadline = time.monotonic() + timeout
+    refused = _binary_trust(args[0]) if args else CommandStatus.NOT_FOUND
+    if refused is not None:
+        return CommandOutcome(refused)
     try:
         process = subprocess.Popen(  # nosec B603 - fixed argv, no shell
             list(args),
@@ -572,6 +608,8 @@ def _from_outcome(outcome: CommandOutcome) -> SeatContext:
         return SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
     if outcome.status is CommandStatus.TOO_LARGE:
         return SeatContext.unresolved(ProbeReason.OUTPUT_TOO_LARGE)
+    if outcome.status is CommandStatus.UNTRUSTED:
+        return SeatContext.unresolved(ProbeReason.KIT_UNTRUSTED)
     if outcome.exit_code == EXIT_NO_SESSION:
         return SeatContext.absent(ProbeReason.NO_SESSION)
     if outcome.exit_code == EXIT_UNREADABLE:
