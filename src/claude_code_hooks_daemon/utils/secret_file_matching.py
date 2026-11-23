@@ -3022,6 +3022,38 @@ def iter_protected_mentions(
         if pattern is not None and token not in yielded_tokens:
             yielded_tokens.add(token)
             yield (pattern, token)
+    if context == "bash":
+        for word in _extglob_words(command):
+            pattern = _glob_link_mention(
+                word, effective, patterns, project_root, default_semantics=default_globs()
+            )
+            if pattern is not None and word not in yielded_tokens:
+                yielded_tokens.add(word)
+                yield (pattern, word)
+
+
+#: A whole unquoted word holding an extglob group (``kit/@(bin|zz)/late``),
+#: whose ``(``, ``|`` and ``)`` the ordinary token stream splits on.
+_EXTGLOB_WORD: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w$])[^\s;&<>|()]*(?:[?*+@!]\([^()\s]*\)[^\s;&<>|()]*)+"
+)
+
+
+def _extglob_words(command: str) -> list[str]:
+    """Each unquoted word of ``command`` holding an extglob group (Ledger 00474 N710).
+
+    Bash reads ``@(a|b)`` as one word once ``extglob`` is on; the ordinary
+    stream splits it at ``(`` and ``|``, so no piece would be expanded as the
+    pattern it is. Quoted text is masked first: a quoted group is a literal.
+    """
+    if "(" not in command:
+        return []
+    unquoted = mask_quoted(command, keep_double=False)
+    return list(
+        dict.fromkeys(
+            command[match.start() : match.end()] for match in _EXTGLOB_WORD.finditer(unquoted)
+        )
+    )
 
 
 def _with_option_value_forms(tokens: Iterable[str]) -> Iterator[str]:
@@ -3506,7 +3538,18 @@ def _token_mention_judged(
             reals = _link_targets(token, effective_cwds)
             if realpath_cache is not None:
                 realpath_cache[token] = reals
-        return _link_mention(token, effective_cwds, patterns, project_root, reals)
+        found = _link_mention(token, effective_cwds, patterns, project_root, reals)
+        if (
+            found is None
+            and context == "bash"
+            and _EXTGLOB_OPENER.search(token) is not None
+            and not is_quoted_literal()
+        ):
+            # An extglob (`@(a|b)`) holds none of `*?[`, yet expands once extglob is on.
+            found = _glob_link_mention(
+                token, effective_cwds, patterns, project_root, default_semantics=default_globs()
+            )
+        return found
     if expands_globs():
         # Plan 00623 final review: a finite bracket glob (`zz/[l]ate`) is exactly its
         # expansions, and bash reads each through any link on its path.
@@ -4189,6 +4232,11 @@ _WORD_GLOB_UNREADABLE: Final[str] = (
 #: past NAME_MAX or PATH_MAX names nothing the shell could open either (N117).
 _ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ENAMETOOLONG})
 _GLOBSTAR: Final[str] = "**"
+_WORD_GLOB_UNREADABLE_PATTERN: Final[str] = "a globbed word holds a pattern the guard cannot read"
+#: An extglob operator (``?( *( +( @( !(``), live once ``shopt -s extglob`` is on.
+_EXTGLOB_OPENER: Final[re.Pattern[str]] = re.compile(r"[?*+@!]\(")
+#: Bracket expressions fnmatch closes at their first ``]``: POSIX classes and kin.
+_POSIX_BRACKET_OPENERS: Final[tuple[str, ...]] = ("[[:", "[[=", "[[.")
 
 
 class _WordGlobStopped(Exception):
@@ -4228,14 +4276,16 @@ class _WordGlobWalk:
         """What ``component`` matches under ``reached``: every entry when ``last``, else directories."""
         if component == _GLOBSTAR and not self.default_semantics:
             return self._globstar(reached, last)
-        if not any(char in _GLOB_CHARACTERS for char in component):
+        if not _component_is_pattern(component):
             return self._literal(reached, component, last)
-        pattern = _fnmatch_component(component)
+        pattern = _component_regex(component)
+        if pattern is None:
+            raise _WordGlobStopped(_WORD_GLOB_UNREADABLE_PATTERN)
         hidden = component.startswith(".") or not self.default_semantics
         return [
             found
             for name, is_link, entry in self._entries(reached.path)
-            if (hidden or not name.startswith(".")) and fnmatch.fnmatchcase(name, pattern)
+            if (hidden or not name.startswith(".")) and pattern.match(name) is not None
             for found in self._keep(reached, name, is_link, entry, last)
         ]
 
@@ -4280,8 +4330,6 @@ class _WordGlobWalk:
         while pending:
             directory = pending.pop()
             for name, is_link, entry in self._entries(directory.path):
-                if name.startswith(".") and self.default_semantics:
-                    continue
                 child = _Reached(
                     f"{directory.path.rstrip('/')}/{name}", directory.via_link or is_link
                 )
@@ -4305,20 +4353,88 @@ def _leads_to_directory(entry: os.DirEntry[str]) -> bool:
         raise _WordGlobStopped(_WORD_GLOB_UNREADABLE) from exc
 
 
-def _fnmatch_component(component: str) -> str:
-    """``component`` as :func:`fnmatch.fnmatchcase` reads it, matching at least what bash would.
+def _component_is_pattern(component: str) -> bool:
+    """Is ``component`` a pattern bash may expand: a wildcard, a bracket or an extglob."""
+    return (
+        any(char in _GLOB_CHARACTERS for char in component)
+        or _EXTGLOB_OPENER.search(component) is not None
+    )
+
+
+#: What each extglob operator makes of its (already translated) alternatives;
+#: ``!(...)`` is read as anything, the superset of what it matches.
+_EXTGLOB_REGEX: Final[dict[str, str]] = {
+    "?": "(?:{})?",
+    "*": "(?:{})*",
+    "+": "(?:{})+",
+    "@": "(?:{})",
+    "!": ".*",
+}
+_ANY_NAME_REGEX: Final[str] = ".*"
+
+
+def _glob_regex(fragment: str) -> str:
+    """Regex for a plain glob ``fragment`` (``*`` and ``?``); one holding a bracket is anything."""
+    if "[" in fragment:
+        return _ANY_NAME_REGEX
+    return "".join(
+        ".*" if char == "*" else "." if char == "?" else re.escape(char)
+        for char in fragment.replace("\\", "")
+    )
+
+
+def _extglob_regex(component: str) -> str | None:
+    """Regex for a component holding extglob groups; None when a group does not close.
+
+    A group that does not close here had its word split (at a ``|`` or a
+    paren) before it reached the guard, and a nested group is not read: the
+    first cannot be judged at all, the second is widened to anything.
+    """
+    parts: list[str] = []
+    index = 0
+    while index < len(component):
+        opener = _EXTGLOB_OPENER.match(component, index)
+        if opener is None:
+            parts.append(_glob_regex(component[index]))
+            index += 1
+            continue
+        close = component.find(")", opener.end())
+        if close == -1:
+            return None
+        body = component[opener.end() : close]
+        if "(" in body:
+            return _ANY_NAME_REGEX
+        alternatives = "|".join(_glob_regex(alternative) for alternative in body.split("|"))
+        parts.append(_EXTGLOB_REGEX[component[index]].format(alternatives))
+        index = close + 1
+    return "".join(parts)
+
+
+def _component_regex(component: str) -> re.Pattern[str] | None:
+    """``component`` as a whole-name regex matching at least what bash would; None if unreadable.
 
     Bash negates a bracket with ``^`` as well as ``!``; a backslash escape is
-    dropped, which can only widen the match (``\\*`` then matches more than ``*``).
+    dropped, which can only widen the match (``\\*`` then matches more than
+    ``*``). A POSIX class (``[[:alpha:]]``), which fnmatch closes at its first
+    ``]``, is widened to anything. An extglob (``@(a|b)``) is translated; one
+    whose group does not close in the component cannot be read: None.
     """
-    return component.replace("[^", "[!").replace("\\", "")
+    if _EXTGLOB_OPENER.search(component) is not None:
+        translated = _extglob_regex(component)
+        if translated is None:
+            return None
+        return re.compile(f"(?s:{translated})\\Z")
+    if any(opener in component for opener in _POSIX_BRACKET_OPENERS):
+        return re.compile(f"(?s:{_ANY_NAME_REGEX})\\Z")
+    return re.compile(fnmatch.translate(component.replace("[^", "[!").replace("\\", "")))
 
 
 def _component_spells(spelling: str, name: str) -> bool:
     """Could word component ``spelling`` (a glob or not) name the entry ``name``?"""
-    if not any(char in _GLOB_CHARACTERS for char in spelling):
+    if not _component_is_pattern(spelling):
         return spelling == name
-    return fnmatch.fnmatchcase(name, _fnmatch_component(spelling))
+    pattern = _component_regex(spelling)
+    return pattern is None or pattern.match(name) is not None
 
 
 def expand_word_glob(
@@ -4397,7 +4513,9 @@ def _glob_link_mention(
     :class:`IncompleteScanError`, which the guard denies.
     """
     for form in _normalised_token_forms(token):
-        if not _is_glob_shaped(form) or "\0" in form or form.startswith("~"):
+        if "\0" in form or form.startswith("~"):
+            continue
+        if not _is_glob_shaped(form) and _EXTGLOB_OPENER.search(form) is None:
             continue
         for base in _glob_bases(form, cwds):
             expanded = expand_word_glob(base, form, default_semantics=default_semantics)
@@ -4655,13 +4773,12 @@ class CwdSet(tuple[str, ...]):
 
     def _scanned_named(self, spelling: str) -> list[str]:
         """The scanned directories whose own name ``spelling`` spells."""
-        if not any(char in _GLOB_CHARACTERS for char in spelling):
+        if not _component_is_pattern(spelling):
             return self._by_name.get(spelling, [])
-        pattern = _fnmatch_component(spelling)
         return [
             directory
             for name, directories in self._by_name.items()
-            if fnmatch.fnmatchcase(name, pattern)
+            if _component_spells(spelling, name)
             for directory in directories
         ]
 
@@ -4724,15 +4841,15 @@ class CwdSet(tuple[str, ...]):
         first = components[0]
         if first == "..":
             return True
-        globbed = any(char in _GLOB_CHARACTERS for char in first)
+        globbed = _component_is_pattern(first)
         # Ledger 00474 N710: a glob past the first part is expanded, never realpath-ed as text.
-        later_globbed = any(char in _GLOB_CHARACTERS for part in components[1:] for char in part)
+        later_globbed = any(_component_is_pattern(part) for part in components[1:])
         for directory in self._existing:
             listing = self._listing(directory)
             if listing is None:
                 return True
             if globbed:
-                hits = [kind for name, kind in listing.items() if fnmatch.fnmatchcase(name, first)]
+                hits = [kind for name, kind in listing.items() if _component_spells(first, name)]
             else:
                 hits = [listing[first]] if first in listing else []
             for is_link, is_dir in hits:

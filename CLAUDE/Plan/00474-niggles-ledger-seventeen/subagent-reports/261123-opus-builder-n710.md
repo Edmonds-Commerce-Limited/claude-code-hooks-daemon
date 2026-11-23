@@ -51,6 +51,38 @@ In both fixtures `*/*` matches `inner/ilink`, a link to the protected dummy, so 
 
 **One regression, fixed.** N117 expects a name past NAME_MAX (ENAMETOOLONG) to be "absent", and it now is again.
 
+## Second round, after an advisor review
+
+**Shapes fnmatch reads more narrowly than bash.** These were red first, then fixed:
+
+- **POSIX classes** (`[[:alpha:]]`) are now widened to any name. Before this fix the Write route allowed them.
+- **Extglob.** `?( *( +( @( !(` is translated to a regex, with `!(…)` read as any name. Before this fix both routes allowed it.
+  - The ordinary token stream splits `@(bin|zz)` at `(` and `|`. A command-level pass (`_extglob_words`) now re-reads each whole unquoted extglob word.
+  - A group that does not close in its component stops the walk, so it fails closed.
+- **`could_be_link`'s first part and `_bases_spelling`** now use the same matcher (`_component_spells`). That covers `[^z]`.
+- **Dead code removed:** the unreachable dot-name `continue` in `_globstar`.
+
+**Discriminating fail-closed tests:**
+
+- An unlistable directory is now asserted on the Write route and with `_index` set to None.
+- An entry whose `is_symlink()` raises is tested.
+- Mutant check: making a stopped walk return `finished([])` turns 4 tests red. The mutant was reverted.
+
+**Real-tree over-block probe** (repository root, handler with no index):
+
+- Under certain bash defaults (this host), these are all allowed: `ls src/**/*.py`, `ls **/*.md`, `ls tests/*/*/*.py`, `cat src/claude_code_hooks_daemon/*/*.py` and `ls CLAUDE/Plan/*/PLAN.md`.
+- With semantics uncertain, `ls **/*.md` at the repository root is DENIED, because the globstar walk passes the 512-listing cap through `.git` and `untracked/`. The other commands stay allowed. That deny is the fail-closed outcome the brief asked for. It only happens where shell snapshots cannot confirm defaults, or in a command that runs `shopt`.
+
+**Words the expansion cannot place:**
+
+- `$D/*/late` and `"$PWD"/kit/*/late` are judged exactly like their literal twins; tests assert that the two decisions are equal.
+- A `~` form is skipped, just as `_link_targets` skips it for a literal, so the two stay consistent.
+- `LinkNames.reaches` is not extended for later-part globs (past the scan cap). Nothing tests it, so it is left as a follow-up.
+
+**Deny reason.** `cat kit/*/late` gets the same `R-SECRET-BASH-MENTION` reason as the literal path. No "could not build the explanation" error appeared in that probe.
+
+Final targeted run: `test_secret_file_guard*.py` gives 3137 passed, 11 skipped. ruff, black and mypy are clean.
+
 ## Notes
 
 - **Release note.** The note is `CLAUDE/UPGRADES/UNRELEASED/release-notes/089-…`. 088 is the highest number on main, and no origin branch adds 089.

@@ -326,3 +326,97 @@ class TestPastTheDirectoryCap:
 
     def test_a_plain_word_past_the_cap_is_still_allowed(self, crowded: Project) -> None:
         assert _both(f"{_MOVE} && cat r.md", crowded.root) == (Decision.ALLOW, Decision.ALLOW)
+
+
+class TestShapesTheMatcherMustNotNarrow:
+    """A pattern fnmatch reads more narrowly than bash must widen, never count as no match."""
+
+    @pytest.mark.parametrize(
+        "word",
+        [
+            "kit/[[:alpha:]]in/late",
+            "kit/bin/[[:lower:]]ate",
+            "kit/[^z]in/late",
+            "kit/[!z]in/l*",
+        ],
+    )
+    def test_bracket_classes_and_negation_are_denied(self, project: Project, word: str) -> None:
+        assert _both(f"cat {word}", project.root) == (Decision.DENY, Decision.DENY)
+
+    @pytest.mark.parametrize(
+        "word",
+        ["kit/?(b)in/late", "kit/*(x)bin/late", "kit/@(bin|zz)/late", "kit/!(lib)/late"],
+    )
+    def test_extglob_shapes_are_denied(self, project: Project, word: str) -> None:
+        command = f"shopt -s extglob; cat {word}"
+        assert _both(command, project.root) == (Decision.DENY, Decision.DENY)
+
+    @pytest.mark.parametrize(
+        "word", ["kit/@(lib)/notes.txt", "kit/?(x)lib/*", "kit/@(lib|zz)/notes.txt"]
+    )
+    def test_an_extglob_reaching_no_link_is_allowed(self, project: Project, word: str) -> None:
+        command = f"shopt -s extglob; cat {word}"
+        assert _both(command, project.root) == (Decision.ALLOW, Decision.ALLOW)
+
+    def test_a_glob_after_a_literal_variable_is_judged_like_its_literal(
+        self, project: Project
+    ) -> None:
+        literal = _both("D=kit; cat $D/bin/late", project.root)
+        globbed = _both("D=kit; cat $D/*/late", project.root)
+        assert globbed == literal
+
+    def test_a_glob_under_pwd_is_judged_like_its_literal(self, project: Project) -> None:
+        literal = _both('cat "$PWD"/kit/bin/late', project.root)
+        globbed = _both('cat "$PWD"/kit/*/late', project.root)
+        assert globbed == literal
+
+
+class TestUnreadableIsAFinding:
+    def test_an_unlistable_directory_stops_the_expansion(self, project: Project) -> None:
+        real_scandir = os.scandir
+        refused = str(project.kit / "bin")
+
+        def scandir(path: Any = ".") -> Any:
+            if str(path) == refused:
+                raise PermissionError(13, "Permission denied", refused)
+            return real_scandir(path)
+
+        with patch.object(os, "scandir", side_effect=scandir):
+            assert not sfm.expand_word_glob(str(project.root), "kit/bin/l*").complete
+            assert _write(f"{_SHEBANG}cat kit/bin/l*\n", project.root) is Decision.DENY
+            with patch.object(SecretFileGuardHandler, "_index", return_value=None):
+                assert _bash("cat kit/bin/l*", project.root) is Decision.DENY
+
+    def test_an_entry_that_cannot_be_classified_stops_the_expansion(self, project: Project) -> None:
+        real_scandir = os.scandir
+        refused = str(project.kit / "bin")
+
+        class _Entry:
+            def __init__(self, entry: os.DirEntry[str]) -> None:
+                self._entry = entry
+                self.name = entry.name
+
+            def is_symlink(self) -> bool:
+                raise PermissionError(13, "Permission denied", self.name)
+
+            def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+                return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+        class _Listing:
+            def __init__(self, path: str) -> None:
+                self._inner = real_scandir(path)
+
+            def __enter__(self) -> list[_Entry]:
+                return [_Entry(entry) for entry in self._inner.__enter__()]
+
+            def __exit__(self, *exc: object) -> None:
+                self._inner.__exit__(None, None, None)
+
+        def scandir(path: Any = ".") -> Any:
+            if str(path) == refused:
+                return _Listing(str(path))
+            return real_scandir(path)
+
+        with patch.object(os, "scandir", side_effect=scandir):
+            assert not sfm.expand_word_glob(str(project.root), "kit/bin/n*").complete
+            assert _write(f"{_SHEBANG}cat kit/bin/n*\n", project.root) is Decision.DENY
