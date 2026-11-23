@@ -109,6 +109,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "IdleWorkableIssueStopGateHandler": (
         "T1 denies a main-thread idle stop while a workable issue is cached and nothing is in flight"
     ),
+    "OwnerWaitStopGuardHandler": (
+        "T1 denies a coordinator seat's waiting stop until each open owner thread got a "
+        "notifying bus post, and the agent must know the reply commands"
+    ),
     "SubagentFullQaBlockerHandler": "T1 denies a full-suite QA run inside a subagent",
     "SubagentWorktreeWriteGuardHandler": (
         "T1 denies a subagent's Write/Edit into another checkout of its repository"
