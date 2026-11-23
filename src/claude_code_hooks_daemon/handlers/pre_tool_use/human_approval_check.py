@@ -55,8 +55,10 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.merge_to_main_approval impor
     merge_lands_on_main,
     merge_target,
 )
+from claude_code_hooks_daemon.utils.command_position import command_position_segments
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_commit_parsing import git_invocations
+from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
+from claude_code_hooks_daemon.utils.git_sync import default_branch
 from claude_code_hooks_daemon.utils.human_approval import (
     DEFAULT_VERIFIER,
     ActClass,
@@ -83,7 +85,8 @@ MODE_ADVISE: Final[str] = "advise"
 MODE_BLOCK: Final[str] = "block"
 _MODES: Final[frozenset[str]] = frozenset({MODE_OFF, MODE_ADVISE, MODE_BLOCK})
 
-_PUSH: Final[str] = "push"
+#: Porcelain push and the plumbing that pushes the same way.
+_PUSH_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"push", "send-pack", "http-push"})
 _CITE_TEAM: Final[str] = "team"
 _CITE_ID: Final[str] = "id"
 
@@ -139,27 +142,161 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
+#: Subcommands that move the CHECKED-OUT branch onto other history.
+_BRANCH_MOVERS: Final[frozenset[str]] = frozenset({"merge", "reset", "rebase", "cherry-pick", "am"})
+#: Flags that end or abandon an operation in progress rather than move a branch.
+_NON_MOVING_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--abort", "--quit", "--skip", "--show-current-patch", "--edit-todo"}
+)
+_SWITCHERS: Final[frozenset[str]] = frozenset({"checkout", "switch"})
+_NEW_BRANCH_FLAGS: Final[frozenset[str]] = frozenset(
+    {"-b", "-B", "-c", "-C", "--orphan", "--create"}
+)
+_DETACH_FLAGS: Final[frozenset[str]] = frozenset({"--detach", "-d"})
+_BRANCH_FORCE_FLAGS: Final[frozenset[str]] = frozenset({"-f", "--force", "-m", "-M", "-C"})
+_PULL_REFSPEC_POSITIONALS: Final[int] = 2
+_HEADS: Final[str] = "refs/heads/"
+#: Names taken as the default branch when it cannot be read (fail closed).
+_FALLBACK_DEFAULTS: Final[frozenset[str]] = frozenset({"main", "master"})
+#: `gh api` merging on GitHub: a pull request merge, or the repository merges endpoint.
+_GH_API_MERGE: Final[re.Pattern[str]] = re.compile(
+    r"\bgh\b.*\bapi\b.*(?:\bpulls/[^/\s]+/merge\b|\bmerges\b)"
+)
+#: The checked-out branch at the start of the command, read lazily.
+_START: Final[str] = "\0start"
+
+
+def _positionals(arguments: tuple[str, ...]) -> list[str]:
+    return [word for word in arguments if not word.startswith("-")]
+
+
+def _is_unreadable(word: str) -> bool:
+    return word == "-" or "$" in word or "`" in word
+
+
+def _switched_to(subcommand: str, arguments: tuple[str, ...]) -> str | None:
+    """The branch a checkout/switch leaves checked out; None when unreadable.
+
+    ``_START`` when it switches no branch (``git checkout -- path``).
+    """
+    if subcommand == "checkout" and "--" in arguments:
+        return _START
+    words = list(arguments)
+    for index, word in enumerate(words):
+        if word in _NEW_BRANCH_FLAGS:
+            new = words[index + 1] if index + 1 < len(words) else ""
+            return None if not new or _is_unreadable(new) else new
+        if word in _DETACH_FLAGS:
+            return None
+    positionals = [word for word in words if not word.startswith("-") or word == "-"]
+    if not positionals:
+        return _START
+    return None if _is_unreadable(positionals[0]) else positionals[0]
+
+
+def _names_default_ref(ref: str, defaults: frozenset[str]) -> bool:
+    ref = ref.removeprefix("+")
+    return ref in defaults or (ref.startswith(_HEADS) and ref[len(_HEADS) :] in defaults)
+
+
+def _moves_named_main_ref(
+    subcommand: str, arguments: tuple[str, ...], defaults: frozenset[str]
+) -> bool:
+    """A command that rewrites the default branch's ref by NAME, from any checkout."""
+    positionals = _positionals(arguments)
+    if subcommand == "fetch":
+        return any(
+            _names_default_ref(spec.split(":", 1)[1], defaults)
+            for spec in positionals
+            if ":" in spec
+        )
+    if subcommand == "update-ref":
+        if "-d" in arguments:
+            return False
+        if "--stdin" in arguments:
+            return True
+        return bool(positionals) and _names_default_ref(positionals[0], defaults)
+    if subcommand == "branch" and any(flag in arguments for flag in _BRANCH_FORCE_FLAGS):
+        return any(word in defaults for word in positionals)
+    return False
+
+
+def _moves_checked_out_branch(subcommand: str, arguments: tuple[str, ...]) -> bool:
+    if subcommand == "pull":
+        return len(_positionals(arguments)) >= _PULL_REFSPEC_POSITIONALS
+    if subcommand not in _BRANCH_MOVERS:
+        return False
+    # `--continue` still lands the operation on the branch, so it counts.
+    return not any(word in _NON_MOVING_FLAGS for word in arguments)
+
+
+def moves_main(command: str, cwd: Path) -> bool:
+    """Whether ``command`` moves the default branch onto other history.
+
+    Two kinds. A command that names the default branch's ref (``fetch .
+    x:main``, ``update-ref refs/heads/main``, ``branch -f main``) moves it
+    from any checkout. A merge, reset, rebase, cherry-pick, ``am`` or
+    refspec pull moves the CHECKED-OUT branch, so it is judged against the
+    branch the command has switched to by then: the default branch counts,
+    an unreadable switch (``checkout -``, ``$B``, ``--detach``) counts (fail
+    closed), and with no switch the starting checkout is read via
+    :func:`merge_lands_on_main`, whose unreadable answer also counts.
+    """
+    read = default_branch(cwd)
+    defaults = frozenset({read}) if read else _FALLBACK_DEFAULTS
+    branch: str | None = _START
+    for run in git_invocations(command):
+        if run.subcommand in _SWITCHERS:
+            switched = _switched_to(run.subcommand, run.arguments)
+            if switched != _START:
+                branch = switched
+            continue
+        if _moves_named_main_ref(run.subcommand, run.arguments, defaults):
+            return True
+        if not _moves_checked_out_branch(run.subcommand, run.arguments):
+            continue
+        if branch is None or branch in defaults:
+            return True
+        if branch == _START:
+            target = next(iter(_positionals(run.arguments)), "")
+            if target not in defaults and merge_lands_on_main(cwd, target) is not False:
+                return True
+    return False
+
+
 def classify_acts(command: str, cwd: Path) -> frozenset[ActClass]:
     """The act classes ``command`` runs. Text it only prints names none.
 
-    An unreadable current branch with a merge named counts as a merge into
-    main (fail closed); ``gh pr merge`` always does, because it lands on the
-    pull request's base on GitHub whatever the local checkout.
+    A merge into main is ``gh pr merge`` (always: it lands on the pull
+    request's base whatever the local checkout), a ``gh api`` merge, or
+    anything :func:`moves_main` reports. A merge this reading names but
+    cannot place in any git run still counts unless the checkout is a
+    definite no (fail closed).
     """
+    runs = git_invocations(command)
     acts: set[ActClass] = set()
-    if any(run.subcommand == _PUSH for run in git_invocations(command)):
+    if any(run.subcommand in _PUSH_SUBCOMMANDS for run in runs):
         acts.add(ActClass.PUSH)
     if names_a_deletion(command):
         acts.add(ActClass.DELETE)
     if sets_world_writable(command):
         acts.add(ActClass.PERMISSION)
-    if is_pr_merge(command):
+    if _merges_into_main(command, cwd, runs):
         acts.add(ActClass.MERGE_MAIN)
-    else:
-        target = merge_target(command)
-        if target is not None and merge_lands_on_main(cwd, target) is not False:
-            acts.add(ActClass.MERGE_MAIN)
     return frozenset(acts)
+
+
+def _merges_into_main(command: str, cwd: Path, runs: list[GitInvocation]) -> bool:
+    if is_pr_merge(command):
+        return True
+    if any(_GH_API_MERGE.search(segment) for segment in command_position_segments(command)):
+        return True
+    if moves_main(command, cwd):
+        return True
+    target = merge_target(command)
+    if target is None or any(run.subcommand in ("merge", "pull") for run in runs):
+        return False
+    return merge_lands_on_main(cwd, target) is not False
 
 
 def cite_from_command(command: str) -> ApprovalCite | None:

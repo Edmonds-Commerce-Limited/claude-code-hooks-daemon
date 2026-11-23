@@ -204,6 +204,98 @@ class TestClassifyActs:
         monkeypatch.setattr(module, "merge_lands_on_main", lambda cwd, target: False)
         assert ActClass.MERGE_MAIN not in classify_acts("git merge feature", Path(CWD))
 
+    @pytest.mark.parametrize("command", ["git send-pack origin x", "git http-push url x"])
+    def test_plumbing_push_is_push(self, command: str) -> None:
+        """Review finding 3: push plumbing is a push."""
+        assert ActClass.PUSH in classify_acts(command, Path(CWD))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh -R o/r pr merge 5",
+            "gh api -X PUT repos/o/r/pulls/5/merge",
+            "gh api repos/o/r/merges -f base=main -f head=x",
+        ],
+    )
+    def test_remote_merges_are_merge_main(
+        self, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        monkeypatch.setattr(module, "merge_lands_on_main", lambda cwd, target: False)
+        assert ActClass.MERGE_MAIN in classify_acts(command, Path(CWD))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git fetch . feature:main",
+            "git fetch origin +feature:refs/heads/main",
+            "git update-ref refs/heads/main abc123",
+            "git branch -f main feature",
+        ],
+    )
+    def test_moving_the_main_ref_from_anywhere_is_merge_main(
+        self, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        """These name the ref, so the checked-out branch and worktree do not matter."""
+        monkeypatch.setattr(module, "merge_lands_on_main", lambda cwd, target: False)
+        monkeypatch.setattr(module, "default_branch", lambda cwd: "main")
+        assert ActClass.MERGE_MAIN in classify_acts(command, Path(CWD))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git reset --hard feature",
+            "git reset --hard",
+            "git rebase feature",
+            "git cherry-pick abc123",
+            "git am < fix.patch",
+        ],
+    )
+    def test_history_moves_on_main_are_merge_main(self, command: str) -> None:
+        assert ActClass.MERGE_MAIN in classify_acts(command, Path(CWD))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git reset --hard feature",
+            "git rebase feature",
+            "git cherry-pick abc123",
+            "git fetch origin feature:feature",
+            "git update-ref refs/heads/feature abc123",
+            "git rebase --abort",
+        ],
+    )
+    def test_history_moves_off_main_are_not_merge_main(
+        self, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        monkeypatch.setattr(module, "merge_lands_on_main", lambda cwd, target: False)
+        monkeypatch.setattr(module, "default_branch", lambda cwd: "main")
+        assert ActClass.MERGE_MAIN not in classify_acts(command, Path(CWD))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git checkout main && git merge feature",
+            "git switch main && git reset --hard feature",
+            "git checkout - && git merge feature",
+            "git checkout $B && git merge feature",
+            "git switch --detach && git cherry-pick abc",
+        ],
+    )
+    def test_judged_against_the_branch_the_command_moves_to(
+        self, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        """Issued from another branch; a switch to main, or one unreadable, counts."""
+        monkeypatch.setattr(module, "merge_lands_on_main", lambda cwd, target: False)
+        monkeypatch.setattr(module, "default_branch", lambda cwd: "main")
+        assert ActClass.MERGE_MAIN in classify_acts(command, Path(CWD))
+
+    def test_switch_away_from_main_then_merge_is_not_merge_main(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(module, "default_branch", lambda cwd: "main")
+        command = "git checkout feature && git merge other"
+        assert ActClass.MERGE_MAIN not in classify_acts(command, Path(CWD))
+
     def test_pr_merge_is_merge_main_whatever_the_checkout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -264,9 +356,7 @@ class TestArming:
         result = handler.handle(bash(PUSH))
         assert result.decision == Decision.DENY
 
-    @pytest.mark.parametrize(
-        "context", [WORKER, SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)]
-    )
+    @pytest.mark.parametrize("context", [WORKER, SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)])
     def test_classify_failure_is_silent_for_an_unarmed_seat(
         self, monkeypatch: pytest.MonkeyPatch, context: SeatContext
     ) -> None:
