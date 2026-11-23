@@ -313,6 +313,17 @@ def _state_path(sidecar_dir: Path, child_pid: int = _CHILD) -> Path:
 def _child_starts(monkeypatch: pytest.MonkeyPatch) -> dict[int, tuple[int, float]]:
     starts: dict[int, tuple[int, float]] = {_CHILD: (_CHILD * 100, 0.0), 7: (700, 0.0)}
     monkeypatch.setattr(_mod, "_rate_limit_child_start", lambda pid: starts.get(pid), raising=False)
+    # The worker has seen a dialog-free screen since the human's last key, for
+    # each fake child; a child not in this map is a fresh worker's (keys assumed).
+    monkeypatch.setattr(
+        _mod,
+        "_RATE_LIMIT_KEYS_SINCE_DUMP",
+        {
+            f"supervise-rate-limit-dialog.{pid}-{ticks}.json": False
+            for pid, (ticks, _) in starts.items()
+        },
+        raising=False,
+    )
     return starts
 
 
@@ -1078,3 +1089,62 @@ class TestTakenOverDialogStaysTaken:
             for offset in range(3)
         ]
         assert all(outcome.payload is None for outcome in late)
+
+
+class TestKeysBeforeTheFirstDump:
+    """Review I2: the human's keys count as taking over even before a dump shows the dialog."""
+
+    def test_arrow_before_the_first_dump_then_quiet(self, sidecar_dir: Path, machine: Any) -> None:
+        # The human presses Down while the screen is still redrawing (no dump),
+        # then pauses to read; the first dump arrives with no new input.
+        _tick(sidecar_dir, machine, _dialog_facts("", raw=b"\x1b[B", quiet=0.5))
+        moved = _dialog(_STANDARD, pointer=1)
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(moved, now=_NOW + offset))
+            for offset in range(1, 5)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+
+    def test_key_in_the_same_tick_as_the_first_dump(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, raw=b"\x1b[B"))
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            for offset in range(1, 5)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+
+    def test_a_submitted_prompt_is_not_taking_over(self, sidecar_dir: Path, machine: Any) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts("", raw=b"run the tests\r", quiet=0.5))
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1))
+        answered = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 2))
+        assert answered.payload == "\r"
+
+    def test_a_dialog_free_dump_after_the_keys_clears_them(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _tick(sidecar_dir, machine, _dialog_facts("", raw=b"half typed", quiet=0.5))
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen("half typed"), now=_NOW + 1))
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 2))
+        answered = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 3))
+        assert answered.payload == "\r"
+
+    def test_a_dialog_free_dump_in_the_typing_tick_does_not_clear(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # The dump of a tick that carried keys may predate them.
+        _tick(sidecar_dir, machine, _dialog_facts(_prompt_screen(""), raw=b"\x1b[B"))
+        outcomes = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            for offset in range(1, 4)
+        ]
+        assert all(outcome.payload is None for outcome in outcomes)
+
+    def test_a_fresh_worker_waits_for_a_dialog_free_dump(
+        self, sidecar_dir: Path, machine: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "_RATE_LIMIT_KEYS_SINCE_DUMP", {})
+        first = [
+            _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + offset))
+            for offset in range(3)
+        ]
+        assert all(outcome.payload is None for outcome in first)

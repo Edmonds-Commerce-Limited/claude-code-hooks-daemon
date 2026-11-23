@@ -8881,6 +8881,37 @@ def _human_typed(raw_b64: str) -> bool:
     return bool(_RATE_LIMIT_TERMINAL_REPORTS.sub(b"", raw))
 
 
+# Review I2: per state file, whether the human pressed keys after the last
+# dialog-free screen the worker saw. The host sends a dump only after quiet
+# output and every arrow redraws, so keys pressed while navigating the dialog
+# arrive before the first dump of it. A child missing here (a fresh worker)
+# counts as having keys pending until a dialog-free dump is seen.
+_RATE_LIMIT_KEYS_SINCE_DUMP: dict[str, bool] = {}
+
+
+def _human_submitted(raw_b64: str) -> bool:
+    """True when the forwarded stdin ends with Enter: the human sent a prompt."""
+    try:
+        raw = base64.b64decode(raw_b64)
+    except (ValueError, TypeError):
+        return False
+    return _RATE_LIMIT_TERMINAL_REPORTS.sub(b"", raw).endswith(b"\r")
+
+
+def _note_human_keys(key: str, *, typed: bool, raw_b64: str, dialog_free_dump: bool) -> bool:
+    """Update the keys-since-dump latch for ``key``; True while keys are pending.
+
+    Set by any key; cleared by a submitted prompt (a chunk ending in Enter),
+    or by a dialog-free dump in a tick that carried no key (that tick's dump
+    may predate its keys).
+    """
+    if typed:
+        _RATE_LIMIT_KEYS_SINCE_DUMP[key] = not _human_submitted(raw_b64)
+    elif dialog_free_dump:
+        _RATE_LIMIT_KEYS_SINCE_DUMP[key] = False
+    return _RATE_LIMIT_KEYS_SINCE_DUMP.get(key, True)
+
+
 def _new_rate_limit_window(reset: float | None, now: float) -> dict[str, object]:
     """Fresh state for a reset window (``reset`` None when no time was parsed)."""
     return {
@@ -8934,7 +8965,16 @@ def _rate_limit_dialog_step(
     if path is None:
         return None, None
     note: str | None = None
-    if _human_typed(facts.human_raw_input) and path.exists():
+    typed = _human_typed(facts.human_raw_input)
+    dump = facts.screen_dump
+    dialog = recognise_rate_limit_dialog(dump) if dump else None
+    keys_pending = _note_human_keys(
+        path.name,
+        typed=typed,
+        raw_b64=facts.human_raw_input,
+        dialog_free_dump=bool(dump) and dialog is None,
+    )
+    if typed and path.exists():
         state = _load_rate_limit_state(path, facts.now_wall, child_pid)
         phase = state.get("phase")
         if phase in (_PHASE_ANSWERED, _PHASE_CLEARED) or (
@@ -8943,10 +8983,8 @@ def _rate_limit_dialog_step(
             state["phase"] = _PHASE_ABANDONED
             _save_rate_limit_state(path, state)
             note = f"{_RATE_LIMIT_LOG}: the human typed, left to them for this window"
-    dump = facts.screen_dump
     if not dump:
         return None, note
-    dialog = recognise_rate_limit_dialog(dump)
     if dialog is None:
         if path.exists():
             state = _load_rate_limit_state(path, facts.now_wall, child_pid)
@@ -8995,6 +9033,10 @@ def _rate_limit_dialog_step(
             # No reset time was parsed: each occurrence is answered once.
             state.update(phase="", answered_at=None, cleared_at=None, clear_attempts=0)
         state.update(occurrence_open=True, occurrence_keys=0, last_signature="")
+        if typed or keys_pending:
+            state["phase"] = _PHASE_ABANDONED
+            _save_rate_limit_state(path, state)
+            return hold("the human pressed keys before it was seen, left to them"), None
     elif phase in (_PHASE_ABANDONED, _PHASE_DONE):
         return hold("left to the human for this window"), None
     if not (
