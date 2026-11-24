@@ -110,9 +110,13 @@ def _entry(root: Path, name: str = "e1") -> Path:
 
 
 def _claim(
-    root_fd: int, name: str, store: ArchiveStore | None = None, checkout: str = CHECKOUT
+    root_fd: int,
+    name: str,
+    store: ArchiveStore | None = None,
+    checkout: str = CHECKOUT,
+    at: datetime | None = None,
 ) -> Claimed:
-    """Claim ``name``; with a store, record the claim first as a sweep does."""
+    """Claim ``name``; with a store, record the claim first (at ``at``, else NOW) as a sweep does."""
     expected = fingerprint_at(root_fd, name, max_inodes=MAX)
     if store is not None:
         record_claim(
@@ -123,7 +127,7 @@ def _claim(
             archive_id=new_archive_id(),
             original_path=f"untracked/scratch/{name}",
             checkout=checkout,
-            at=NOW,
+            at=NOW if at is None else at,
         )
     result = claim(root_fd, name, expected, max_inodes=MAX)
     assert isinstance(result, Claimed)
@@ -138,7 +142,7 @@ def _record(name: str, store: ArchiveStore, handle: Claimed, tar: TarTool) -> Ar
         checkout=CHECKOUT,
         verdict="DISPOSABLE",
         proof_ids=("P1",),
-        packed_at="2026-11-20T00:00:00Z",
+        packed_at="2026-11-20T12:00:00Z",
         expires_at=None,
         counts=result.counts,
         archive_size=result.size,
@@ -1288,9 +1292,9 @@ FUTURE = "2026-12-01T00:00:00Z"
 
 
 def _archived_with(
-    root_fd: int, store: ArchiveStore, tar: TarTool, **changes: Any
+    root_fd: int, store: ArchiveStore, tar: TarTool, at: datetime = NOW, **changes: Any
 ) -> tuple[Claimed, ArchiveRecord]:
-    handle = _claim(root_fd, "e1", store)
+    handle = _claim(root_fd, "e1", store, at=at)
     record = dataclasses.replace(_record("e1", store, handle, tar), **changes)
     store.append(record)
     return handle, record
@@ -1298,7 +1302,45 @@ def _archived_with(
 
 def _due(root_fd: int, store: ArchiveStore, tar: TarTool) -> tuple[Claimed, ArchiveRecord]:
     """An archive whose expiry (``expires_at`` and packed + 24h) is before NOW."""
-    return _archived_with(root_fd, store, tar, expires_at=PAST, packed_at="2026-11-18T00:00:00Z")
+    return _archived_with(
+        root_fd,
+        store,
+        tar,
+        at=datetime(2026, 11, 18, tzinfo=UTC),
+        expires_at=PAST,
+        packed_at="2026-11-18T00:00:00Z",
+    )
+
+
+class TestResumeAfterARestore:
+    """Task 3.9 finding 2: a restored tree's leftover claim is never proved by the old record."""
+
+    def test_a_record_packed_before_the_claim_does_not_prove_the_tree(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, old = _archived_with(
+            root_fd, store, tar, at=datetime(2026, 11, 19, tzinfo=UTC), packed_at=NOW.isoformat()
+        )
+        # The tree is restored (a NEW directory, so a new birth) and claimed again.
+        claimed = root / (CLAIM_PREFIX + "e1")
+        aside = root / "aside"
+        claimed.rename(aside)
+        shutil.copytree(aside, root / "e1", symlinks=True)
+        shutil.rmtree(aside)
+        _claim(root_fd, "e1", store, at=datetime(2026, 11, 21, tzinfo=UTC))
+        (claimed / "a.txt").unlink()  # part of the restored tree was deleted since
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "sub" / "b.bin").read_bytes() == bytes(range(256))
+        assert _archive_path(store, old).exists()
+
+    def test_a_record_packed_after_the_claim_still_proves_it(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _archived_with(root_fd, store, tar, at=datetime(2026, 11, 19, tzinfo=UTC))
+        assert _resume(root_fd, store, tar).outcome == "removed"
 
 
 def _archive_path(store: ArchiveStore, record: ArchiveRecord) -> Path:

@@ -4,3 +4,5 @@
 **Audience**: operators
 
 `scratch-sweep` no longer judges a scratch entry DISPOSABLE when it holds a git repository with objects. A clone made with `git clone --shared` anywhere on disk borrows a repository's objects through its `alternates` file, and no sweep can find such a borrower outside the project. Such an entry is now UNCERTAIN: `--apply` packs it with the 168-hour hold (`scratch.archive.uncertain_hours`) rather than the 12-hour one, and prints its restore command as before. A clone that broke when its lender was archived can be repaired with `hooks-daemon scratch-sweep restore <id>` within that hold. Entries with no repository, or holding only an empty one, are unchanged. When a git pointer in the scratch root cannot be read, an UNCERTAIN entry is now held STUCK, as a DISPOSABLE one already was.
+
+After a restore, a sweep that crashed while claiming the restored entry no longer removes it on the strength of the archive made before the restore: resuming a leftover claim accepts only an archive packed after that claim was recorded, and otherwise renames the entry back.

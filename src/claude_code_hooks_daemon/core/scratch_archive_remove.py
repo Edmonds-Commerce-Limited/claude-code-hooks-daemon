@@ -229,22 +229,38 @@ def claim_event_covers(
     )
 
 
-def _claim_recorded(
+def _first_claim_at(
     store: ArchiveStore,
     checkout: str,
     name: str,
     info: os.stat_result,
     birth: BirthStamp | None,
-) -> bool:
+) -> datetime | None:
+    """When the earliest claim event covering this very inode was written; None: no such event.
+
+    An event whose ``at`` cannot be parsed refuses the resume (fail closed).
+    """
     try:
         events = store.read_events().events
     except StoreRefused as exc:
         raise RemoveRefused(str(exc)) from exc
-    return any(
-        isinstance(event, ClaimEvent)
-        and claim_event_covers(event, checkout=checkout, name=name, info=info, birth=birth)
+    times = [
+        _parsed(event.at, "claim event")
         for event in events
-    )
+        if isinstance(event, ClaimEvent)
+        and claim_event_covers(event, checkout=checkout, name=name, info=info, birth=birth)
+    ]
+    return min(times) if times else None
+
+
+def _parsed(stamp: str, what: str) -> datetime:
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError as exc:
+        raise RemoveRefused(f"unparseable {what} time {stamp!r}") from exc
+    if moment.tzinfo is None:
+        raise RemoveRefused(f"{what} time {stamp!r} names no time zone")
+    return moment
 
 
 def _names_entry(record: ArchiveRecord, name: str) -> bool:
@@ -543,11 +559,21 @@ def resume_claimed(
         birth = birth_stamp(parent_fd, claimed_name)
     except OSError as exc:
         raise RemoveRefused(f"cannot read the birth of {claimed_name!r}: {exc}") from exc
-    if not _claim_recorded(store, checkout, name, info, birth):
+    claimed_at = _first_claim_at(store, checkout, name, info, birth)
+    if claimed_at is None:
         return Resumed(
             name, "foreign", f"no claim record covers {claimed_name!r}: not a sweep's; left alone"
         )
-    candidates = [r for r in reversed(records) if r.checkout == checkout and _names_entry(r, name)]
+    # Task 3.9 finding 2: only a pack of THIS tree may prove it. A record packed
+    # before the claim is of an earlier tree of the same name (one since
+    # restored), whose retention is not this tree's.
+    candidates = [
+        r
+        for r in reversed(records)
+        if r.checkout == checkout
+        and _names_entry(r, name)
+        and _parsed(r.packed_at, "packed_at") >= claimed_at
+    ]
     unchecked = False
     for record in candidates:
         try:
