@@ -681,6 +681,10 @@ class Priority:
     # the injected context block sits AFTER the user's prompt, so a higher
     # number is the recency position within it.
     STANDING_AUTHORISATIONS = 57
+    # Plan 00636 Task 2.2: just before the standing authorisations, so the
+    # owner's recorded directives sit next to them at the recency end of the
+    # injected block; silent unless a coordinator seat has a register.
+    OWNER_DIRECTIVES_REGISTER = 54
     # Plan 00395, placed after standing_authorisations even though Plan 00223
     # chose that recency slot deliberately. Safe because this handler is
     # SILENT whenever the versions match, so on almost every turn it adds

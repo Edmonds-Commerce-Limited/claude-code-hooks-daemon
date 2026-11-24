@@ -162,7 +162,22 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
     as prompts (bounded: at most one extra refusal, never a loop).
   - N6: an unreadable stop message gets no v1 `auto` advisory (still refused
     where the flags are readable).
-- [ ] ⬜ **Task 2.2**: s3 directives register.
+- [x] ✅ **Task 2.2** (settled, deterministic part only): s3 directives register.
+  Shipped as `owner_directives_register` (UserPromptSubmit, priority 54,
+  advisory, never denies or terminal). The register is `options.directives`, a
+  list of `{id, text}`; a repeated id or wording is recorded once. It replays on
+  the first human prompt of a session and every `prompt_interval` human prompts
+  to a seat the 00631 probe arms (declared coordinator, coordinator duty,
+  unreadable role or unresolved probe, as `owner_wait_stop_guard` arms); a
+  declared worker, no team and a sub-agent are untouched. The replay says it is
+  not a fresh human instruction and not a citable approval. Shared
+  `utils/automated_prompt.py` now serves it and `standing_authorisations`.
+  **Open, not built** (DESIGN.md s3 is one table row, so these are unsettled):
+  detecting a repeated owner directive from the bus (pingbus v1 history has no
+  author kind; the HUMAN check is 00634), writing a directive into the register
+  (an agent writing its own owner directive is a forgery path), detecting that a
+  seat re-asked one (needs bus reads and judgement), and whether the register
+  lives in config or in a tracked file (owner decision).
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
 - [ ] ⬜ **Task 2.5**: s7 board and B5 liveness.
@@ -194,7 +209,8 @@ land here. Not gated on a seat. Each task starts with a failing test.
   fixture that failed first.
 - [ ] Release-bound items recorded in the pending-release holding area
   (Task 2.1a: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-*.md` and
-  `config-changes/v3.77.0.yaml`).
+  `config-changes/v3.77.0.yaml`; Task 2.2: `release-notes/096-*.md` and the
+  `owner_directives_register` entry in the same `config-changes` file).
 
 ## Delivery & Milestones
 

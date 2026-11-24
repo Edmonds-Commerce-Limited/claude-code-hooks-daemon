@@ -1401,6 +1401,11 @@ handlers:
       enabled: true
       priority: 58
 
+    owner_directives_register:  # Plan 00636 Task 2.2: replay the owner's recorded directives to a coordinator seat.
+      # Silent until options.directives lists one; advisory, never denies.
+      enabled: true
+      priority: 54
+
     standing_authorisations:  # Plan 00223: replay authorisations THIS project recorded.
       # Delivered on UserPromptSubmit because Phase 1 measured it as the only
       # channel that keeps pace with a system prompt re-sent every request:

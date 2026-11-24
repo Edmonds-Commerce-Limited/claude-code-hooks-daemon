@@ -936,6 +936,13 @@ class HandlerID:
         config_key="idle_housekeeping_advisory",
         display_name="idle-housekeeping-advisory",
     )
+    # Plan 00636 Task 2.2 (s3): the owner's recorded directives are replayed to a
+    # coordinator seat so a directive given once is never re-asked.
+    OWNER_DIRECTIVES_REGISTER = HandlerIDMeta(
+        class_name="OwnerDirectivesRegisterHandler",
+        config_key="owner_directives_register",
+        display_name="owner-directives-register",
+    )
     STANDING_AUTHORISATIONS = HandlerIDMeta(
         class_name="StandingAuthorisationsHandler",
         config_key="standing_authorisations",

@@ -65,7 +65,7 @@ from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerB
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils import ccy_supervisor
-from claude_code_hooks_daemon.utils.cron_tick import classify_tick
+from claude_code_hooks_daemon.utils.automated_prompt import is_automated_prompt
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -184,14 +184,8 @@ _SECONDS_PER_MINUTE: Final[int] = 60
 # the Plan 00283 Phase 2/3 loop-guard for free — the supervisor-typed
 # reinforcement this handler emits carries it, so it can never re-trigger
 # itself.
-_FAILSAFE_RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
-# The supervisor's provenance prefix (see `ccy_supervisor.CCY_SUPERVISOR_MARKER`
-# for why it has no closing bracket): a bracketed literal would miss every
-# timestamped nudge, letting compact/continue turns count as human prompts.
-_AUTOMATED_PROMPT_MARKERS: Final[tuple[str, ...]] = (
-    _FAILSAFE_RECOVERY_MARKER,
-    ccy_supervisor.CCY_SUPERVISOR_MARKER,
-)
+# The marker list and the test live in ``utils.automated_prompt`` (shared with
+# the owner directives register).
 
 # Bound the per-session state map so a long-lived daemon cannot leak memory
 # across many sessions. Same BoundedFifoMap as command_hints._fire_state.
@@ -379,9 +373,7 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         and every declared ``persistent_crons`` job carry a tick sentinel too
         (Plan 00388).
         """
-        if classify_tick(prompt) is not None:
-            return True
-        return any(marker in prompt for marker in _AUTOMATED_PROMPT_MARKERS)
+        return is_automated_prompt(prompt)
 
     def _state_for(self, session_id: str) -> _SessionState:
         """Return this session's cadence state, creating it (bounded, FIFO)."""
