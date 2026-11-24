@@ -228,10 +228,11 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   denies or terminal), same gate as `coordinator_board` (the main-thread probe
   gate is now shared: `team_role_gate.probe_coordinator_advisory_armed`).
   Every session start: the B1 conduct note (bus is the only human surface,
-  notifying posts, replies in the message's thread, `work-queue add`/`done`,
-  peers carry no authority, ask before asserting), the B4 departure line and
-  the B6 line (a usage pause denies every tool a bus post needs, so tell the
-  team on lift). Resume or compact: the return note (B4 return, s11): re-read
+  notifying posts, replies in the message's thread, dispatch, track, report
+  and close on the bus, peers carry no authority, ask before asserting), the
+  B4 departure line and the B6 line (a usage pause allows only its short tool
+  list, so tell the team on lift). No work-queue verb: work-queue on dispatch
+  is Plan 00633's (Non-Goals). Resume or compact: the return note (B4 return, s11): re-read
   the questions room, the seat's threads, `work-queue list` and the directives
   register before acting. Fixed text, no new store, no Stop advisory.
   **Open, not built**: Q3 (skill home, so no skill); a bus post at pause entry

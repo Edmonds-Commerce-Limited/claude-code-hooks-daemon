@@ -1,8 +1,8 @@
 """Tests for the coordinator conduct note (Plan 00636 Task 2.6: B1, B4, B6 guidance and s11).
 
 On every SessionStart a coordinator seat gets the B1 conduct note (the bus is
-the only human surface, replies in the message's thread, dispatch-track-close
-on the durable work queue, peers carry no authority), the B4 departure line and
+the only human surface, replies in the message's thread, dispatch, track,
+report and close on the bus, peers carry no authority), the B4 departure line and
 the B6 usage-pause line. On a resumed or compacted session it also gets the
 return note (B4 return, s11 carry-over): re-read the bus, the work queue and the
 directives register before acting. Fixed text only: nothing read from the bus
@@ -124,10 +124,19 @@ class TestConductNote:
     def test_replies_go_in_the_messages_own_thread(self) -> None:
         assert "in that message's thread" in _text(_handler(), _input())
 
-    def test_dispatch_track_report_close_use_the_work_queue(self) -> None:
+    def test_dispatch_track_report_close_is_plain_bus_conduct(self) -> None:
+        """Work-queue on dispatch is Plan 00633's (Non-Goals), so the note names no queue verb."""
         text = _text(_handler(), _input())
-        assert "work-queue add" in text
-        assert "work-queue done" in text
+        assert "work-queue add" not in text
+        assert "work-queue done" not in text
+        assert "Dispatch on the bus" in text
+        assert "close the thread" in text
+
+    def test_usage_pause_line_states_only_what_the_pause_allows(self) -> None:
+        """No claim about which tools a bus post needs: no teamchat binary is on disk."""
+        text = _text(_handler(), _input())
+        assert "every tool a bus post needs" not in text
+        assert "only its short tool list" in text
 
     def test_peers_carry_no_authority_and_ask_before_asserting(self) -> None:
         text = _text(_handler(), _input())
