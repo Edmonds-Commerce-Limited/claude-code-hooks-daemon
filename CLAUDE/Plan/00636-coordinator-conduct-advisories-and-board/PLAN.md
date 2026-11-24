@@ -207,7 +207,22 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   cause. **Open, not built**: which denies made up the 109 failed stops (not
   on disk); whether wind-down is a real session mode with entry and exit, and
   which guards it may relax (owner decision: any relaxation loosens a guard).
-- [ ] ⬜ **Task 2.5**: s7 board and B5 liveness.
+- [x] ✅ **Task 2.5** (advise-only part): s7 board and B5 liveness. Shipped as
+  `coordinator_board` (SessionStart, priority 48, advisory, never denies or
+  terminal). On every session start of a seat `coordinator_advisory_armed`
+  arms, one note: peers' state, where teamchat shows it, is `teamchat status`, run by the
+  seat; teamchat's files are not the board; a seat the board does not show, or
+  cannot be read, is unknown, not down (ask it on the bus before reassigning).
+  It runs no `teamchat status` and opens no teamchat file; the only command it
+  runs is the shared `whoami` seat probe. It relays no status
+  text. **Open, not built**: the `teamchat status` output contract is not on
+  disk and no binary is here, so nothing reads or summarises the board (a
+  parser would be invented); whether it covers other seats or only this
+  session's teams; what fedora-desktop Plan 00251 supplies; Q6 (advisory only,
+  or a supervisor action on a down seat; owner decision); and whether the seat
+  link exists at a `startup` SessionStart (if `whoami` still exits 69 then, the
+  note is silent on startup and appears only on resume and compact; unverified
+  here, no binary).
 - [ ] ⬜ **Task 2.6**: s11 carry-over; B1, B4, B6 guidance.
 
 ### Phase 3: Plan tooling (retrospective s13)
@@ -240,7 +255,8 @@ land here. Not gated on a seat. Each task starts with a failing test.
   `owner_directives_register` entry in the same `config-changes` file; Task
   2.3: `release-notes/097-*.md` and the `ci_state_reading` entry there; Task
   2.4: `release-notes/098-*.md`, no config change so no `config-changes`
-  entry).
+  entry; Task 2.5: `release-notes/099-*.md` and the `coordinator_board` entry
+  in the same `config-changes` file).
 
 ## Delivery & Milestones
 

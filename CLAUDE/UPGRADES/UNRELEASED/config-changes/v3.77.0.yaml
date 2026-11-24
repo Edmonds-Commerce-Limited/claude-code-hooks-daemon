@@ -370,6 +370,22 @@ config_changes:
               priority: 44
               options:
                 stuck_after_minutes: 30
+    - key: handlers.session_start.coordinator_board
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00636 Task 2.5). On every session start of a team coordinator
+        seat, one note: peers' state in one view is teamchat status, run by the
+        seat; teamchat's files are not the board; a seat the board does not
+        show, or cannot be read, is unknown, not down. Runs no `teamchat
+        status` and opens no teamchat file; the only command it runs is the
+        shared `whoami` seat probe. Advisory, never denies, restarts nothing. A declared worker, no team and a sub-agent are untouched.
+      example_yaml: |
+        handlers:
+          session_start:
+            coordinator_board:
+              enabled: true
+              priority: 48
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

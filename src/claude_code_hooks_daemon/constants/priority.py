@@ -587,6 +587,10 @@ class Priority:
     # session needs (it names the agents to re-brief), so it speaks ahead of the
     # guard-drift report, which only fires on a new session in practice.
     WORK_QUEUE_REBRIEF = 48
+    # Plan 00636 Task 2.5: shares the slot above. Both re-brief a coordinator
+    # on a new, resumed or compacted session; this one names where peers'
+    # state comes from. Cheap, and silent off a coordinator seat.
+    COORDINATOR_BOARD = 48
     # Plan 00498: the first SessionStart advisory. Every cron, goal and recovery
     # advisory below is silent where autonomy is off, so this one line is what
     # tells the session the quiet is deliberate; it must not be read last.

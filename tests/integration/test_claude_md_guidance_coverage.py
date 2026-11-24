@@ -692,6 +692,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "ContractStalenessHandler": "T4 fires once at session start with the full remedy",
+    "CoordinatorBoardHandler": (
+        "T4 the session-start note IS the content, repeated on every new, resumed "
+        "or compacted session of a coordinator seat; resident text would reach "
+        "every non-team project for nothing"
+    ),
     "RemoteDocsCommitGateHandler": (
         "T4 the deny names every offending staged file, its specific problem "
         "and the capture command. The standing policy — that the tree is "
