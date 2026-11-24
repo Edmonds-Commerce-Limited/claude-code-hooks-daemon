@@ -183,6 +183,24 @@ class TestItem1CaseBlindFiniteBracket:
             ["kit", "lib", _PROTECTED], glob, ignore_case=True
         )
 
+    @pytest.mark.parametrize(
+        ("glob", "name", "matches"),
+        [
+            ("[[:upper:]]*", "bin", False),
+            ("[[:upper:]x]in", "Xin", True),
+            ("[X[:digit:]]in", "xin", True),
+            ("[a-c]IN", "bin", True),
+            ("[!b]IN", "Bin", False),
+            ("B?N", "bin", True),
+            ("\\B*", "bin", True),
+        ],
+    )
+    def test_the_index_folds_letters_but_not_classes(
+        self, glob: str, name: str, matches: bool
+    ) -> None:
+        """Bash 5.2 with nocaseglob: ``[[:upper:]]*`` lists no lower-case directory."""
+        assert protected_file_index._segments_match([name], [glob], ignore_case=True) is matches
+
     def test_the_index_matcher_reads_case_exactly_when_defaults_are_certain(self) -> None:
         glob = ["kit", "[B]IN", "*"]
         assert not protected_file_index._segments_match(

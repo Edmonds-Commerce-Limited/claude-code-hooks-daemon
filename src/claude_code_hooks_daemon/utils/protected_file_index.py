@@ -619,17 +619,103 @@ def _component_matches(glob: str, name: str, ignore_case: bool) -> bool:
     members, where the shared one widens it to any name, which against the files
     that really exist would deny every class-bearing glob in their directory.
     """
-    pattern = _component_pattern(glob)
-    if pattern.fullmatch(name) is not None:
+    if _component_pattern(glob).fullmatch(name) is not None:
         return True
-    return (
-        ignore_case and _has_glob_syntax(glob) and _case_blind(pattern).fullmatch(name) is not None
-    )
+    if not ignore_case or not _has_glob_syntax(glob):
+        return False
+    return _component_pattern(_case_folded_glob(glob)).fullmatch(name) is not None
 
 
 @lru_cache(maxsize=1024)
-def _case_blind(pattern: re.Pattern[str]) -> re.Pattern[str]:
-    return re.compile(pattern.pattern, pattern.flags | re.IGNORECASE)
+def _case_folded_glob(glob: str) -> str:
+    """``glob`` as bash reads it under ``nocaseglob``: each letter also matches its other case.
+
+    A POSIX class is left as it is: bash 5.2 does not fold one (``[[:upper:]]``
+    matches no lower-case name with ``nocaseglob`` on).
+    """
+    out: list[str] = []
+    position = 0
+    while position < len(glob):
+        char = glob[position]
+        if char == "\\" and position + 1 < len(glob):
+            out.append(_both_cases(glob[position + 1]) or glob[position : position + 2])
+            position += 2
+            continue
+        if char == "[":
+            folded = _case_folded_bracket(glob, position + 1)
+            if folded is not None:
+                out.append(folded[0])
+                position = folded[1]
+                continue
+        out.append(_both_cases(char) or char)
+        position += 1
+    return "".join(out)
+
+
+def _both_cases(char: str) -> str | None:
+    """``[xX]`` for a letter with a one-character other case, else None."""
+    other = char.swapcase()
+    if len(other) != 1 or other == char:
+        return None
+    return f"[{char}{other}]"
+
+
+def _case_folded_bracket(glob: str, start: int) -> tuple[str, int] | None:
+    """The bracket opened just before ``start`` with each letter member's other case added.
+
+    Parsed as :func:`_bracket_expression` parses it; None when it never closes.
+    """
+    position = start
+    members: list[str] = []
+    if position < len(glob) and glob[position] in _BRACKET_NEGATIONS:
+        members.append(glob[position])
+        position += 1
+    first = True
+    while position < len(glob):
+        char = glob[position]
+        if char == "]" and not first:
+            return "[" + "".join(members) + "]", position + 1
+        first = False
+        if glob.startswith("[:", position):
+            close = glob.find(":]", position + 2)
+            if close != -1 and glob[position + 2 : close] in _POSIX_CLASSES:
+                members.append(glob[position : close + 2])
+                position = close + 2
+                continue
+        escaped = char == "\\" and position + 1 < len(glob)
+        if escaped:
+            position += 1
+            char = glob[position]
+        if glob.startswith("-", position + 1) and glob[position + 2 : position + 3] not in (
+            "",
+            "]",
+        ):
+            high = glob[position + 2]
+            members.append(_escaped_member(char) + "-" + _escaped_member(high))
+            low_other, high_other = char.swapcase(), high.swapcase()
+            if (
+                len(low_other) == 1
+                and len(high_other) == 1
+                and (low_other, high_other)
+                != (
+                    char,
+                    high,
+                )
+            ):
+                members.append(_escaped_member(low_other) + "-" + _escaped_member(high_other))
+            position += 3
+            continue
+        members.append(_escaped_member(char))
+        other = char.swapcase()
+        if len(other) == 1 and other != char:
+            members.append(_escaped_member(other))
+        position += 1
+    return None
+
+
+def _escaped_member(char: str) -> str:
+    """A bracket member written so :func:`_bracket_expression` reads it as that one character."""
+    return "\\" + char if char in "\\]-[!^" else char
 
 
 @lru_cache(maxsize=1024)
