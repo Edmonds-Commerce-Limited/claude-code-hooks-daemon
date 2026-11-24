@@ -22,17 +22,21 @@ Three states, kept apart in the types because they mean different things:
   (``TEAMCHAT_KIT`` unset, binary missing, timeout, exit 65 or any other
   non-zero, malformed JSON, unknown ``v``). Role and duty are unknown and
   guards stay armed, so a broken probe can never silently disarm a seat.
+  Through :class:`SeatContextResolver` this state needs positive evidence
+  (owner ruling D3): only a session that resolved a seat earlier stays
+  UNRESOLVED; one that never did reads ABSENT (``TEAM_UNCONFIRMED``), because
+  the runtime variable alone does not prove a team.
 - ``RESOLVED``: the per-team seats ``whoami`` declared.
 
 Role and duty are PER TEAM; there is no session-wide role. Role is the wire
 set ``coordinator | worker | probe`` (``null`` is unknown); a well-formed role
-outside it is carried as declared and switches nothing on. Duty is an open set
-(``null`` is unknown). Team, role and duty names are compared stripped and
-case folded (:func:`normalise_name`); a name with odd characters is unknown.
-A coordinator role stands only beside a readable duty that is not ``host``:
-a host duty, an unreadable one, or rows that disagree make it unknown, so a
-seat that is (or might be) a host is never a coordinator here. Rows for one
-team merge to the most restrictive reading (see ``_merge``).
+outside it is carried as declared and switches nothing on. Duty is an open,
+OPTIONAL set: ``null``, an absent key or an unreadable value is undeclared and
+arms nothing (owner ruling D1). Team, role and duty names are compared
+stripped and case folded (:func:`normalise_name`); a role with odd characters
+is unknown. A coordinator role stands unless a row declares duty ``host`` (D2),
+so a host seat is never a coordinator here. Rows for one team merge to the
+most restrictive reading (see ``_merge``).
 
 Invariant 5: nothing under teamchat's seat store, state root or run directory
 is opened or statted; the only act is running the binary. Log lines carry a
@@ -135,6 +139,8 @@ class ProbeReason(StrEnum):
     OUTPUT_TOO_LARGE = "output_too_large"
     VERSION_MISMATCH = "version_mismatch"
     SHAPE_MISMATCH = "shape_mismatch"
+    #: The probe gave no answer and this session never resolved a seat (D3).
+    TEAM_UNCONFIRMED = "team_unconfirmed"
 
 
 class RoleKind(StrEnum):
@@ -301,10 +307,12 @@ class SeatContext:
         return any(seat.duty and seat.duty.casefold() == wanted for seat in self.seats)
 
     def duty_unknown(self) -> bool:
-        """Whether a team is signalled but some duty could not be read."""
-        if self.state is SeatState.UNRESOLVED:
-            return True
-        return any(not seat.duty for seat in self.seats)
+        """Whether a team is signalled but the probe gave no answer at all.
+
+        Duty is a teams-only, optional field: in a RESOLVED seat a null, absent
+        or unreadable duty is undeclared and arms nothing (owner ruling D1).
+        """
+        return self.state is SeatState.UNRESOLVED
 
 
 # --- parsing -----------------------------------------------------------------
@@ -335,7 +343,9 @@ class _Row:
     team: str
     role: str  # "" == unknown
     handle: str
-    duty: str  # "" == unknown
+    duty: str  # "" == undeclared or unreadable
+    #: A non-null duty that fails the grammar: it might be a garbled ``host``.
+    duty_malformed: bool = False
 
 
 def _rows(document: object) -> list[object] | ProbeReason:
@@ -360,11 +370,14 @@ def _row(raw: object) -> _Row | ProbeReason:
         # A row we cannot attribute to a team could be any team's: the whole
         # answer becomes unknown rather than silently dropping it.
         return ProbeReason.SHAPE_MISMATCH
+    raw_duty = raw.get("duty")
+    duty = normalise_name(raw_duty)
     return _Row(
         team,
         normalise_name(raw.get("role")),
         _handle(raw.get("handle")),
-        normalise_name(raw.get("duty")),
+        duty,
+        duty_malformed=raw_duty is not None and not duty,
     )
 
 
@@ -385,9 +398,10 @@ def _merge(team: str, rows: list[_Row]) -> TeamSeat:
     - Role: an unreadable role on any row, or rows that disagree, is unknown.
       A conflict is itself an unknown reading, and unknown outranks both
       worker and coordinator, so coordinator-plus-worker rows are unknown.
-    - A coordinator stands only with a positively readable duty that is not
-      host; anything else reads as unknown, so a seat whose duty is (or might
-      be) host is never a coordinator here.
+    - A coordinator stands unless a row declares duty host, or carries a
+      malformed duty that might be a garbled host (review F2). Duty is
+      optional (owner ruling D2), so a null or absent duty does not unmake a
+      coordinator; a host seat is never one here.
     """
     roles = {row.role for row in rows}
     duties = {row.duty for row in rows}
@@ -395,7 +409,8 @@ def _merge(team: str, rows: list[_Row]) -> TeamSeat:
     duty = _merged_duty(duties)
     handle = handles.pop() if len(handles) == 1 else ""
     role = roles.pop() if len(roles) == 1 else ""
-    coordinator_unproven = role == ROLE_COORDINATOR and duty in ("", DUTY_HOST)
+    maybe_host = duty == DUTY_HOST or any(row.duty_malformed for row in rows)
+    coordinator_unproven = role == ROLE_COORDINATOR and maybe_host
     if not role or coordinator_unproven:
         return TeamSeat(team, RoleKind.UNKNOWN, "", handle, duty)
     return TeamSeat(team, RoleKind.DECLARED, role, handle, duty)
@@ -746,6 +761,8 @@ class SeatContextResolver:
         self._timeout = timeout
         self._lock = threading.Lock()
         self._cache: dict[SessionSignals, tuple[float, SeatContext]] = {}
+        #: Runtimes that resolved a seat, oldest first; outlives the TTL cache.
+        self._confirmed: dict[str, None] = {}
         self._detection_enabled = True
 
     @classmethod
@@ -773,9 +790,49 @@ class SeatContextResolver:
             cached = self._cache.get(signals)
         if cached is not None and now - cached[0] < self._ttl:
             return cached[1]
-        context = probe_seat_context(signals, runner=self._runner, timeout=self._timeout)
+        context = self._confirmed_reading(
+            signals, probe_seat_context(signals, runner=self._runner, timeout=self._timeout)
+        )
         self._store(signals, now, context)
         return context
+
+    def _confirmed_reading(self, signals: SessionSignals, context: SeatContext) -> SeatContext:
+        """Arm on evidence (owner ruling D3), remembered per session runtime.
+
+        A resolved seat confirms the session is in a team; a definitive no-team
+        answer clears that. A probe with no answer stays UNRESOLVED (armed) only
+        for a confirmed session; otherwise it reads as no team, with one log line.
+        """
+        runtime = signals.runtime
+        with self._lock:
+            if context.state is SeatState.RESOLVED:
+                self._confirmed.pop(runtime, None)
+                self._confirmed[runtime] = None
+                while len(self._confirmed) > self._max_entries:
+                    del self._confirmed[next(iter(self._confirmed))]
+                return context
+            if context.state is SeatState.ABSENT:
+                self._confirmed.pop(runtime, None)
+                return context
+            confirmed = runtime in self._confirmed
+        if confirmed:
+            return context
+        _LOGGER.info(
+            "teamchat seat probe: no answer (%s) and no seat resolved yet this session; "
+            "treated as no team",
+            context.reason.value,
+        )
+        return SeatContext.absent(ProbeReason.TEAM_UNCONFIRMED)
+
+    def team_confirmed(self, signals: SessionSignals) -> bool:
+        """Whether this session (by runtime) resolved a seat and has not since left."""
+        with self._lock:
+            return bool(signals.runtime) and signals.runtime in self._confirmed
+
+    def confirmed_count(self) -> int:
+        """How many sessions are remembered as confirmed team seats."""
+        with self._lock:
+            return len(self._confirmed)
 
     def cache_size(self) -> int:
         """How many sessions the cache currently holds."""
@@ -795,3 +852,31 @@ class SeatContextResolver:
                     oldest = min(self._cache, key=lambda key: self._cache[key][0])
                     del self._cache[oldest]
             self._cache[signals] = (now, context)
+
+
+_SHARED_LOCK: Final[threading.Lock] = threading.Lock()
+_SHARED: dict[tuple[float, bool], SeatContextResolver] = {}
+
+
+def shared_resolver(config: TeamSeatConfig | None) -> SeatContextResolver:
+    """The ONE resolver for a ``team_seat`` config, shared by every team handler (R4).
+
+    One ``whoami`` per session per TTL instead of one per handler, and one
+    memory of which sessions resolved a seat (D3). ``None`` is the defaults.
+    """
+    from claude_code_hooks_daemon.config.models import TeamSeatConfig
+
+    resolved = config if config is not None else TeamSeatConfig()
+    key = (float(resolved.resolve_ttl_seconds), resolved.detection_enabled)
+    with _SHARED_LOCK:
+        resolver = _SHARED.get(key)
+        if resolver is None:
+            resolver = SeatContextResolver.from_config(resolved)
+            _SHARED[key] = resolver
+        return resolver
+
+
+def reset_shared_resolvers() -> None:
+    """Forget every shared resolver (tests, and a daemon config reload)."""
+    with _SHARED_LOCK:
+        _SHARED.clear()

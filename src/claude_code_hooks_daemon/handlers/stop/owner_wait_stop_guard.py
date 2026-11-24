@@ -127,6 +127,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContextResolver,
     SeatState,
     SessionSignals,
+    shared_resolver,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
@@ -309,6 +310,8 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         self._bus: OwnerWaitBus = TeamchatOwnerWaitBus()
         self._clock: Callable[[], float] = time.time
         self._resolver: SeatContextResolver | None = None
+        # Injected by the registry from the top-level ``team_seat:`` block.
+        self._team_seat: TeamSeatConfig | None = None
         self._config_loader: Callable[[], Config] = self._default_config_loader
 
     def get_default_enabled(self) -> bool:
@@ -383,9 +386,6 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             )
             return default_config()
 
-    def _team_seat_config(self) -> TeamSeatConfig:
-        return self._config_loader().team_seat
-
     def _stand_in_reason(self, hook_input: dict[str, Any]) -> str | None:
         """auto_continue_stop's stand-in requirement for this stop, which this deny would hide.
 
@@ -415,10 +415,11 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         return None if requirement is None else requirement.reason
 
     def _resolve_seats(self, signals: SessionSignals) -> SeatContext:
-        """The 00631 seat context for this session (TTL-cached by the resolver)."""
-        if self._resolver is None:
-            self._resolver = SeatContextResolver.from_config(self._team_seat_config())
-        return self._resolver.resolve(signals)
+        """The 00631 seat context for this session (the shared, TTL-cached resolver)."""
+        resolver = (
+            self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
+        )
+        return resolver.resolve(signals)
 
     # -- matching ----------------------------------------------------------------
 

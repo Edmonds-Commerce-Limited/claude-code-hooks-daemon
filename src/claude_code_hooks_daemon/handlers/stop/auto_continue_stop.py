@@ -87,8 +87,8 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
 from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    shared_resolver,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 from claude_code_hooks_daemon.utils.wind_down import running_background_ids, wind_down_note
@@ -988,12 +988,7 @@ class AutoContinueStopHandler(StopHandlerBase):
         return result
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def _coordinator_armed(self, hook_input: dict[str, Any]) -> bool:
         try:

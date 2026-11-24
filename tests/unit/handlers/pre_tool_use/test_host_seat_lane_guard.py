@@ -315,9 +315,22 @@ class TestArming:
         assert "holds a teamchat seat with duty host" in text
         assert "the guard stays armed" not in text
 
-    def test_subagent_is_silent(self) -> None:
-        handler, _ = make(HOST)
+    def test_subagent_of_a_host_seat_is_advised_never_denied(self) -> None:
+        """Owner answer to Q1: a host seat's sub-agents are guarded, in advise mode only."""
+        handler, _ = make(HOST, mode="block")
+        assert handler.matches(subagent(PYTEST)) is True
+        result = handler.handle(subagent(PYTEST))
+        assert result.decision is Decision.ALLOW
+        assert "worker seat" in _text(result)
+
+    @pytest.mark.parametrize("context", [UNRESOLVED, WORKER, NULL_DUTY, ABSENT])
+    def test_subagent_is_judged_on_a_declared_host_duty_only(self, context: SeatContext) -> None:
+        handler, _ = make(context)
         assert handler.matches(subagent(PYTEST)) is False
+
+    def test_main_thread_host_seat_is_still_denied_under_block(self) -> None:
+        handler, _ = make(HOST, mode="block")
+        assert handler.handle(bash(PYTEST)).decision is Decision.DENY
 
     def test_non_lane_command_is_silent_for_a_host_seat(self) -> None:
         handler, _ = make(HOST)

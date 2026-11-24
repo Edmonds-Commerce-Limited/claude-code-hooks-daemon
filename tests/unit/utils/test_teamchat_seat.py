@@ -375,24 +375,39 @@ class TestRolesAndDuties:
             [("alpha", "host"), ("alpha", None)],
             # Review F2: a duty that fails the grammar might be host.
             [("alpha", "Host!")],
-            [("alpha", None)],
             [("alpha", " HOST ")],
             [("alpha", "Host")],
             [("alpha", "coordinator"), ("alpha", "host")],
-            [("alpha", "coordinator"), ("alpha", "worker")],
             [("alpha", ["host"])],
             # A host row under another spelling of the same team name.
             [("Alpha", "host"), ("alpha", "coordinator")],
             [(" alpha", "host"), ("alpha", "coordinator")],
         ],
     )
-    def test_coordinator_needs_a_readable_non_host_duty(self, rows: list[tuple[str, Any]]) -> None:
+    def test_coordinator_is_unknown_beside_a_host_or_malformed_duty(
+        self, rows: list[tuple[str, Any]]
+    ) -> None:
         seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
         context = probe(fx.whoami(*seats))
         answer = context.role_for_team("alpha")
         assert answer.kind is RoleKind.UNKNOWN
         assert not answer.holds_role("coordinator")
         assert answer.guards_armed is True
+
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            # Owner ruling D2: duty is optional, so null does not unmake a coordinator.
+            [("alpha", None)],
+            # Disagreeing non-host duties can never be host.
+            [("alpha", "coordinator"), ("alpha", "worker")],
+        ],
+    )
+    def test_coordinator_stands_without_a_declared_duty(self, rows: list[tuple[str, Any]]) -> None:
+        seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
+        answer = probe(fx.whoami(*seats)).role_for_team("alpha")
+        assert answer.kind is RoleKind.DECLARED
+        assert answer.holds_role("coordinator")
 
     @pytest.mark.parametrize("duty", ["host", " host ", "HOST", "Host"])
     def test_any_host_row_makes_the_team_host(self, duty: str) -> None:
@@ -413,7 +428,8 @@ class TestRolesAndDuties:
             )
         )
         assert context.duty_in("alpha") == UNKNOWN
-        assert context.duty_unknown() is True
+        # D1: only a probe with no answer leaves duty unknown for the gates.
+        assert context.duty_unknown() is False
 
     def test_role_and_duty_are_normalised(self) -> None:
         context = probe(fx.whoami(fx.seat("alpha", " Worker ", duty=" WORKER")))
@@ -439,7 +455,8 @@ class TestRolesAndDuties:
         assert context.role_for_team("alpha").kind is RoleKind.UNKNOWN
         assert context.role_in("alpha") == UNKNOWN
         assert context.duty_in("alpha") == UNKNOWN
-        assert context.duty_unknown() is True
+        # D1: a null duty in a resolved seat is undeclared, not unknown.
+        assert context.duty_unknown() is False
 
     def test_probe_role_switches_nothing_on(self) -> None:
         answer = probe(fx.ROLE_PROBE).role_for_team("alpha")

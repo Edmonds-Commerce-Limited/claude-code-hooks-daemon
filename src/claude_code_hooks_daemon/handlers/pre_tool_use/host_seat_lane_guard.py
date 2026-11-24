@@ -12,14 +12,18 @@ no deny rules.
 
 Arming is :func:`team_role_gate.duty_gate` on ``host``:
 
-- no team (no teamchat runtime, ``whoami`` exit 69, no seats), a sub-agent, or
-  a seat with no ``host`` duty in any held team: silent, no change. Duty is a
-  teams-only, optional field, so a row whose duty is null, absent or
-  unreadable declares nothing and does not arm;
-- a declared ``host`` duty in any held team: armed, whatever the other rows say;
-- a probe that gave no answer at all (UNRESOLVED): armed, because an
-  unreadable probe never disarms a guard. The first refusal in a session says
-  the probe gave no answer.
+- no team (no teamchat runtime, ``whoami`` exit 69, no seats), or a seat with
+  no ``host`` duty in any held team: silent, no change. Duty is a teams-only,
+  optional field, so a row whose duty is null, absent or unreadable declares
+  nothing and does not arm (owner ruling D1);
+- a declared ``host`` duty in any held team: armed, whatever the other rows
+  say. A sub-agent of that seat is armed too, on the DECLARED duty only, and
+  is only ever advised, never denied, whatever the mode (owner answer to Q1);
+- a probe that gave no answer, in a session that resolved a seat earlier:
+  armed on the main thread, because an unreadable probe never disarms a seat
+  proven to be in a team. A session that never resolved a seat is not proven
+  to be in one (D3) and stays silent. The first refusal says the probe gave
+  no answer.
 
 The lane commands are a SHORT per-language list held by the strategies in
 ``strategies/lane_commands/`` (test runners, builds, linters, QA scripts; not
@@ -47,6 +51,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.lane_commands.common import (
@@ -61,9 +66,8 @@ from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, duty_gate
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     DUTY_HOST,
     SeatContext,
-    SeatContextResolver,
-    SeatState,
     SessionSignals,
+    shared_resolver,
 )
 
 if TYPE_CHECKING:
@@ -170,31 +174,23 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         return self._mode == MODE_OFF
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def _verdict(self, hook_input: Mapping[str, Any]) -> GateVerdict:
         """The duty gate on ``host``.
 
         NOT_APPLICABLE with no teamchat runtime, and no probe run. ROLE_UNKNOWN
-        only when the probe gave no answer at all (UNRESOLVED). A probe that
-        answered but declares no duty (null, absent or unreadable) is
-        NOT_APPLICABLE too: duty is optional, so only a declared ``host``
-        arms. ``duty_gate`` checks a declared duty first, so a host in one
-        team is never disarmed by a null duty in another.
+        only when the probe gave no answer in a session that resolved a seat
+        earlier (the shared resolver's D3 rule). An undeclared duty is
+        NOT_APPLICABLE (D1, in ``duty_gate``); a host in one team is never
+        disarmed by a null duty in another. A sub-agent is judged as its seat
+        on a DECLARED duty only (``include_subagents``).
         """
         signals = SessionSignals.from_hook_input(hook_input)
         if not signals.runtime:
             return GateVerdict.NOT_APPLICABLE
         context = self._seat_resolver().resolve(signals)
-        verdict = duty_gate(hook_input, context, duty=DUTY_HOST).verdict
-        if verdict is GateVerdict.ROLE_UNKNOWN and context.state is not SeatState.UNRESOLVED:
-            return GateVerdict.NOT_APPLICABLE
-        return verdict
+        return duty_gate(hook_input, context, duty=DUTY_HOST, include_subagents=True).verdict
 
     def _is_lane(self, hook_input: Mapping[str, Any]) -> bool:
         command = get_bash_command(dict(hook_input)) or ""
@@ -245,7 +241,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
                 exc,
                 reason="a failure after arming is the mode's refusal; the exception text is never shown",
             )
-            return self._refuse(_HANDLER_ERROR)
+            return self._refuse(_HANDLER_ERROR, hook_input)
 
     def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
         verdict = self._verdict(hook_input)
@@ -254,9 +250,9 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         if verdict is GateVerdict.ROLE_UNKNOWN:
             # Only an unanswered probe reaches here; see _verdict.
             if self._first_note(hook_input):
-                return self._refuse(f"{_UNKNOWN_REFUSAL} {_NO_ANSWER}")
-            return self._refuse(_UNKNOWN_REFUSAL)
-        return self._refuse(_REFUSAL)
+                return self._refuse(f"{_UNKNOWN_REFUSAL} {_NO_ANSWER}", hook_input)
+            return self._refuse(_UNKNOWN_REFUSAL, hook_input)
+        return self._refuse(_REFUSAL, hook_input)
 
     def _first_note(self, hook_input: Mapping[str, Any]) -> bool:
         """Whether this is the session's first no-answer refusal (then remembered)."""
@@ -268,8 +264,9 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         self._noted_sessions.add(session)
         return True
 
-    def _refuse(self, text: str) -> GatingResult:
-        if self._mode == MODE_BLOCK:
+    def _refuse(self, text: str, hook_input: Mapping[str, Any]) -> GatingResult:
+        """The mode's refusal. A sub-agent is only ever advised (owner answer to Q1)."""
+        if self._mode == MODE_BLOCK and acts_as_main_thread(hook_input):
             return GatingResult(decision=Decision.DENY, reason=text).under_rule(_RULE)
         return GatingResult(decision=Decision.ALLOW, context=[f"{text} [{RuleID.HOST_SEAT_LANE}]"])
 

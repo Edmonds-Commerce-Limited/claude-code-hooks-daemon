@@ -78,8 +78,8 @@ from claude_code_hooks_daemon.utils.human_approval import (
 )
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    shared_resolver,
 )
 
 if TYPE_CHECKING:
@@ -405,12 +405,7 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
         return self._mode == MODE_OFF
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """An armed seat running a push, delete, world-writable chmod or merge into main.

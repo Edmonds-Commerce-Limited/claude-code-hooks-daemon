@@ -45,8 +45,8 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    shared_resolver,
 )
 
 if TYPE_CHECKING:
@@ -112,12 +112,7 @@ class CiStateReadingHandler(PostToolUseHandlerBase):
         return DEFAULT_STUCK_AFTER_MINUTES * _SECONDS_PER_MINUTE
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def _armed(self, hook_input: dict[str, Any]) -> bool:
         try:

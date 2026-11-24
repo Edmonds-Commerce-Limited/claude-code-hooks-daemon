@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.utils.secret_redaction import (
     redact_text,
 )
 from claude_code_hooks_daemon.utils.ssh_agent import call_bound_to_peer
+from claude_code_hooks_daemon.utils.teamchat_seat import KIT_ENV_VAR, RUNTIME_ENV_VAR
 
 # Global memory log handler - accessible for log queries
 _memory_log_handler: MemoryLogHandler | None = None
@@ -337,8 +338,8 @@ def _stamp_session_hostname(
 
 #: Session environment variable -> payload field, for the teamchat role probe.
 _TEAMCHAT_STAMPS: tuple[tuple[str, str], ...] = (
-    ("TEAMCHAT_RUNTIME", HookInputField.TEAMCHAT_RUNTIME),
-    ("TEAMCHAT_KIT", HookInputField.TEAMCHAT_KIT),
+    (RUNTIME_ENV_VAR, HookInputField.TEAMCHAT_RUNTIME),
+    (KIT_ENV_VAR, HookInputField.TEAMCHAT_KIT),
 )
 
 
