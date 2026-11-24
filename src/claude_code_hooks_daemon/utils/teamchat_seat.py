@@ -858,8 +858,10 @@ _SHARED: dict[tuple[float, bool], SeatContextResolver] = {}
 def shared_resolver(config: TeamSeatConfig | None) -> SeatContextResolver:
     """The ONE resolver for a ``team_seat`` config, shared by every team handler (R4).
 
-    One ``whoami`` per session per TTL instead of one per handler, and one
-    memory of which sessions resolved a seat (D3). ``None`` is the defaults.
+    Handlers reuse one cached answer per session per TTL instead of probing
+    one each, and share one memory of which sessions resolved a seat (D3).
+    The probe is not single-flight: misses racing in parallel may each run
+    ``whoami``. ``None`` is the defaults.
     """
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
 
@@ -874,7 +876,7 @@ def shared_resolver(config: TeamSeatConfig | None) -> SeatContextResolver:
 
 
 def reset_shared_resolvers() -> None:
-    """Forget every shared resolver (tests, and a daemon config reload)."""
+    """Forget every shared resolver. Tests only: no daemon path calls it (N727)."""
     with _SHARED_LOCK:
         _SHARED.clear()
 
