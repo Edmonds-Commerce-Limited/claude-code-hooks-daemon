@@ -14,17 +14,37 @@ behind only moves the clutter from `git worktree list` to `git branch`.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_reaping import (
     MINIMUM_AGE_SECONDS,
+    ReapOutcome,
+    RunGit,
     WorktreeState,
-    reap_worktree,
 )
+from claude_code_hooks_daemon.core.worktree_reaping import reap_worktree as _reap_worktree
 from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT
 
 _Completed = subprocess.CompletedProcess[str]
+
+
+def _no_blockers(_path: Path) -> Sequence[str]:
+    return ()
+
+
+def reap_worktree(
+    repo_root: Path,
+    state: WorktreeState,
+    *,
+    run_fn: RunGit,
+    dry_run: bool = False,
+    blockers_fn: Callable[[Path], Sequence[str]] = _no_blockers,
+) -> ReapOutcome:
+    """The real function, with a tree that has no blockers unless a test says so."""
+    return _reap_worktree(repo_root, state, run_fn=run_fn, dry_run=dry_run, blockers_fn=blockers_fn)
+
 
 #: Comfortably clear of Plan 00372's recency window, so `_clean_state()` stays
 #: reapable purely on the axes this file's tests actually exercise.
@@ -294,3 +314,60 @@ class TestTheDryRun:
     def test_a_dry_run_of_a_refused_worktree_still_explains_the_refusal(self) -> None:
         outcome = reap_worktree(Path("/repo"), _dirty_state(), run_fn=_FakeGit(), dry_run=True)
         assert "not safe to reap" in outcome.detail
+
+
+class TestTheBlockersAreReadAgainJustBeforeTheRemoval:
+    """Plan 00627 finding 4: a file written after the caller's check is not deleted.
+
+    A plain `git worktree remove` deletes ignored files, so git's own refusal
+    does not cover a scratch file written between the caller's blockers check
+    and the removal.
+    """
+
+    def test_a_blocker_found_at_the_last_moment_stops_the_removal(self) -> None:
+        git = _FakeGit()
+        outcome = reap_worktree(
+            Path("/repo"),
+            _clean_state(),
+            run_fn=git,
+            blockers_fn=lambda _path: ("untracked/scratch/late.md",),
+        )
+        assert not any(call[:2] == ("worktree", "remove") for call in git.calls)
+        assert not outcome.removed
+        assert outcome.blocked
+        assert "untracked/scratch/late.md" in outcome.detail
+
+    def test_no_blocker_lets_the_removal_run(self) -> None:
+        git = _FakeGit()
+        outcome = reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
+        assert outcome.removed
+        assert not outcome.blocked
+
+    def test_the_blockers_are_read_on_the_path_git_reported(self) -> None:
+        record = _RecordingBlockers()
+        state = _clean_state(path=Path("/repo/untracked/worktrees/agent-aaa-111"))
+        reap_worktree(Path("/repo"), state, run_fn=_FakeGit(), blockers_fn=record)
+        assert record.seen == [Path("/repo/untracked/worktrees/agent-aaa-111")]
+
+    def test_a_predicate_refusal_reads_no_blockers(self) -> None:
+        record = _RecordingBlockers()
+        reap_worktree(Path("/repo"), _dirty_state(), run_fn=_FakeGit(), blockers_fn=record)
+        assert record.seen == []
+
+    def test_a_dry_run_reads_no_blockers(self) -> None:
+        record = _RecordingBlockers()
+        reap_worktree(
+            Path("/repo"), _clean_state(), run_fn=_FakeGit(), dry_run=True, blockers_fn=record
+        )
+        assert record.seen == []
+
+
+class _RecordingBlockers:
+    """A blockers read that finds nothing and remembers each path it was asked about."""
+
+    def __init__(self) -> None:
+        self.seen: list[Path] = []
+
+    def __call__(self, path: Path) -> Sequence[str]:
+        self.seen.append(path)
+        return ()

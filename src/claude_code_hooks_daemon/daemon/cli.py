@@ -11238,7 +11238,13 @@ def cmd_worktree_reap(
         # The state carries the path git reported. Rebuilding it here picked
         # `.claude/worktrees/` unconditionally, which named a path that does
         # not exist for every worktree under the other sanctioned root.
-        outcome = reap_worktree(repo_root, state, dry_run=not reap, **collect_kwargs)
+        outcome = reap_worktree(
+            repo_root, state, blockers_fn=blockers_of, dry_run=not reap, **collect_kwargs
+        )
+        if outcome.blocked:
+            refused += 1
+            print(f"KEEP    {outcome.detail}")
+            continue
         # Under `--reap` an unremoved worktree means git refused or failed, which
         # is not a dry run: nothing about the run was hypothetical.
         label = "REAPED " if outcome.removed else ("FAILED " if reap else "DRY-RUN")
