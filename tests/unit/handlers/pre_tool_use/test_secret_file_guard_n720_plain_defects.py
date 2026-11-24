@@ -20,6 +20,7 @@ dummy outside the project, its name assembled so this file never spells one.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.indexed_project import index_project
+from tests.load_scaling import scaled_cpu_seconds
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -272,6 +274,32 @@ class TestItem2ClassNotFirstInItsBracket:
         """The bash-aware reading needs real name text, so a name-agnostic class adds no deny."""
         assert _every_route(command, project.root) == _ALLOWED_EVERYWHERE
 
+    @pytest.mark.parametrize(
+        "token", ["[" + "[:" * 50000 + "x", "[" * 50000 + "x", "[a" + "[=" * 50000, "a" * 2000]
+    )
+    def test_a_hostile_token_is_not_given_the_bash_bracket_scan(self, token: str) -> None:
+        """Past the bounds the old reading alone is used; a file name cannot be that long."""
+        assert not sfm._bash_bracket_scan_fits(token)
+        assert sfm._class_aware_literal_residue(token) == sfm._token_literal_residue(token)
+        assert sfm._brackets_as_one_character(token) == token
+
+    @pytest.mark.perf_sweep
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "[" * 64 + "x" * 960,
+            "[" + "[:" * 63 + "x" * 897,
+            "[a" + "[=" * 63 + "y" * 895,
+        ],
+    )
+    def test_the_bash_bracket_scan_inside_its_bounds_is_quick(self, token: str) -> None:
+        assert sfm._bash_bracket_scan_fits(token)
+        started = time.process_time()
+        for _ in range(20):
+            sfm._class_aware_literal_residue(token)
+            sfm._brackets_as_one_character(token)
+        assert time.process_time() - started < scaled_cpu_seconds(1.0)
+
     def test_the_residue_reader_skips_a_whole_class_bracket(self) -> None:
         assert sfm._class_aware_literal_residue(f"[x[:lower:]]{_PROTECTED[1:]}") == (_PROTECTED[1:])
 
@@ -302,6 +330,8 @@ class TestItem3aFlagCluster:
             "bash -eO dotglob -c 'cat kit/*/late2'",
             "bash -xeO dotglob -c 'cat kit/*/late2'",
             "bash -Ox dotglob -c 'cat kit/*/late2'",
+            "bash --norc -xO dotglob -c 'cat kit/*/late2'",
+            "bash -o pipefail -xO dotglob -c 'cat kit/*/late2'",
             "bash -xOe dotglob -c 'cat kit/*/late2'",
             "sh -xO dotglob -c 'cat kit/*/late2'",
             "bash -xO nocaseglob -c 'cat kit/B?N/late'",

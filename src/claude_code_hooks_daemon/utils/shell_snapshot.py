@@ -56,7 +56,7 @@ _SHOPT_LINE: Final[re.Pattern[str]] = re.compile(
 #: ``.``, ``eval``), which may run ``shopt`` itself (Ledger 00474 N716).
 _SWITCHES_OPTIONS: Final[re.Pattern[str]] = re.compile(
     r"\bshopt\b|(?<!\S)[-+]O\b"
-    r"|\b(?:ba|da|k|z)?sh(?:[ \t]+[-+][A-Za-z]*)*?[ \t]+[-+][A-Za-z]*O[A-Za-z]*\b"
+    r"|\b(?:ba|da|k|z)?sh\b[^;&|\n]*?(?<!\S)[-+][A-Za-z]*O[A-Za-z]*\b"
     r"|\b(?:GLOBIGNORE|BASHOPTS|BASH_ENV)\b|\b(?:source|eval)\b"
     r"|(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*\.[ \t]",
     re.MULTILINE,

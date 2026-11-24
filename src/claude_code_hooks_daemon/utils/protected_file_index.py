@@ -198,7 +198,8 @@ class ProtectedFileIndex:
         names = [name for name, is_link in _listed_or_unresolvable(parent) if is_link]
         hits: list[tuple[str, str, bool]] = []
         for name in names:
-            if not _segments_match([name], [parts[first]]):
+            # Case-exact as before: no caller here knows the shell's case option.
+            if not _segments_match([name], [parts[first]], ignore_case=False):
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             real = os.path.realpath(link)
@@ -416,7 +417,7 @@ class ProtectedFileIndex:
         names = [name for name, is_link in _listed_or_unresolvable(parent) if is_link]
         links: list[str] = []
         for name in names:
-            if not _segments_match([name], [last]):
+            if not _segments_match([name], [last], ignore_case=False):
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             target = os.path.realpath(link)
@@ -584,7 +585,7 @@ def _skipped_below(base: str, absolute: str, skip: SkipHook) -> bool:
     return False
 
 
-def _segments_match(path: Sequence[str], glob: Sequence[str], *, ignore_case: bool = True) -> bool:
+def _segments_match(path: Sequence[str], glob: Sequence[str], *, ignore_case: bool) -> bool:
     """Do the components of ``path`` match those of ``glob``, as the shell would?
 
     ``ignore_case`` is for a caller that cannot rule ``nocaseglob`` out
@@ -623,7 +624,15 @@ def _component_matches(glob: str, name: str, ignore_case: bool) -> bool:
         return True
     if not ignore_case or not _has_glob_syntax(glob):
         return False
+    if len(glob) > _FOLD_MAX_CHARS or glob.count("[") > _FOLD_MAX_OPENERS:
+        return False
     return _component_pattern(_case_folded_glob(glob)).fullmatch(name) is not None
+
+
+#: Longest component given the case-blind reading. A file name is at most 255
+#: bytes, so a longer component names none, and the bracket scan is quadratic in it.
+_FOLD_MAX_CHARS: Final[int] = 1024
+_FOLD_MAX_OPENERS: Final[int] = 64
 
 
 @lru_cache(maxsize=1024)

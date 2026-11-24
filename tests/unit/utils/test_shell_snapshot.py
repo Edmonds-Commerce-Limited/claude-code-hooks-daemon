@@ -84,6 +84,8 @@ class TestVerdict:
             "bash -Ox dotglob -c x",
             "/bin/bash -e -xO dotglob -c x",
             "sh -eO dotglob -c x",
+            "bash --norc -xO dotglob -c x",
+            "bash -o pipefail -xO dotglob -c x",
             # Ledger 00474 N716: dot names and case switched on without shopt.
             "GLOBIGNORE=zz; ls *",
             "env BASHOPTS=dotglob bash -c 'ls *'",

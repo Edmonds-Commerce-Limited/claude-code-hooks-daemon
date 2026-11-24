@@ -1125,7 +1125,12 @@ def _class_aware_literal_residue(token: str) -> str:
     part of any stem. Here a class (``[:lower:]``, ``[=a=]``, ``[.a.]``) is one
     member, a ``]`` first is a member, and a backslash escapes the next
     character, as :func:`_bracket_end` reads it.
+
+    A token past :func:`_bash_bracket_scan_fits` gets the old residue: it can
+    name no file, and the scan is quadratic in its brackets.
     """
+    if not _bash_bracket_scan_fits(token):
+        return _token_literal_residue(token)
     kept: list[str] = []
     index = 0
     while index < len(token):
@@ -1138,6 +1143,21 @@ def _class_aware_literal_residue(token: str) -> str:
             kept.append(token[index])
         index += 1
     return "".join(kept)
+
+
+#: Longest token, and most ``[``, the bash-aware bracket scan reads. A file name
+#: is at most 255 bytes, so a longer token names none; the bounds keep the
+#: scan's worst case (one pass per unclosed ``[``) small.
+_BASH_BRACKET_SCAN_MAX_CHARS: Final[int] = 1024
+_BASH_BRACKET_SCAN_MAX_OPENERS: Final[int] = 64
+
+
+def _bash_bracket_scan_fits(token: str) -> bool:
+    """Is ``token`` within the bounds :func:`_bracket_end` is run on?"""
+    return (
+        len(token) <= _BASH_BRACKET_SCAN_MAX_CHARS
+        and token.count("[") <= _BASH_BRACKET_SCAN_MAX_OPENERS
+    )
 
 
 def _bracket_end(token: str, start: int) -> int | None:
@@ -1412,7 +1432,12 @@ def _globs_can_intersect(a: str, b: str) -> bool:
 
 
 def _brackets_as_one_character(token: str) -> str:
-    """``token`` with each bracket bash would close (:func:`_bracket_end`) replaced by ``?``."""
+    """``token`` with each bracket bash would close (:func:`_bracket_end`) replaced by ``?``.
+
+    Unchanged past :func:`_bash_bracket_scan_fits`, which leaves the old reading alone.
+    """
+    if not _bash_bracket_scan_fits(token):
+        return token
     kept: list[str] = []
     index = 0
     while index < len(token):
