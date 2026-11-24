@@ -235,7 +235,9 @@ class TestN5OnlyTheGuardsOwnLatestBlockEarnsThePass:
         path = _write(tmp_path / "t.jsonl", [_feedback(OWN_BLOCK), queued])
         assert len(recent_stop_hook_block_texts_this_chain(path, lookback=200)) == 1
 
-    def test_an_attachment_only_own_refusal_before_a_prompt_is_dropped(self, tmp_path: Path) -> None:
+    def test_an_attachment_only_own_refusal_before_a_prompt_is_dropped(
+        self, tmp_path: Path
+    ) -> None:
         attachment = {
             "type": "attachment",
             "attachment": {
@@ -280,7 +282,9 @@ class TestKnownResidualDaemonDenyThenWork:
         entries.append(_feedback(second.reason))
         for i in range(1, 39):
             entries += [_tool_use(i), _tool_result()]
-        entries.append(_assistant("STOPPING BECAUSE: [awaiting-human] the owner must pick X or Y (Q62)."))
+        entries.append(
+            _assistant("STOPPING BECAUSE: [awaiting-human] the owner must pick X or Y (Q62).")
+        )
         third = _run(chain, tmp_path, entries, active=True)
         assert third.decision is Decision.DENY
 
