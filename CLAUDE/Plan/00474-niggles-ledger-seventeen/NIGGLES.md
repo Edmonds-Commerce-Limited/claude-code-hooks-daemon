@@ -8423,3 +8423,13 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: HIGH (security): a protected file's contents can be read through a link.
 
 **Status**: ⬜ Open. Direction to consider (owner design call, since it trades usability): the guard enumerates option-setting syntax, and an enumeration cannot be complete (item 3 is unbounded). A fail-closed alternative is to deny any command whose glob-relevant shell state cannot be established statically (dynamic command names, `eval`, `trap`, `printf -v`, `-O`, `--rcfile`, `source`, `.` in any position) when a protected-file link exists under the project, and to keep the narrow allow for the plain commands of normal repo work. Test-first with the review's reproducers; then an independent security review.
+
+### N721 — R-GIT-WORKTREE-REMOVE-FORCE calls a tracked file lost although a remote ref holds its exact content
+
+**Source**: relayed by lts-infra.1 (peer, authority none) from fedora-desktop.1's dogfood run; not yet reproduced from this seat.
+
+**Evidence**: the guard refuses to remove a detached throwaway worktree whose only change is a tracked file byte-identical to that file in a commit a remote ref already holds (pushed c46c73154). Example left in the fedora-desktop checkout: `untracked/worktrees/ledger-red`, detached at b04f60855, one deleted test file. The refusal's own advice, "deliberately delete each listed path", cannot clear a tracked file, because a deleted tracked file is still a dirty path.
+
+**Severity**: LOW (usability): a safe removal is refused and the stated remedy cannot work. Not a safety hole (the guard errs towards keeping work).
+
+**Status**: ⬜ Open. Expected: content reachable from a remote ref counts as not lost, and the advice names a route that works for tracked files (restore or commit the path, or remove once the content is proven pushed). Reproduce first with a detached worktree and a deleted tracked file whose pre-deletion content a remote ref holds; test-first; the change loosens a deletion guard, so it needs an independent security review before merge.
