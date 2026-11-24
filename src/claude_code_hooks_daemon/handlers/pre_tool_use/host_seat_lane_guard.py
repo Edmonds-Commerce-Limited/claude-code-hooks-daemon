@@ -13,11 +13,13 @@ no deny rules.
 Arming is :func:`team_role_gate.duty_gate` on ``host``:
 
 - no team (no teamchat runtime, ``whoami`` exit 69, no seats), a sub-agent, or
-  a seat whose duties are all declared and none is ``host``: silent, no change;
-- a declared ``host`` duty: armed;
-- a duty that cannot be read (the probe gave no answer, or a row with no
-  duty): armed, because an unreadable state never disarms a guard. The first
-  refusal in a session says the probe gave no answer.
+  a seat with no ``host`` duty in any held team: silent, no change. Duty is a
+  teams-only, optional field, so a row whose duty is null, absent or
+  unreadable declares nothing and does not arm;
+- a declared ``host`` duty in any held team: armed, whatever the other rows say;
+- a probe that gave no answer at all (UNRESOLVED): armed, because an
+  unreadable probe never disarms a guard. The first refusal in a session says
+  the probe gave no answer.
 
 The command classification is the shared one in
 :mod:`utils.long_running_command`, taking its test, build and QA groups (not
@@ -132,7 +134,6 @@ _UNKNOWN_REFUSAL: Final[str] = (
     f"host seat: {_LANE}"
 )
 _NO_ANSWER: Final[str] = "The teamchat whoami probe gave no answer."
-_NULL_DUTY: Final[str] = "The teamchat probe answered, but the seat's duty is not declared."
 _HANDLER_ERROR: Final[str] = (
     "Host seat lane: the guard could not judge this command, so it is treated as a "
     f"test, build, lint or QA command. {_LANE}"
@@ -142,14 +143,14 @@ _RULE: Final[Rule] = Rule(
     rule_id=RuleID.HOST_SEAT_LANE,
     blocked=(
         "a test, build, lint or QA command in a session holding a teamchat seat with "
-        "duty host (or whose duty cannot be read)"
+        "duty host (or whose teamchat probe gives no answer)"
     ),
     why="Host seats are for deployment and triage at desktop level; they are not workers",
     fix="Run it in a worker seat of the team",
     verbose=(
         "WHY BLOCKED:\n"
         "This session holds a teamchat seat whose duty is host in some team (or\n"
-        "its duty cannot be read), and the command runs tests, a build, a linter\n"
+        "the teamchat probe gave no answer), and the command runs tests, a build, a linter\n"
         "or QA. Host seats are for deployment and triage, not for worker lanes.\n\n"
         "DO INSTEAD:\n"
         "  Hand the command to a worker seat of the team.\n"
@@ -227,12 +228,19 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         """The duty gate on ``host`` and the probe state behind it.
 
         NOT_APPLICABLE (state None) with no teamchat runtime, and no probe run.
+        A probe that answered but declares no duty (null, absent or unreadable)
+        is NOT_APPLICABLE too: duty is optional, so only a declared ``host``
+        arms. ``duty_gate`` checks a declared duty first, so a host in one
+        team is never disarmed by a null duty in another.
         """
         signals = SessionSignals.from_hook_input(hook_input)
         if not signals.runtime:
             return GateVerdict.NOT_APPLICABLE, None
         context = self._seat_resolver().resolve(signals)
-        return duty_gate(hook_input, context, duty=DUTY_HOST).verdict, context.state
+        verdict = duty_gate(hook_input, context, duty=DUTY_HOST).verdict
+        if verdict is GateVerdict.ROLE_UNKNOWN and context.state is not SeatState.UNRESOLVED:
+            return GateVerdict.NOT_APPLICABLE, context.state
+        return verdict, context.state
 
     def _is_lane(self, hook_input: Mapping[str, Any]) -> bool:
         command = get_bash_command(dict(hook_input)) or ""
@@ -286,13 +294,11 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             return self._refuse(_HANDLER_ERROR)
 
     def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
-        verdict, state = self._verdict(hook_input)
+        verdict, _state = self._verdict(hook_input)
         if verdict is GateVerdict.NOT_APPLICABLE or not self._is_lane(hook_input):
             return GatingResult(decision=Decision.ALLOW)
         if verdict is GateVerdict.ROLE_UNKNOWN:
-            if state is not SeatState.UNRESOLVED:
-                # The probe answered; the seat's duty is null on the wire.
-                return self._refuse(f"{_UNKNOWN_REFUSAL} {_NULL_DUTY}")
+            # Only an unanswered probe reaches here; see _verdict.
             if self._first_note(hook_input):
                 return self._refuse(f"{_UNKNOWN_REFUSAL} {_NO_ANSWER}")
             return self._refuse(_UNKNOWN_REFUSAL)
@@ -321,10 +327,11 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             "test, build, lint and QA commands (`pytest`, `npm test`, `make test`, "
             "`ruff`, `mypy`, `llm_qa.py`, also via `sh -c`, wrappers or `&`) are "
             "refused: host seats are for deployment and triage. Hand the command to a "
-            "worker seat. Deployment and triage commands are never refused. If the "
-            "seat's duty cannot be read the guard stays armed. `mode: advise` (the "
-            "default) only reports; `mode: block` denies. A session with no team seat "
-            "is never affected."
+            "worker seat. Deployment and triage commands are never refused. Only an "
+            "explicit `host` duty arms it: a session with no team seat, or a seat whose "
+            "duty is null or missing, is never affected. If the teamchat probe gives "
+            "no answer at all the guard stays armed. `mode: advise` (the default) only "
+            "reports; `mode: block` denies."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

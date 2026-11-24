@@ -48,6 +48,15 @@ COORDINATOR = parse_whoami(fx.COORDINATOR_ONLY)
 OTHER_DUTY = parse_whoami(fx.UNKNOWN_DUTY)
 MULTI_TEAM = parse_whoami(fx.MULTI_TEAM)
 NULL_DUTY = parse_whoami(fx.ROLE_NULL)
+WORKER_NULL_DUTY = parse_whoami(fx.whoami(fx.seat("alpha", "worker", duty=None)))
+NO_DUTY_KEY = parse_whoami(
+    fx.whoami({"team": "alpha", "handle": "@example.1+local.container:alpha.test", "role": "worker"})
+)
+GARBAGE_DUTY = parse_whoami(fx.whoami(fx.seat("alpha", "worker", duty="ho st!")))
+HOST_AND_NULL_DUTY = parse_whoami(
+    fx.whoami(fx.seat("alpha", "worker", duty="host"), fx.seat("beta", "worker", duty=None))
+)
+NOT_JSON = parse_whoami(fx.NOT_JSON)
 NO_TEAMS = parse_whoami(fx.NO_TEAMS)
 UNRESOLVED = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
 ABSENT = SeatContext.absent(ProbeReason.NO_SESSION)
@@ -260,10 +269,31 @@ class TestArming:
         handler, _ = make(context)
         assert handler.matches(bash(PYTEST)) is False
 
-    @pytest.mark.parametrize("context", [UNRESOLVED, NULL_DUTY])
-    def test_unknown_duty_is_armed(self, context: SeatContext) -> None:
+    @pytest.mark.parametrize("context", [UNRESOLVED, NOT_JSON])
+    def test_an_unreadable_probe_stays_armed(self, context: SeatContext) -> None:
         handler, _ = make(context)
         assert handler.matches(bash(PYTEST)) is True
+
+    @pytest.mark.parametrize(
+        "context",
+        [NULL_DUTY, WORKER_NULL_DUTY, NO_DUTY_KEY, GARBAGE_DUTY],
+        ids=["role-null", "worker-null-duty", "no-duty-key", "garbage-duty"],
+    )
+    def test_a_seat_with_no_declared_duty_is_silent(self, context: SeatContext) -> None:
+        """Duty is a teams-only concept and may be null: only an explicit host arms."""
+        handler, _ = make(context)
+        assert handler.matches(bash(PYTEST)) is False
+        result = handler.handle(bash(PYTEST))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_host_in_one_team_and_null_duty_in_another_is_armed(self) -> None:
+        """A null duty elsewhere must never disarm an explicit host."""
+        handler, _ = make(HOST_AND_NULL_DUTY)
+        assert handler.matches(bash(PYTEST)) is True
+        text = _text(handler.handle(bash(PYTEST)))
+        assert "holds a teamchat seat with duty host" in text
+        assert "the guard stays armed" not in text
 
     def test_subagent_is_silent(self) -> None:
         handler, _ = make(HOST)
@@ -360,12 +390,12 @@ class TestDecision:
             assert "cannot be read" in text
             assert "worker seat" in text
 
-    def test_null_duty_does_not_claim_the_probe_gave_no_answer(self) -> None:
+    def test_a_resolved_unknown_duty_is_never_refused(self) -> None:
         handler, _ = make(NULL_DUTY)
-        text = _text(handler.handle(bash(PYTEST)))
-        assert _NO_ANSWER not in text
-        assert "duty is not declared" in text
-        assert "worker seat" in text
+        for _ in range(2):
+            result = handler.handle(bash(PYTEST))
+            assert result.decision == Decision.ALLOW
+            assert not result.context
 
     def test_lazy_resolver_is_built_from_team_seat(self) -> None:
         handler = HostSeatLaneGuardHandler()
