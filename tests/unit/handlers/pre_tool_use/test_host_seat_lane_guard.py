@@ -2,8 +2,10 @@
 
 A session holding a teamchat seat whose duty in ANY held team is ``host``
 (owner ruling lts-infra Q62/Q64 D3) runs no test, build, lint or QA command:
-host seats are for deployment and triage. An unreadable ``whoami`` means the
-duty is unknown and the guard stays armed. No team means no change at all.
+host seats are for deployment and triage. A null or missing duty in a resolved
+seat is undeclared and arms nothing (D1). A probe that stops answering keeps the
+guard armed only in a session that already resolved a seat; one that never
+answered reads as no team (D3). No team means no change at all.
 
 Injection seams the handler exposes for these tests:
 
@@ -126,6 +128,16 @@ class TestIdentity:
 
     def test_declares_team_seat_for_injection(self) -> None:
         assert hasattr(HostSeatLaneGuardHandler(), "_team_seat")
+
+    def test_rule_text_scopes_the_no_answer_arming_to_a_resolved_session(self) -> None:
+        """Plan 00474 R8: a probe with no answer arms only after a seat resolved (D3)."""
+        rule = HostSeatLaneGuardHandler().get_rules()[0]
+        scoped = "a probe that stops answering in a session that resolved a seat"
+        assert scoped in rule.blocked
+        assert "a session that already resolved a seat" in rule.verbose
+        assert "probe gives no answer" not in rule.blocked
+        claude_md = HostSeatLaneGuardHandler().get_claude_md() or ""
+        assert "stays armed only in a session that already resolved a seat" in claude_md
 
     def test_ships_in_advise_mode(self) -> None:
         assert HostSeatLaneGuardHandler()._mode == "advise"

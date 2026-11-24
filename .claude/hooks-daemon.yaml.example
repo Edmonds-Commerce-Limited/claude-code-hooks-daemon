@@ -206,14 +206,14 @@ handlers:
 
     human_approval_check:   # A coordinator team seat's push, delete, world-writable chmod or
       enabled: true          # merge into main needs a cited questions-room line a human sent.
-      priority: 21            # Silent for a session with no team seat. block denies EVERY coordinator
+      priority: 21            # Silent with no team seat (a never-answering probe is none). block denies EVERY coordinator
       options:                # push until fedora-desktop issue 369 lands: the default verifier refuses every cite.
         mode: advise           # off | advise | block
         coordinator_seats_only: true   # arm only coordinator seats (and unreadable roles)
 
     host_seat_lane_guard:   # A teamchat seat with duty host runs no test, build, lint or QA
       enabled: true          # command: host seats are for deployment and triage.
-      priority: 21            # Silent with no team seat or a null duty; only duty host arms it.
+      priority: 21            # Silent with no team seat, a never-answering probe or a null duty; only duty host arms it.
       options:
         mode: advise           # off | advise | block
 

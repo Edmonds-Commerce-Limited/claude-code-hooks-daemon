@@ -27,7 +27,8 @@ not in this clone).
 
 - `SeatContext` with `role_in(team)`, `duty_in(team)` and `any_duty(value)`;
   no session-wide role. Role is the wire set (`coordinator | worker | probe`,
-  `null` is unknown); duty is an open set (`null` is unknown).
+  `null` is unknown); duty is an open set (`null` is undeclared and arms
+  nothing, Plan 00474 D1).
 - Absent and no-answer cases kept apart (DESIGN.md section 4), with a 60 s TTL.
 - `TEAMCHAT_RUNTIME` and `TEAMCHAT_KIT` reach the daemon through the payload
   stamp (precedent: `SESSION_HOSTNAME`).

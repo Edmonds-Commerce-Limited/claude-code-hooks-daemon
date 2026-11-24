@@ -110,15 +110,16 @@ _RULE: Final[Rule] = Rule(
     rule_id=RuleID.HOST_SEAT_LANE,
     blocked=(
         "a test, build, lint or QA command in a session holding a teamchat seat with "
-        "duty host (or whose teamchat probe gives no answer)"
+        "duty host (or with a probe that stops answering in a session that resolved a seat)"
     ),
     why="Host seats are for deployment and triage at desktop level; they are not workers",
     fix="Run it in a worker seat of the team",
     verbose=(
         "WHY BLOCKED:\n"
         "This session holds a teamchat seat whose duty is host in some team (or\n"
-        "the teamchat probe gave no answer), and the command runs tests, a build, a linter\n"
-        "or QA. Host seats are for deployment and triage, not for worker lanes.\n\n"
+        "the teamchat probe stopped answering in a session that already resolved a seat),\n"
+        "and the command runs tests, a build, a linter or QA. Host seats are for\n"
+        "deployment and triage, not for worker lanes.\n\n"
         "DO INSTEAD:\n"
         "  Hand the command to a worker seat of the team.\n"
         "Deployment and triage commands are never refused here."
@@ -282,7 +283,9 @@ class HostSeatLaneGuardHandler(TeamOnlyGuidance, PreToolUseHandlerBase):
             "worker seat. Deployment and triage commands are never refused. Only an "
             "explicit `host` duty arms it: a session with no team seat, or a seat whose "
             "duty is null or missing, is never affected. If the teamchat probe gives "
-            "no answer at all the guard stays armed. `mode: advise` (the default) only "
+            "no answer at all the guard stays armed only in a session that already "
+            "resolved a seat; one that never resolved reads as no team. "
+            "`mode: advise` (the default) only "
             "reports; `mode: block` denies."
         )
 

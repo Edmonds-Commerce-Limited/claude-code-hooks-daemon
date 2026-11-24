@@ -14,8 +14,9 @@ Advisory only: it never denies, is never terminal, and runs no command or
 network call of its own. Silent when the output shows nothing waiting to start,
 so the seat probe runs only when there is something to say. The gate is the
 shared ``coordinator_advisory_armed``: a declared coordinator, a coordinator
-duty, an unreadable role or an unresolved probe hear it; a declared worker, no
-team and a sub-agent do not. A fault reading the seat counts as armed.
+duty, an unreadable role, or a probe that stops answering after this session
+resolved a seat hear it; a declared worker, no team (including a probe that
+never answered) and a sub-agent do not. A fault reading the seat counts as armed.
 """
 
 from __future__ import annotations
