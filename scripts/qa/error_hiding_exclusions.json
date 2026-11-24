@@ -777,6 +777,18 @@
       "function": "_find_persisted_report",
       "rule": "return-none-on-error",
       "reason": "Plan 00460 review finding m2: reading the candidate file's content is purely to compare it against the current last_assistant_message (a match is required before the caller may cite the path) -- the read is not load-bearing on its own. An OSError here (the file vanishing between find_persisted_report's glob and this read, a concurrent prune) is exactly as harmless to treat as 'no match' as the ordinary content-mismatch case one line later, which is this same function's normal control flow, not an exception. The caller (handle()) already treats None identically to 'nothing usable was persisted' and falls back to the pre-Task-1.6 messages, so raising here would turn a benign filesystem race in a TERMINAL SubagentStop handler into a crashed dispatch over a lookup that was already best-effort."
+    },
+    {
+      "file": "utils/human_approval.py",
+      "function": "_resolve",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00634 P1: CiteLedger._resolve is reached only with single_use_cites ON. A ledger path that cannot be resolved (ProjectContext not initialised, or any failure computing it) returns None, which the ledger reports as UNAVAILABLE and check_approval refuses the cite (fail closed). Raising would escape into the guard's handle(); the failure is logged via log_and_continue and carries no line text. Covered by test_a_path_that_cannot_be_resolved_refuses."
+    },
+    {
+      "file": "utils/human_approval.py",
+      "function": "_load",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00634 P1: CiteLedger._load returns None for an unreadable single-use ledger (OSError other than a missing file), which becomes LedgerOutcome.UNAVAILABLE and refuses the cite: an unreadable ledger can never let a used cite pass again. Logged via log_and_continue; the ledger holds ids and act classes only, never line text. Covered by test_an_unreadable_ledger_refuses and test_an_oversized_ledger_refuses."
     }
   ]
 }

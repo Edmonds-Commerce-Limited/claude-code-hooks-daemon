@@ -440,14 +440,15 @@ def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return document
 
 
-def decode_json_document(text: str) -> object | ProbeReason:
+def decode_json_document(text: str, *, max_bytes: int = MAX_OUTPUT_BYTES) -> object | ProbeReason:
     """Strictly decode one teamchat CLI JSON answer, or say why not. Never raises.
 
-    Oversized output, a document nested past :data:`MAX_JSON_DEPTH`, a
-    repeated key and any decoder failure (including ``RecursionError``) are
-    each a reason, never a partial document.
+    Text longer than ``max_bytes`` characters, a document nested past
+    :data:`MAX_JSON_DEPTH`, a repeated key and any decoder failure (including
+    ``RecursionError``) are each a reason, never a partial document. A caller
+    decoding its own file names its own cap; CLI output keeps the runner's.
     """
-    if len(text) > MAX_OUTPUT_BYTES:
+    if len(text) > max_bytes:
         return ProbeReason.OUTPUT_TOO_LARGE
     if _nesting_exceeds(text, MAX_JSON_DEPTH):
         return ProbeReason.NOT_JSON

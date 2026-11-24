@@ -303,10 +303,58 @@ config_changes:
               options:
                 mode: advise
                 coordinator_seats_only: true
+                require_question: false
+                max_line_age_seconds: null
+                single_use_cites: false
       migration_note: >-
-        Keep mode: advise for now. Until fedora-desktop issue 369 confirms the
-        teamchat verify contract, the shipped verifier refuses every cite, so
-        mode: block denies EVERY armed act, including every coordinator push.
+        Keep mode: advise. advise is annotation only (it allows every
+        refusal). Cites are checked with `teamchat verify <id> --room
+        questions`, coded against the fedora-desktop issue 369 contract as its
+        peer relayed it and not yet checked against a live teamchat; a
+        declared coordinator seat's sub-agents are judged as the seat.
+    - key: handlers.pre_tool_use.human_approval_check.options.require_question
+      recommended: false
+      dormant: false
+      description: >-
+        require_question (default false, owner question O4): a cited line must
+        answer a Q<n> question (teamchat verify's `question`); `none` or null
+        refuses. An invalid value is refused by validation and stays off.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            human_approval_check:
+              options:
+                require_question: false
+    - key: handlers.pre_tool_use.human_approval_check.options.max_line_age_seconds
+      recommended: false
+      dormant: false
+      description: >-
+        max_line_age_seconds (default null = off, integer 1 to 2592000, owner
+        question O4): a cited line older than this, by verify's `sent_ms`, or
+        dated more than a minute in the future, refuses.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            human_approval_check:
+              options:
+                max_line_age_seconds: null
+    - key: handlers.pre_tool_use.human_approval_check.options.single_use_cites
+      recommended: false
+      dormant: false
+      description: >-
+        single_use_cites (default false, owner question O4): each cite passes
+        once per act class, recorded (ids and act classes only, never text) in
+        human-approval-used-cites.json under the daemon's untracked directory.
+        An unreadable or unwritable ledger refuses; deleting it re-allows
+        every recorded cite. The file is bounded at 256 KiB: past that the
+        oldest entries are evicted and those cites become usable again, so
+        pair it with max_line_age_seconds for a hard bound.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            human_approval_check:
+              options:
+                single_use_cites: false
     - key: handlers.pre_tool_use.host_seat_lane_guard
       recommended: true
       dormant: false

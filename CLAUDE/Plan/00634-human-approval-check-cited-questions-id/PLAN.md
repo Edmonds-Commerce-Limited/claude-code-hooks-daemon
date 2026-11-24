@@ -13,17 +13,16 @@ Child (d) of umbrella [Plan 00630](../00630-coordinator-level-skills-ccy-teams-a
 design in its [DESIGN.md](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md)
 section 16. Before a destructive act (push, delete, permission change, merge to
 main) the daemon requires a cited questions-room id and the team it names, and
-runs `$TEAMCHAT_KIT/bin/teamchat verify --team <T> <id>` with the stamped
+runs `$TEAMCHAT_KIT/bin/teamchat verify <id> --room questions` with the stamped
 `TEAMCHAT_RUNTIME`. It passes only if the line is in the questions room, its
 sender is a declared human of T, and the seat's role in T is coordinator.
 Anything else is a deny with the reason, never a pass; there is no `history`
 fallback. Nothing under teamchat's seat store or run directory is opened.
 
-Coded against fedora-desktop issue 369: `verify` takes a questions-room id and
-answers with room, sender, whether a declared team human, the attached `Q<n>`
-and the text, with documented exit codes. Until it lands, today's `verify`
-reads the main room only, so a questions-room cite cannot be verified and the
-guard (and the 00632 GO gate) deny with that reason.
+Coded against the fedora-desktop issue 369 `verify` contract as its peer
+relayed it (one `verified` record: room, sender, `human`, `question`,
+`sent_ms`; documented exit codes). It is not yet checked against a live
+teamchat (Task 2.4); anything off that contract refuses.
 
 A verified readiness GO (Plan 00632) is accepted as the cite for the act
 classes it authorised, until the window ends or the mode lapses; never for a
@@ -59,25 +58,35 @@ class it did not authorise.
   green.
 - [x] ✅ **Task 2.2**: Guard `human_approval_check`, mode off | advise | block
   (advise by default). Targeted QA green.
-- [ ] ⬜ **Task 2.3**: Live verification once issue 369 lands; then swap the
-  default verifier for `TeamchatVerifyCli` and confirm its argv and answer
-  shape against the real contract. **Blocked on the preconditions below.**
+- [x] ✅ **Task 2.3**: `DEFAULT_VERIFIER` is `TeamchatVerifyCli`, coded against
+  the issue 369 contract as the peer relayed it
+  ([subagent-reports/261124-fedora-desktop-contract-reply.md](subagent-reports/261124-fedora-desktop-contract-reply.md)):
+  argv `verify <id> --room questions`, one `verified` record, the exact 13
+  keys, exits 23/22/20/14 mapped, anything else refused. Wired on the owner's
+  instruction with P1 off, which is safe only because the mode is `advise`.
+  Builder report:
+  [subagent-reports/261124-task-2-3-and-p2-verify-and-subagents.md](subagent-reports/261124-task-2-3-and-p2-verify-and-subagents.md).
+- [ ] ⬜ **Task 2.4**: Live check of the verify call from a v2 seat (argv
+  order, the value of `v`, the types of `item`, `from`, `body_sha256`).
 
-### BLOCKING PRECONDITIONS for Task 2.3 and for ever defaulting `mode: block`
+### Preconditions for ever defaulting `mode: block`
 
 From the independent review
 ([subagent-reports/261123-opus-independent-review-pr225.md](subagent-reports/261123-opus-independent-review-pr225.md)).
-None of these is done; each must land before the live verifier is wired or
-`block` becomes the default.
+Owner ruling (2026-11-24): the check stays advise-only; nothing here is to be
+flipped to block or defaulted on.
 
-- [ ] ⬜ **P1 (review finding 1), bind the approval**: a verified line must be
-  bound to the act and to the line's text, and have a maximum line age. For
-  example, single-use per cite, or the line must answer a `Q<n>` the
-  coordinator posted that names the act. Today a coordinator can cite ANY
-  human questions-room line, however old and whatever it says (even "NO").
-- [ ] ⬜ **P2 (review finding 2), arm delegated threads**: sub-agents and
-  in-process teammates are never armed, so a coordinator can hand a push,
-  delete or merge to a sub-agent and bypass the check entirely.
+- [ ] 🔄 **P1 (review finding 1), bind the approval**: built OFF behind
+  `require_question`, `max_line_age_seconds` and `single_use_cites` (owner
+  question O4). Default unchanged: any human questions-room line passes.
+- [x] ✅ **P2 (review finding 2), arm delegated threads**: a sub-agent is armed
+  only when a held seat is DECLARED coordinator, and is judged as that seat
+  (`role_gate(..., include_subagents=True)`, wired for this guard only).
+  **Known collision for a later block flip**: `R-BRANCH-SUBAGENT-STOP-GUARD`
+  refuses a sub-agent stop that leaves unpushed commits, so a coordinator
+  seat's sub-agent in `block` mode could be unable either to push or to stop.
+  It needs a hand-over route (e.g. sub-agents push only their own agent
+  branch); the owner has not decided. Advise mode creates no conflict.
 - [ ] ⬜ **P3 (review finding 5), advise is annotation only**: `advise` allows
   every refusal (uncited, forged, wrong team, verify unavailable, handler
   error). It must not be read as protection; only `block` enforces.
@@ -89,14 +98,10 @@ None of these is done; each must land before the live verifier is wired or
 - **Q5, proposed**: `coordinator_seats_only` (default on) arms coordinator
   seats and unreadable roles on the main thread; off arms every main-thread
   seat.
-- **Gap, sub-agents** (precondition P2): under the Q5 default a coordinator's
-  sub-agent or in-process teammate is not armed, so its push, delete or merge
-  is unguarded. Arming it would deny every such act, because no sub-agent can
-  pass.
-- **Gap, replay** (precondition P1): replay is UNBOUNDED. The 300 s in-memory
-  approval record only skips re-verification; once it lapses the same line
-  verifies again and passes again, indefinitely. Nothing binds the line's
-  text, age or question to the act.
+- **Gap, replay** (precondition P1): with the binding switches off (the
+  default) replay is UNBOUNDED. The 300 s in-memory approval record only skips
+  re-verification; once it lapses the same line passes again. Nothing reads
+  the line's text, so a human "NO" in the questions room still verifies.
 - **Gap, deletes**: a plain `git branch -d` is not an act (merged-only delete).
 - **Gap, `git -C <dir>`**: a merge or main-moving command run with `-C` is
   judged against the hook cwd, not `<dir>`.
@@ -105,12 +110,10 @@ None of these is done; each must land before the live verifier is wired or
 - **Choice, `gh pr merge`**: always counts as a merge into main, because it
   lands on the PR base on GitHub whatever the local checkout; an unreadable
   current branch with a merge named also counts (fail closed).
-- **Mode `block`**: until issue 369 lands the default verifier refuses every
-  cite, so `block` denies every armed act; the shipped default is `advise`.
-- **Unverified here**: the `verify --json` flag, the answer shape, and the
-  event id grammar (provisional `$[A-Za-z0-9_+=-]`; no `:`, `/`, `.` or `~`
-  accepted, so a path-shaped id is refused; fails closed if real ids carry
-  one).
+- **Mode**: `advise` only (owner ruling). `advise` is annotation only.
+- **Unverified here**: the relayed verify contract has not been run against a
+  live teamchat (Task 2.4). The id grammar is the contract's
+  `^\$[A-Za-z0-9_-]{43}$`.
 
 ## Dependencies
 
@@ -124,7 +127,8 @@ None of these is done; each must land before the live verifier is wired or
 - [x] Absent-team fixture passes.
 - [x] Release-bound items recorded in the pending-release holding area
   (`CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml`,
-  `release-notes/087-human-approval-check.md`).
+  `release-notes/087-human-approval-check.md`,
+  `release-notes/103-human-approval-check-verifies-cites-and-judges-coordinator-sub-agents.md`).
 
 ## Delivery & Milestones
 

@@ -45,6 +45,59 @@ def test_subagent_of_coordinator_seat_is_not_coordinator() -> None:
     assert decision.verdict is GateVerdict.NOT_APPLICABLE
 
 
+# --- include_subagents (Plan 00634 P2): a guard judges a seat's sub-agent as the seat ---
+
+
+def test_include_subagents_judges_a_coordinator_seats_subagent_as_the_seat() -> None:
+    context = parse_whoami(fx.COORDINATOR_ONLY)
+    decision = role_gate(
+        SUBAGENT, context, team="alpha", role="coordinator", include_subagents=True
+    )
+    assert decision.verdict is GateVerdict.APPLIES
+
+
+def test_include_subagents_leaves_a_worker_seats_subagent_not_applicable() -> None:
+    context = parse_whoami(fx.WORKER_ONLY)
+    decision = role_gate(
+        SUBAGENT, context, team="alpha", role="coordinator", include_subagents=True
+    )
+    assert decision.verdict is GateVerdict.NOT_APPLICABLE
+
+
+def test_include_subagents_leaves_a_no_team_subagent_not_applicable() -> None:
+    decision = role_gate(SUBAGENT, ABSENT, team="alpha", role="coordinator", include_subagents=True)
+    assert decision.verdict is GateVerdict.NOT_APPLICABLE
+
+
+def test_include_subagents_never_arms_a_subagent_on_an_unreadable_role() -> None:
+    """Owner ruling (plan 00634): a sub-agent is judged only on a DECLARED role."""
+    for context in (UNRESOLVED, parse_whoami(fx.ROLE_NULL)):
+        decision = role_gate(
+            SUBAGENT, context, team="alpha", role="coordinator", include_subagents=True
+        )
+        assert decision.verdict is GateVerdict.NOT_APPLICABLE
+
+
+def test_include_subagents_changes_nothing_on_the_main_thread() -> None:
+    for context in (parse_whoami(fx.COORDINATOR_ONLY), parse_whoami(fx.WORKER_ONLY), ABSENT):
+        assert role_gate(
+            MAIN, context, team="alpha", role="coordinator", include_subagents=True
+        ) == role_gate(MAIN, context, team="alpha", role="coordinator")
+
+
+def test_duty_gate_include_subagents_never_arms_on_an_unreadable_duty() -> None:
+    decision = duty_gate(SUBAGENT, UNRESOLVED, duty="host", include_subagents=True)
+    assert decision.verdict is GateVerdict.NOT_APPLICABLE
+
+
+def test_duty_gate_include_subagents_judges_the_seat() -> None:
+    context = parse_whoami(fx.HOST_DUTY)
+    assert duty_gate(SUBAGENT, context, duty="host", include_subagents=True).verdict is (
+        GateVerdict.APPLIES
+    )
+    assert duty_gate(SUBAGENT, context, duty="host").verdict is GateVerdict.NOT_APPLICABLE
+
+
 def test_per_team_multi_team() -> None:
     context = parse_whoami(fx.MULTI_TEAM)
     assert role_gate(MAIN, context, team="alpha", role="coordinator").verdict is (

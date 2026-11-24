@@ -1247,13 +1247,13 @@ handlers:
 | **Type**       | Blocking (terminal)    |
 | **Event**      | PreToolUse             |
 
-**Description:** In a session holding a teamchat seat as coordinator, a `git push`, a branch, ref or worktree delete, a world-writable `chmod` or a merge into main needs a cited questions-room line a declared human of the team sent (Plan 00634, `R-HUMAN-APPROVAL-MISSING`). The cite is a trailing comment on the command's last line: `git push origin x  # human-approval team=<team> id=<$event-id>`. A peer agent's line never counts, and a sub-agent cannot carry an approval.
+**Description:** In a session holding a teamchat seat as coordinator, a `git push`, a branch, ref or worktree delete, a world-writable `chmod` or a merge into main needs a cited questions-room line a declared human of the team sent (Plan 00634, `R-HUMAN-APPROVAL-MISSING`). The cite is a trailing comment on the command's last line: `git push origin x  # human-approval team=<team> id=<$event-id>`. A peer agent's line never counts. The cite is checked with `teamchat verify <id> --room questions`.
 
-**Fires when:** the mode is not `off`, the payload carries a teamchat runtime, the command names one of those acts, and the seat is armed: a main thread whose seat is coordinator in some team or whose role cannot be read (with `coordinator_seats_only: true`), or any main-thread seat (with it false). A session with no team seat never probes and never changes. A merge whose current branch cannot be read counts as a merge into main; `gh pr merge` always does. Only forced branch deletes are detected (`branch -D`, `update-ref -d`), and the permission act is the world-writable `chmod` only.
+**Fires when:** the mode is not `off`, the payload carries a teamchat runtime, the command names one of those acts, and the seat is armed: a main thread whose seat is coordinator in some team or whose role cannot be read (with `coordinator_seats_only: true`), or any main-thread seat (with it false). A sub-agent is armed only when a held seat is declared coordinator, and is judged as that seat. A session with no team seat never probes and never changes. A merge whose current branch cannot be read counts as a merge into main; `gh pr merge` always does. Only forced branch deletes are detected (`branch -D`, `update-ref -d`), and the permission act is the world-writable `chmod` only.
 
-**Options:** `mode` (`off` | `advise` | `block`, default `advise`): `advise` allows with the refusal as context, `block` denies. `coordinator_seats_only` (default `true`).
+**Options:** `mode` (`off` | `advise` | `block`, default `advise`): `advise` allows with the refusal as context, `block` denies. `coordinator_seats_only` (default `true`). Binding switches, all off by default (owner question O4): `require_question` (the line must answer a `Q<n>`), `max_line_age_seconds` (`null` or 1 to 2592000), `single_use_cites` (each cite passes once per act class, recorded in the daemon's untracked directory; the record is bounded at 256 KiB by evicting its oldest entries, which makes those cites usable again, so pair it with `max_line_age_seconds` for a hard bound).
 
-**Until fedora-desktop issue 369 lands** the shipped verifier refuses every cite, so `block` denies every armed act, including every coordinator push.
+**`advise` is annotation only**: it allows every refusal, so it protects nothing. The `verify` contract is the one fedora-desktop's peer seat relayed for issue 369, not yet checked against a live teamchat; an answer off that contract refuses.
 
 **Config example:**
 

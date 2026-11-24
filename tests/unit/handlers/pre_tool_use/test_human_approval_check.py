@@ -10,7 +10,9 @@ Injection seams the handler exposes for these tests:
 - ``_coordinator_seats_only``: Q5 (option ``coordinator_seats_only``)
 - ``_resolver``: anything with ``resolve(signals) -> SeatContext``; built
   lazily from ``_team_seat`` when None
-- ``_verifier``: a :data:`Verifier`, default ``DEFAULT_VERIFIER``
+- ``_verifier``: a :data:`Verifier`; tests inject ``TeamchatVerifyCli`` over a
+  fake runner, never the real one
+- ``_ledger``: a :class:`CiteLedger` (single use, OFF by default)
 - ``_records``: an :class:`ApprovalRecords`
 """
 
@@ -37,15 +39,18 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.human_approval_check import 
     classify_acts,
 )
 from claude_code_hooks_daemon.utils.human_approval import (
-    DEFAULT_VERIFIER,
     ActClass,
     ApprovalCite,
     ApprovalRecords,
+    CiteLedger,
     Refusal,
+    TeamchatVerifyCli,
     VerifiedLine,
     VerifyFailure,
 )
 from claude_code_hooks_daemon.utils.teamchat_seat import (
+    CommandOutcome,
+    CommandStatus,
     ProbeReason,
     SeatContext,
     SessionSignals,
@@ -65,8 +70,23 @@ ROLE_UNKNOWN = parse_whoami(fx.ROLE_NULL)
 UNRESOLVED = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
 
 HUMAN_LINE = VerifiedLine(
-    team="alpha", event_id=fx.HUMAN_ID, room="questions", declared_human=True, question="Q7"
+    team="alpha",
+    event_id=fx.HUMAN_ID,
+    room="questions",
+    declared_human=True,
+    question="Q7",
+    sent_ms=fx.SENT_MS,
 )
+
+
+def cli_answering(outcome: CommandOutcome) -> TeamchatVerifyCli:
+    """The production verifier over a fake runner: nothing is ever spawned."""
+    return TeamchatVerifyCli(runner=lambda args, env, timeout: outcome)
+
+
+#: The production verifier answering "no such line" (exit 23).
+NOT_FOUND_CLI = cli_answering(CommandOutcome(CommandStatus.EXITED, exit_code=23))
+HUMAN_CLI = cli_answering(CommandOutcome(CommandStatus.OK, fx.verify_answer(), 0))
 _VERIFIED_WORD = re.compile(r"\bverified\b", re.IGNORECASE)
 
 
@@ -131,7 +151,7 @@ def make(
     *,
     mode: str = "block",
     coordinator_seats_only: bool = True,
-    verifier: Any = DEFAULT_VERIFIER,
+    verifier: Any = NOT_FOUND_CLI,
 ) -> tuple[HumanApprovalCheckHandler, FakeResolver]:
     handler = HumanApprovalCheckHandler()
     resolver = FakeResolver(context)
@@ -383,11 +403,19 @@ class TestArming:
         handler, _ = make(context)
         assert handler.matches(bash(PUSH)) is False
 
-    def test_classify_failure_is_silent_for_a_subagent(
+    def test_classify_failure_counts_for_a_coordinator_seats_subagent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(module, "classify_acts", _exploding_classify)
         handler, _ = make(COORDINATOR)
+        assert handler.matches(subagent(PUSH)) is True
+
+    @pytest.mark.parametrize("context", [WORKER, ROLE_UNKNOWN, UNRESOLVED])
+    def test_classify_failure_is_silent_for_another_subagent(
+        self, monkeypatch: pytest.MonkeyPatch, context: SeatContext
+    ) -> None:
+        monkeypatch.setattr(module, "classify_acts", _exploding_classify)
+        handler, _ = make(context)
         assert handler.matches(subagent(PUSH)) is False
 
     def test_classify_failure_with_no_runtime_never_probes(
@@ -425,9 +453,28 @@ class TestArming:
         handler, _ = make(SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL))
         assert handler.matches(bash(PUSH)) is False
 
-    def test_subagent_is_silent(self) -> None:
+    def test_coordinator_seats_subagent_is_armed(self) -> None:
+        """P2: a sub-agent can push for the coordinator, so it is judged as the seat."""
         handler, _ = make(COORDINATOR)
+        assert handler.matches(subagent(PUSH)) is True
+
+    @pytest.mark.parametrize(
+        "context",
+        [WORKER, ROLE_UNKNOWN, UNRESOLVED, SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)],
+    )
+    def test_subagent_of_any_other_seat_is_silent(self, context: SeatContext) -> None:
+        """Nothing is assumed for a sub-agent: only a DECLARED coordinator seat arms it."""
+        handler, _ = make(context)
         assert handler.matches(subagent(PUSH)) is False
+
+    def test_worker_seats_subagent_is_silent_with_q5_off(self) -> None:
+        handler, _ = make(WORKER, coordinator_seats_only=False)
+        assert handler.matches(subagent(PUSH)) is False
+
+    def test_no_runtime_subagent_is_silent(self) -> None:
+        handler, resolver = make(COORDINATOR)
+        assert handler.matches(subagent(PUSH) | {HookInputField.TEAMCHAT_RUNTIME: ""}) is False
+        assert resolver.calls == []
 
     def test_exception_before_arming_is_silent(self) -> None:
         handler, _ = make(RuntimeError("probe crashed"))
@@ -472,19 +519,44 @@ class TestDecision:
         assert result.decision == Decision.DENY
         assert "no well-formed cite" in _text(result)
 
-    def test_default_verifier_denies_in_block(self) -> None:
+    def test_line_not_found_denies_in_block(self) -> None:
         handler, _ = make()
         result = handler.handle(bash(CITED_PUSH))
         assert result.decision == Decision.DENY
-        assert "issue 369" in _text(result)
+        assert "found no such line" in _text(result)
         assert not _VERIFIED_WORD.search(_text(result))
 
-    def test_default_verifier_only_advises_in_advise(self) -> None:
+    def test_line_not_found_only_advises_in_advise(self) -> None:
         handler, _ = make(mode="advise")
         result = handler.handle(bash(CITED_PUSH))
         assert result.decision == Decision.ALLOW
-        assert "issue 369" in _text(result)
+        assert "found no such line" in _text(result)
         assert not _VERIFIED_WORD.search(_text(result))
+
+    def test_the_production_verifier_passes_a_human_line(self) -> None:
+        handler, _ = make(verifier=HUMAN_CLI)
+        result = handler.handle(bash(CITED_PUSH))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_handler_defaults_to_the_production_verifier(self) -> None:
+        assert isinstance(HumanApprovalCheckHandler()._verifier, TeamchatVerifyCli)
+
+    def test_coordinator_seats_subagent_with_a_human_cite_passes(self) -> None:
+        handler, _ = make(verifier=HUMAN_CLI)
+        assert handler.handle(subagent(CITED_PUSH)).decision == Decision.ALLOW
+
+    def test_coordinator_seats_subagent_without_a_cite_is_refused(self) -> None:
+        handler, _ = make(verifier=HUMAN_CLI)
+        result = handler.handle(subagent(PUSH))
+        assert result.decision == Decision.DENY
+        assert "no well-formed cite" in _text(result)
+
+    def test_coordinator_seats_subagent_only_advises_in_advise(self) -> None:
+        handler, _ = make(mode="advise")
+        result = handler.handle(subagent(PUSH))
+        assert result.decision == Decision.ALLOW
+        assert result.context
 
     def test_refusal_names_the_act(self) -> None:
         handler, _ = make()
@@ -511,7 +583,7 @@ class TestDecision:
 
     def test_peer_line_is_refused(self) -> None:
         def peer(_s: SessionSignals, _c: ApprovalCite) -> VerifiedLine:
-            return VerifiedLine("alpha", fx.HUMAN_ID, "questions", False, "Q7")
+            return VerifiedLine("alpha", fx.HUMAN_ID, "questions", False, "Q7", fx.SENT_MS)
 
         handler, _ = make(verifier=peer)
         assert handler.handle(bash(CITED_PUSH)).decision == Decision.DENY
@@ -563,9 +635,93 @@ class TestInvariants:
         monkeypatch.setattr(builtins, "open", record(builtins.open))
         monkeypatch.setattr(os, "stat", record(os.stat))
         monkeypatch.setattr(os, "scandir", record(os.scandir))
-        for verifier in (DEFAULT_VERIFIER, human_verifier):
+        for verifier in (NOT_FOUND_CLI, HUMAN_CLI, human_verifier):
             handler, _ = make(verifier=verifier)
             payload = bash(CITED_PUSH)
             if handler.matches(payload):
                 handler.handle(payload)
         assert touched == []
+
+
+# --- options: the binding switches (owner question O4, all OFF by default) ----------
+
+
+class TestOptions:
+    def test_defaults_are_all_off(self) -> None:
+        policy = HumanApprovalCheckHandler()._policy()
+        assert not policy.any_on
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {"require_question": True, "single_use_cites": False},
+            {"max_line_age_seconds": None},
+            {"max_line_age_seconds": 600},
+            {"max_line_age_seconds": 30 * 86400},
+        ],
+    )
+    def test_valid_options(self, options: dict[str, Any]) -> None:
+        assert HumanApprovalCheckHandler.validate_options(options) == {}
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {"require_question": "yes"},
+            {"single_use_cites": 1},
+            {"max_line_age_seconds": True},
+            {"max_line_age_seconds": 0},
+            {"max_line_age_seconds": -5},
+            {"max_line_age_seconds": 30 * 86400 + 1},
+            {"max_line_age_seconds": "600"},
+        ],
+    )
+    def test_invalid_options(self, options: dict[str, Any]) -> None:
+        assert set(HumanApprovalCheckHandler.validate_options(options)) == set(options)
+
+    def test_an_invalid_value_that_slips_through_stays_off(self) -> None:
+        handler = HumanApprovalCheckHandler()
+        loose: Any = "yes"
+        handler._require_question = loose
+        handler._max_line_age_seconds = True
+        handler._single_use_cites = None
+        assert not handler._policy().any_on
+
+    def test_require_question_refuses_a_line_answering_none(self) -> None:
+        none = cli_answering(CommandOutcome(CommandStatus.OK, fx.verify_answer(question="none"), 0))
+        handler, _ = make(verifier=none)
+        assert handler.handle(bash(CITED_PUSH)).decision == Decision.ALLOW
+        handler._require_question = True
+        result = handler.handle(bash(CITED_PUSH))
+        assert result.decision == Decision.DENY
+        assert "answers no Q<n>" in _text(result)
+
+    def test_max_line_age_refuses_an_old_line(self) -> None:
+        handler, _ = make(verifier=HUMAN_CLI)
+        handler._max_line_age_seconds = 600
+        result = handler.handle(bash(CITED_PUSH))
+        assert result.decision == Decision.DENY
+        assert "older than the allowed age" in _text(result)
+
+    def test_single_use_refuses_the_second_use(self, tmp_path: Path) -> None:
+        handler, _ = make(verifier=HUMAN_CLI)
+        handler._ledger = CiteLedger(lambda: tmp_path / "ledger.json")
+        handler._single_use_cites = True
+        assert handler.handle(bash(CITED_PUSH)).decision == Decision.ALLOW
+        result = handler.handle(bash(CITED_PUSH))
+        assert result.decision == Decision.DENY
+        assert "already used" in _text(result)
+
+    def test_single_use_off_never_touches_the_ledger(self, tmp_path: Path) -> None:
+        handler, _ = make(verifier=HUMAN_CLI)
+        handler._ledger = CiteLedger(lambda: tmp_path / "ledger.json")
+        handler.handle(bash(CITED_PUSH))
+        handler.handle(bash(CITED_PUSH))
+        assert not (tmp_path / "ledger.json").exists()
+
+    def test_default_ledger_lives_under_the_daemon_untracked_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", lambda: tmp_path)
+        assert module._ledger_path() == tmp_path / module.LEDGER_FILE_NAME

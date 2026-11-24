@@ -10,9 +10,11 @@ The cite is a trailing shell comment on the LAST line, so the shell ignores
 it and the command runs unchanged once approved. A peer's line never counts.
 
 Arming (``utils.human_approval.is_armed``): never for a session with no team
-seat, never for a sub-agent. With ``coordinator_seats_only`` (Q5, proposed,
-owner ruling pending) only a coordinator seat, or one whose role cannot be
-read, is armed. Anything that fails BEFORE arming is silent: a seatless
+seat. With ``coordinator_seats_only`` (Q5, proposed, owner ruling pending)
+only a coordinator seat, or one whose role cannot be read, is armed on the
+main thread. A sub-agent is judged as its seat (Plan 00634 P2: a sub-agent
+can push for the coordinator), but only when a held seat is DECLARED
+coordinator; nothing is assumed for a sub-agent. Anything that fails BEFORE arming is silent: a seatless
 session must see no change. Anything that fails AFTER arming is the mode's
 refusal: ``block`` denies, ``advise`` allows with the refusal as context.
 
@@ -21,9 +23,12 @@ classes themselves are deliberately not imported: discovery registers every
 handler class found in a module's namespace, so importing one would register
 it twice.
 
-The shipped verifier (``DEFAULT_VERIFIER``) refuses every cite until the
-teamchat questions-room ``verify`` contract is confirmed (fedora-desktop issue
-369), so under ``block`` every armed act is denied until then.
+The verifier (``DEFAULT_VERIFIER``) runs ``teamchat verify <id> --room
+questions`` per the fedora-desktop issue 369 contract as its peer relayed it,
+unchecked against a live teamchat here; anything off that contract refuses.
+The binding options (``require_question``, ``max_line_age_seconds``,
+``single_use_cites``) are owner question O4 and default OFF. Advise mode is
+annotation only: it allows every refusal.
 """
 
 from __future__ import annotations
@@ -64,6 +69,8 @@ from claude_code_hooks_daemon.utils.human_approval import (
     ActClass,
     ApprovalCite,
     ApprovalRecords,
+    BindingPolicy,
+    CiteLedger,
     Verifier,
     check_approval,
     is_armed,
@@ -103,6 +110,11 @@ _ACT_NAMES: Final[Mapping[ActClass, str]] = {
     ActClass.MERGE_MAIN: "merge into main",
 }
 
+#: The single-use ledger, under the daemon's untracked state directory.
+LEDGER_FILE_NAME: Final[str] = "human-approval-used-cites.json"
+#: Largest ``max_line_age_seconds`` accepted (30 days).
+MAX_LINE_AGE_LIMIT_SECONDS: Final[int] = 30 * 86400
+
 _HANDLER_ERROR: Final[str] = (
     "the human-approval check could not judge this command, so it is treated as unapproved"
 )
@@ -133,7 +145,8 @@ _RULE: Final[Rule] = Rule(
         "  1. Ask in the team's questions room.\n"
         "  2. Append the human's line as a trailing comment on the command's last\n"
         "     line: `# human-approval team=<team> id=<$event-id>`.\n"
-        "A peer agent's line never counts, and a sub-agent cannot carry one."
+        "A peer agent's line never counts. A sub-agent of a coordinator seat\n"
+        "is judged as the seat and cites the same way."
     ),
 )
 
@@ -326,11 +339,24 @@ def cite_from_command(command: str) -> ApprovalCite | None:
 _RECORDS: Final[ApprovalRecords] = ApprovalRecords()
 
 
+def _ledger_path() -> Path:
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+    return ProjectContext.daemon_untracked_dir() / LEDGER_FILE_NAME
+
+
+def _is_age(value: object) -> bool:
+    return type(value) is int and 0 < value <= MAX_LINE_AGE_LIMIT_SECONDS
+
+
 class HumanApprovalCheckHandler(PreToolUseHandlerBase):
     """Deny a coordinator seat's destructive act that cites no human approval."""
 
     _mode: str | None = MODE_ADVISE
     _coordinator_seats_only: bool | None = True
+    _require_question: bool | None = False
+    _max_line_age_seconds: int | None = None
+    _single_use_cites: bool | None = False
 
     def __init__(self) -> None:
         super().__init__(
@@ -344,6 +370,7 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
         self._resolver: _SeatResolver | None = None
         self._verifier: Verifier = DEFAULT_VERIFIER
         self._records: ApprovalRecords = _RECORDS
+        self._ledger: CiteLedger = CiteLedger(_ledger_path)
 
     @staticmethod
     def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
@@ -355,7 +382,23 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
             options["coordinator_seats_only"], bool
         ):
             problems["coordinator_seats_only"] = "coordinator_seats_only must be true or false"
+        for key in ("require_question", "single_use_cites"):
+            if key in options and not isinstance(options[key], bool):
+                problems[key] = f"{key} must be true or false"
+        age = options.get("max_line_age_seconds")
+        if age is not None and not _is_age(age):
+            problems["max_line_age_seconds"] = (
+                f"max_line_age_seconds must be null or an integer 1 to {MAX_LINE_AGE_LIMIT_SECONDS}"
+            )
         return problems
+
+    def _policy(self) -> BindingPolicy:
+        age = self._max_line_age_seconds
+        return BindingPolicy(
+            require_question=self._require_question is True,
+            max_line_age_seconds=age if _is_age(age) else None,
+            single_use=self._single_use_cites is True,
+        )
 
     def is_dormant(self) -> bool:
         """Whether config leaves this handler unable to fire."""
@@ -388,6 +431,7 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
                 hook_input,
                 self._seat_resolver().resolve(signals),
                 coordinator_seats_only=self._coordinator_seats_only is not False,
+                include_subagents=True,
             )
         except Exception as exc:
             log_and_continue(
@@ -442,6 +486,9 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
             cite=cite_from_command(command),
             verifier=self._verifier,
             records=self._records,
+            policy=self._policy(),
+            ledger=self._ledger,
+            include_subagents=True,
         )
         if verdict.passed:
             return GatingResult(decision=Decision.ALLOW)
@@ -462,10 +509,10 @@ class HumanApprovalCheckHandler(PreToolUseHandlerBase):
             "a questions-room line a declared human of the team sent. Ask there, then "
             "append the line as a trailing comment on the command's LAST line: "
             "`git push origin x  # human-approval team=<team> id=<$event-id>`. A peer's "
-            "line never counts and a sub-agent cannot carry an approval. `mode: advise` "
-            "only reports; `mode: block` denies. Until the teamchat `verify` contract is "
-            "confirmed (fedora-desktop issue 369) no cite can pass, so `block` denies "
-            "every such act. A session with no team seat is never affected."
+            "line never counts. A sub-agent of a declared coordinator seat is judged as "
+            "the seat and cites the same way. The cite is checked with `teamchat verify "
+            "<id> --room questions`. `mode: advise` only reports (it allows every "
+            "refusal); `mode: block` denies. A session with no team seat is never affected."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
