@@ -74,13 +74,25 @@ def _first_group(pattern: re.Pattern[str], text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def find_plans(project_root: Path, plan_dir: str, query: str) -> list[PlanMatch]:
+def _read_body(plan_document: Path) -> str:
+    """Return a whole plan document, or empty on a read failure (see ``_read_header``)."""
+    try:
+        return plan_document.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def find_plans(
+    project_root: Path, plan_dir: str, query: str, *, search_body: bool = False
+) -> list[PlanMatch]:
     """Every plan whose number, folder name or title matches ``query``.
 
     Args:
         project_root: Repository root; ``plan_dir`` is resolved beneath it.
         plan_dir: Repo-relative plan directory (e.g. ``CLAUDE/Plan``).
         query: Free text, a plan number, or empty to list every plan.
+        search_body: Also match the query against the whole PLAN.md text, not
+            just the folder name and title. Archives are searched either way.
 
     Returns:
         Matches ordered by plan number. Empty when nothing matches and when
@@ -109,6 +121,8 @@ def find_plans(project_root: Path, plan_dir: str, query: str) -> list[PlanMatch]
         title = _first_group(_TITLE_LINE, header)
 
         haystack = f"{folder.name} {title or ''}".lower()
+        if search_body and needle:
+            haystack = f"{haystack}\n{_read_body(plan_document).lower()}"
         if needle and numeric != number and needle not in haystack:
             continue
 

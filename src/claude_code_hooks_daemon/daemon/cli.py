@@ -10061,7 +10061,7 @@ def cmd_find_plan(args: argparse.Namespace) -> int:
     plan_dir_rel = config.plan_workflow.directory
 
     query = " ".join(args.query) if args.query else ""
-    matches = find_plans(project_root, plan_dir_rel, query)
+    matches = find_plans(project_root, plan_dir_rel, query, search_body=bool(args.body))
 
     if not matches:
         # Not an error: "no plan covers this" is frequently the answer the
@@ -13762,6 +13762,11 @@ def build_parser() -> argparse.ArgumentParser:
         "query",
         nargs="*",
         help="Plan number or free text; omit to list every plan",
+    )
+    parser_find_plan.add_argument(
+        "--body",
+        action="store_true",
+        help="Also search the text of each PLAN.md, not only name and title",
     )
     parser_find_plan.add_argument(
         "--project-root",

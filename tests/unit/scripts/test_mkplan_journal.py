@@ -668,7 +668,8 @@ class TestHelpDocumentsJournalMode:
         )
 
         assert result.returncode == 0, result.stderr
-        assert "--journal <plan-number> <category> <body-file>" in result.stderr
+        assert "--journal <plan-number|plan-folder-name> <" in result.stderr
+        assert "> <body-file>" in result.stderr
         assert "UTC" in result.stderr
         for category in (
             "action",
