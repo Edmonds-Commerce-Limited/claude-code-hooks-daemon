@@ -29,6 +29,15 @@ static deny rule is fedora-desktop's `cc-deny.json` (the coordinator is having
 fedora-desktop.1 add the host-seat entries); this plan adds no deny-rule task.
 An unreadable `whoami` means role unknown and the guards stay armed.
 
+**Decision (owner, 2026-11-24)**: only an explicit `host` duty arms the guard.
+A seat whose duty is null, missing or unreadable is silent (duty is an optional
+teams field); a host duty in one team is not disarmed by a null duty in
+another. A probe that gives no answer at all (UNRESOLVED) keeps the guard
+armed. Finding 2 is re-scoped: the lane list moves to a per-language strategy
+domain (`strategies/lane_commands/`); `npm t` and `pre-commit run` are closed;
+`docker exec` and `ssh` stay an owner question; the other finding-2 spellings
+are accepted as won't-chase (the guard advises, it is not a sandbox).
+
 ## Goals
 
 - In a session holding a team with duty `host`, a QA/test/build command
@@ -57,7 +66,8 @@ An unreadable `whoami` means role unknown and the guards stay armed.
 ### Phase 2: Handler
 
 - [ ] 🔄 **Task 2.1** (built, advise mode, targeted QA green; live verification
-  in a host-duty seat and the promote-to-block ruling remain): Handler reusing the slow-command classification
+  in a host-duty seat and the promote-to-block ruling remain): Handler reusing the slow-command
+  classifier, with its lane list held per language in `strategies/lane_commands/`
   (`classify` and `FindingKind` in
   `src/claude_code_hooks_daemon/utils/long_running_command.py`, as used by
   `handlers/pre_tool_use/long_running_command_guard.py`), advisory first. Name
@@ -69,8 +79,10 @@ An unreadable `whoami` means role unknown and the guards stay armed.
   Targeted QA green.
   **Preconditions for switching to `mode: block`** (independent review of
   PR #233, `subagent-reports/261123-opus-independent-review-pr233.md`; fixed
-  in advise: findings 1, 4, 6, 7; OPEN: 2 and 3):
-  - Finding 2, about 40 wrapper and launcher bypasses the classifier misses:
+  in advise: findings 1, 4, 6, 7; OPEN: 3, and 2 only for `docker exec`/`ssh`):
+  - Finding 2 (re-scoped 2026-11-24, see Decision): CLOSED `npm t` and
+    `pre-commit run`; OWNER QUESTION `docker exec` and `ssh`; WON'T-CHASE the
+    rest. The original list, about 40 wrapper and launcher bypasses the classifier misses:
     `xargs`, `eval`, `$(...)` and backticks in argument position,
     `echo pytest | bash`, `python -I/-X ... -m pytest`, `python -c`,
     `coverage run -m`, `uv run -p/--python`, value options of `stdbuf`,
@@ -79,7 +91,7 @@ An unreadable `whoami` means role unknown and the guards stay armed.
     `task`/`hatch`, package-manager spellings (`npm t`, `run-script`,
     `pnpm vitest`, `yarn jest`, `bunx`), `cargo +nightly test`,
     `pre-commit run`, `run_autofix.sh`, and container or remote execution
-    (`docker exec`, `ssh`; owner to rule). Close or accept each.
+    (`docker exec`, `ssh`; owner to rule).
   - Finding 3, sub-agents of a host seat are never judged (`duty_gate`
     returns NOT_APPLICABLE off the main thread): needs an owner ruling to
     accept (and document) or to arm sub-agents.

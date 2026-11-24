@@ -48,11 +48,23 @@ COORDINATOR = parse_whoami(fx.COORDINATOR_ONLY)
 OTHER_DUTY = parse_whoami(fx.UNKNOWN_DUTY)
 MULTI_TEAM = parse_whoami(fx.MULTI_TEAM)
 NULL_DUTY = parse_whoami(fx.ROLE_NULL)
+WORKER_NULL_DUTY = parse_whoami(fx.whoami(fx.seat("alpha", "worker", duty=None)))
+NO_DUTY_KEY = parse_whoami(
+    fx.whoami(
+        {"team": "alpha", "handle": "@example.1+local.container:alpha.test", "role": "worker"}
+    )
+)
+GARBAGE_DUTY = parse_whoami(fx.whoami(fx.seat("alpha", "worker", duty="ho st!")))
+HOST_AND_NULL_DUTY = parse_whoami(
+    fx.whoami(fx.seat("alpha", "worker", duty="host"), fx.seat("beta", "worker", duty=None))
+)
+NOT_JSON = parse_whoami(fx.NOT_JSON)
 NO_TEAMS = parse_whoami(fx.NO_TEAMS)
 UNRESOLVED = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
 ABSENT = SeatContext.absent(ProbeReason.NO_SESSION)
 
-_NO_ANSWER = "gave no answer"
+#: The once-per-session note; the refusal itself also says the probe gave no answer.
+_NO_ANSWER = "whoami probe gave no answer"
 
 
 def bash(
@@ -260,10 +272,48 @@ class TestArming:
         handler, _ = make(context)
         assert handler.matches(bash(PYTEST)) is False
 
-    @pytest.mark.parametrize("context", [UNRESOLVED, NULL_DUTY])
-    def test_unknown_duty_is_armed(self, context: SeatContext) -> None:
+    @pytest.mark.parametrize("context", [UNRESOLVED, NOT_JSON])
+    def test_an_unreadable_probe_stays_armed(self, context: SeatContext) -> None:
         handler, _ = make(context)
         assert handler.matches(bash(PYTEST)) is True
+
+    def test_a_seat_resolved_earlier_is_armed_when_a_later_probe_gives_no_answer(self) -> None:
+        """No last-good answer is kept: a later no-answer probe arms, whatever came before."""
+        handler, resolver = make(WORKER)
+        assert handler.matches(bash(PYTEST)) is False
+        resolver._context = UNRESOLVED
+        assert handler.matches(bash(PYTEST)) is True
+        assert handler.handle(bash(PYTEST)).decision == Decision.DENY
+        assert len(resolver.calls) == 3
+
+    @pytest.mark.parametrize(
+        "context",
+        [NULL_DUTY, WORKER_NULL_DUTY, NO_DUTY_KEY, GARBAGE_DUTY],
+        ids=["role-null", "worker-null-duty", "no-duty-key", "garbage-duty"],
+    )
+    def test_a_seat_with_no_declared_duty_is_silent(self, context: SeatContext) -> None:
+        """Duty is a teams-only concept and may be null: only an explicit host arms."""
+        handler, _ = make(context)
+        assert handler.matches(bash(PYTEST)) is False
+        result = handler.handle(bash(PYTEST))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_host_and_worker_rows_for_one_team_stay_armed(self) -> None:
+        """A wire that says host for a team still arms, whatever else it says for it."""
+        context = parse_whoami(
+            fx.whoami(fx.seat("alpha", "worker", duty="host"), fx.seat("alpha", "worker"))
+        )
+        handler, _ = make(context)
+        assert handler.matches(bash(PYTEST)) is True
+
+    def test_host_in_one_team_and_null_duty_in_another_is_armed(self) -> None:
+        """A null duty elsewhere must never disarm an explicit host."""
+        handler, _ = make(HOST_AND_NULL_DUTY)
+        assert handler.matches(bash(PYTEST)) is True
+        text = _text(handler.handle(bash(PYTEST)))
+        assert "holds a teamchat seat with duty host" in text
+        assert "the guard stays armed" not in text
 
     def test_subagent_is_silent(self) -> None:
         handler, _ = make(HOST)
@@ -357,15 +407,18 @@ class TestDecision:
             text = _text(handler.handle(bash(PYTEST)))
             # The rule's own summary names both cases; the situation line must not claim host.
             assert "holds a teamchat seat with duty host" not in text
-            assert "cannot be read" in text
+            # UNRESOLVED proves no seat is held and no duty was read: say only what is known.
+            assert "teamchat probe gave no answer, so the guard stays armed" in text
+            assert "holds a teamchat seat" not in text
+            assert "cannot be read" not in text
             assert "worker seat" in text
 
-    def test_null_duty_does_not_claim_the_probe_gave_no_answer(self) -> None:
+    def test_a_resolved_unknown_duty_is_never_refused(self) -> None:
         handler, _ = make(NULL_DUTY)
-        text = _text(handler.handle(bash(PYTEST)))
-        assert _NO_ANSWER not in text
-        assert "duty is not declared" in text
-        assert "worker seat" in text
+        for _ in range(2):
+            result = handler.handle(bash(PYTEST))
+            assert result.decision == Decision.ALLOW
+            assert not result.context
 
     def test_lazy_resolver_is_built_from_team_seat(self) -> None:
         handler = HostSeatLaneGuardHandler()
@@ -432,6 +485,10 @@ class TestInvariants:
 
     def test_acceptance_tests_are_declared(self) -> None:
         assert HostSeatLaneGuardHandler().get_acceptance_tests()
+
+    def test_no_acceptance_command_is_declared_twice(self) -> None:
+        commands = [test.command for test in HostSeatLaneGuardHandler().get_acceptance_tests()]
+        assert len(commands) == len(set(commands))
 
     def test_claude_md_guidance_names_the_lane(self) -> None:
         guidance = HostSeatLaneGuardHandler().get_claude_md() or ""

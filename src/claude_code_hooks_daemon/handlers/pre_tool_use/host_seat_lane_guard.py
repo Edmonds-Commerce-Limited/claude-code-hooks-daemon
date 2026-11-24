@@ -13,17 +13,21 @@ no deny rules.
 Arming is :func:`team_role_gate.duty_gate` on ``host``:
 
 - no team (no teamchat runtime, ``whoami`` exit 69, no seats), a sub-agent, or
-  a seat whose duties are all declared and none is ``host``: silent, no change;
-- a declared ``host`` duty: armed;
-- a duty that cannot be read (the probe gave no answer, or a row with no
-  duty): armed, because an unreadable state never disarms a guard. The first
-  refusal in a session says the probe gave no answer.
+  a seat with no ``host`` duty in any held team: silent, no change. Duty is a
+  teams-only, optional field, so a row whose duty is null, absent or
+  unreadable declares nothing and does not arm;
+- a declared ``host`` duty in any held team: armed, whatever the other rows say;
+- a probe that gave no answer at all (UNRESOLVED): armed, because an
+  unreadable probe never disarms a guard. The first refusal in a session says
+  the probe gave no answer.
 
-The command classification is the shared one in
-:mod:`utils.long_running_command`, taking its test, build and QA groups (not
-installs, containers or watches, which are deployment and triage) plus the lint
-and QA-script shapes below, and judging backgrounded or ``timeout``-bounded
-runs too: the lane is about WHAT runs, not how long.
+The lane commands are a SHORT per-language list held by the strategies in
+``strategies/lane_commands/`` (test runners, builds, linters, QA scripts; not
+installs, containers or watches, which are deployment and triage). They are
+judged through the shared peel in :mod:`utils.long_running_command`, which
+reads the common wrappers, ``sh -c`` bodies and backgrounded or
+``timeout``-bounded runs: the lane is about WHAT runs, not how long. The long
+tail of wrapper spellings is deliberately not chased, since this guard advises.
 """
 
 from __future__ import annotations
@@ -31,7 +35,6 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from claude_code_hooks_daemon.constants import (
@@ -46,15 +49,14 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.long_running_command import (
-    BUILD_PATTERNS,
-    QA_PATTERNS,
-    TEST_PATTERNS,
-    FindingKind,
-    LongRunningPolicy,
-    classify,
+from claude_code_hooks_daemon.strategies.lane_commands.common import (
+    HARNESS_CANNOT_PRODUCE,
+    runs_any,
 )
+from claude_code_hooks_daemon.strategies.lane_commands.registry import (
+    LaneCommandStrategyRegistry,
+)
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, duty_gate
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     DUTY_HOST,
@@ -76,46 +78,9 @@ _MODES: Final[frozenset[str]] = frozenset({MODE_OFF, MODE_ADVISE, MODE_BLOCK})
 _OPTION_MODE: Final[str] = "mode"
 _OPTION_EXTRA: Final[str] = "extra_lane_patterns"
 
-#: Lint and type-check programs, and package-script spellings of lint/QA.
-LINT_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?:ruff|mypy|pyright|pylint|flake8|black|isort|bandit|eslint|prettier|stylelint"
-    r"|shellcheck|golangci-lint|phpstan|psalm|phpcs|rubocop|hadolint|markdownlint|yamllint)\b",
-    r"^(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:llm:)?(?:lint|typecheck|type-check|qa)\S*",
-    r"^npx\s+(?:jest|vitest|playwright|mocha|tsc|eslint|prettier)\b",
-    r"^cargo\s+fmt\b",
-    # `python -m unittest` peels to `unittest`.
-    r"^unittest\b",
-)
-#: ``make`` alone, or a test/build/lint target. ``make deploy`` is untouched.
-LANE_MAKE_PATTERNS: Final[tuple[str, ...]] = (
-    r"^make(?:\s+-\S+)*\s*$",
-    r"^make(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|all|ci)\b",
-)
-#: A script named for tests, QA or lint: ``run_tests.sh``, ``llm_qa.py``, ``test_x.py``.
-#: A deploy, smoke, health, publish or connection check is triage even when its
-#: name carries ``test`` or ``qa`` (``deploy-qa.sh``, ``smoke_test.sh``).
-QA_SCRIPT_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?![\w.-]*(?:deploy|smoke|health|publish|connection))"
-    r"(?:[\w.-]*[_.-])?(?:tests?|qa|lint|typecheck|type_check)(?:[_.-][\w.-]*)?\.(?:sh|bash|py)\b",
-)
-#: The shared build group, except that a JVM build tool is judged by its goal:
-#: ``mvn deploy`` and ``gradle publish`` ship an artefact and are deployment.
-_SHIPPING_GOAL: Final[str] = r"(?!(?:.*\s)?(?:deploy|publish)(?:\s|$))"
-LANE_BUILD_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?:tsc|webpack|ant|cmake|ninja|bazel)\b",
-    rf"^(?:gradle|gradlew|mvn){_SHIPPING_GOAL}\b",
-    *BUILD_PATTERNS[1:],
-)
-LANE_PATTERNS: Final[tuple[str, ...]] = (
-    *TEST_PATTERNS,
-    *LANE_BUILD_PATTERNS,
-    *QA_PATTERNS,
-    *LINT_PATTERNS,
-    *LANE_MAKE_PATTERNS,
-    *QA_SCRIPT_PATTERNS,
-)
-#: Any ``timeout`` counts as unbounded here, so a bounded test run is still judged.
-_LANE_THRESHOLD_SECONDS: Final[float] = 0.0
+_LANE_REGISTRY: Final[LaneCommandStrategyRegistry] = LaneCommandStrategyRegistry.create_default()
+#: Every language's lane commands: the strategies in ``strategies/lane_commands/``.
+LANE_PATTERNS: Final[tuple[str, ...]] = _LANE_REGISTRY.get_lane_patterns()
 #: Sessions already told the probe gave no answer; cleared when it reaches this size.
 _MAX_NOTED_SESSIONS: Final[int] = 1024
 
@@ -127,12 +92,10 @@ _REFUSAL: Final[str] = (
     f"test, build, lint or QA command. {_LANE}"
 )
 _UNKNOWN_REFUSAL: Final[str] = (
-    "Host seat lane: this session holds a teamchat seat whose duty cannot be read, so "
-    "the guard stays armed, and this is a test, build, lint or QA command. If this is a "
-    f"host seat: {_LANE}"
+    "Host seat lane: the teamchat probe gave no answer, so the guard stays armed, and "
+    f"this is a test, build, lint or QA command. If this is a host seat: {_LANE}"
 )
 _NO_ANSWER: Final[str] = "The teamchat whoami probe gave no answer."
-_NULL_DUTY: Final[str] = "The teamchat probe answered, but the seat's duty is not declared."
 _HANDLER_ERROR: Final[str] = (
     "Host seat lane: the guard could not judge this command, so it is treated as a "
     f"test, build, lint or QA command. {_LANE}"
@@ -142,14 +105,14 @@ _RULE: Final[Rule] = Rule(
     rule_id=RuleID.HOST_SEAT_LANE,
     blocked=(
         "a test, build, lint or QA command in a session holding a teamchat seat with "
-        "duty host (or whose duty cannot be read)"
+        "duty host (or whose teamchat probe gives no answer)"
     ),
     why="Host seats are for deployment and triage at desktop level; they are not workers",
     fix="Run it in a worker seat of the team",
     verbose=(
         "WHY BLOCKED:\n"
         "This session holds a teamchat seat whose duty is host in some team (or\n"
-        "its duty cannot be read), and the command runs tests, a build, a linter\n"
+        "the teamchat probe gave no answer), and the command runs tests, a build, a linter\n"
         "or QA. Host seats are for deployment and triage, not for worker lanes.\n\n"
         "DO INSTEAD:\n"
         "  Hand the command to a worker seat of the team.\n"
@@ -162,14 +125,6 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
-@lru_cache(maxsize=16)
-def _lane_policy(extra_patterns: tuple[str, ...]) -> LongRunningPolicy:
-    return LongRunningPolicy(
-        threshold_seconds=_LANE_THRESHOLD_SECONDS,
-        slow_patterns=tuple(re.compile(p) for p in (*LANE_PATTERNS, *extra_patterns)),
-    )
-
-
 def is_lane_command(command: str, *, extra_patterns: Sequence[str] = ()) -> bool:
     """Whether ``command`` runs a test, build, lint or QA command anywhere in it.
 
@@ -177,8 +132,7 @@ def is_lane_command(command: str, *, extra_patterns: Sequence[str] = ()) -> bool
     never read as a command; ``sh -c`` bodies, wrappers and backgrounded
     statements are.
     """
-    findings = classify(command, _lane_policy(tuple(extra_patterns)), include_background=True)
-    return any(finding.kind is FindingKind.SLOW_COMMAND for finding in findings)
+    return runs_any(command, (*LANE_PATTERNS, *extra_patterns))
 
 
 class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
@@ -223,16 +177,24 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             self._resolver = SeatContextResolver.from_config(config)
         return self._resolver
 
-    def _verdict(self, hook_input: Mapping[str, Any]) -> tuple[GateVerdict, SeatState | None]:
-        """The duty gate on ``host`` and the probe state behind it.
+    def _verdict(self, hook_input: Mapping[str, Any]) -> GateVerdict:
+        """The duty gate on ``host``.
 
-        NOT_APPLICABLE (state None) with no teamchat runtime, and no probe run.
+        NOT_APPLICABLE with no teamchat runtime, and no probe run. ROLE_UNKNOWN
+        only when the probe gave no answer at all (UNRESOLVED). A probe that
+        answered but declares no duty (null, absent or unreadable) is
+        NOT_APPLICABLE too: duty is optional, so only a declared ``host``
+        arms. ``duty_gate`` checks a declared duty first, so a host in one
+        team is never disarmed by a null duty in another.
         """
         signals = SessionSignals.from_hook_input(hook_input)
         if not signals.runtime:
-            return GateVerdict.NOT_APPLICABLE, None
+            return GateVerdict.NOT_APPLICABLE
         context = self._seat_resolver().resolve(signals)
-        return duty_gate(hook_input, context, duty=DUTY_HOST).verdict, context.state
+        verdict = duty_gate(hook_input, context, duty=DUTY_HOST).verdict
+        if verdict is GateVerdict.ROLE_UNKNOWN and context.state is not SeatState.UNRESOLVED:
+            return GateVerdict.NOT_APPLICABLE
+        return verdict
 
     def _is_lane(self, hook_input: Mapping[str, Any]) -> bool:
         command = get_bash_command(dict(hook_input)) or ""
@@ -249,7 +211,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         if self.is_dormant() or hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         try:
-            verdict, _state = self._verdict(hook_input)
+            verdict = self._verdict(hook_input)
         except Exception as exc:
             log_and_continue(
                 logger,
@@ -286,13 +248,11 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             return self._refuse(_HANDLER_ERROR)
 
     def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
-        verdict, state = self._verdict(hook_input)
+        verdict = self._verdict(hook_input)
         if verdict is GateVerdict.NOT_APPLICABLE or not self._is_lane(hook_input):
             return GatingResult(decision=Decision.ALLOW)
         if verdict is GateVerdict.ROLE_UNKNOWN:
-            if state is not SeatState.UNRESOLVED:
-                # The probe answered; the seat's duty is null on the wire.
-                return self._refuse(f"{_UNKNOWN_REFUSAL} {_NULL_DUTY}")
+            # Only an unanswered probe reaches here; see _verdict.
             if self._first_note(hook_input):
                 return self._refuse(f"{_UNKNOWN_REFUSAL} {_NO_ANSWER}")
             return self._refuse(_UNKNOWN_REFUSAL)
@@ -321,26 +281,35 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             "test, build, lint and QA commands (`pytest`, `npm test`, `make test`, "
             "`ruff`, `mypy`, `llm_qa.py`, also via `sh -c`, wrappers or `&`) are "
             "refused: host seats are for deployment and triage. Hand the command to a "
-            "worker seat. Deployment and triage commands are never refused. If the "
-            "seat's duty cannot be read the guard stays armed. `mode: advise` (the "
-            "default) only reports; `mode: block` denies. A session with no team seat "
-            "is never affected."
+            "worker seat. Deployment and triage commands are never refused. Only an "
+            "explicit `host` duty arms it: a session with no team seat, or a seat whose "
+            "duty is null or missing, is never affected. If the teamchat probe gives "
+            "no answer at all the guard stays armed. `mode: advise` (the default) only "
+            "reports; `mode: block` denies."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Harness-undrivable: arming needs a live teamchat seat with duty host."""
+        """This handler's own tests plus one lane refusal per language strategy.
+
+        All are harness-undrivable: arming needs a live teamchat seat with duty host.
+        """
+        strategy_tests = [
+            test
+            for strategy in _LANE_REGISTRY.strategies()
+            for test in strategy.get_acceptance_tests()
+        ]
+        return [*self._own_acceptance_tests(), *strategy_tests]
+
+    def _own_acceptance_tests(self) -> list[Any]:
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
-        unseated = (
-            "Arming needs a live teamchat runtime and a seat with duty host; the harness "
-            "session holds no team seat, so the guard stays silent there."
-        )
         return [
             AcceptanceTest(
-                title="host seat lane guard - a test run from a host seat is refused",
-                command="pytest tests/unit",
+                title="host seat lane guard - a wrapped test run from a host seat is refused",
+                command="nice -n 19 pytest tests/unit",
                 description=(
-                    "Under mode: block a host-duty seat's pytest is denied. Unit tests in "
+                    "Under mode: block a host-duty seat's pytest is denied through a "
+                    "wrapper (the bare form is the Python strategy's test). Unit tests in "
                     "tests/unit/handlers/pre_tool_use/test_host_seat_lane_guard.py cover "
                     "the matrix."
                 ),
@@ -349,7 +318,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
                 safety_notes="Never runs the tests: the command is denied before it starts.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
-                harness_cannot_produce=unseated,
+                harness_cannot_produce=HARNESS_CANNOT_PRODUCE,
             ),
             AcceptanceTest(
                 title="host seat lane guard - a triage command is untouched",
@@ -360,7 +329,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
                 safety_notes="Read-only command.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
-                harness_cannot_produce=unseated,
+                harness_cannot_produce=HARNESS_CANNOT_PRODUCE,
             ),
         ]
 

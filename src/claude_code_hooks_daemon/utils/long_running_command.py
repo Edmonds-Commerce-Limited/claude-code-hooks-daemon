@@ -146,9 +146,10 @@ _GIT_SLOW_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 _GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "-c", "--git-dir", "--work-tree"})
 
 #: Known-slow programs, matched against ``<program> <arguments>`` with every
-#: wrapper (``timeout``, ``uv run``, ``python -m``, ...) already peeled. Kept
-#: as named groups so a guard can take a subset (host_seat_lane_guard takes
-#: test, build and QA but not installs, containers or watches).
+#: wrapper (``timeout``, ``uv run``, ``python -m``, ...) already peeled.
+#: host_seat_lane_guard keeps its own per-language copy of the test, build and
+#: QA groups (strategies/lane_commands); tests/unit/strategies/lane_commands/
+#: test_registry.py pins the two together in both directions.
 TEST_PATTERNS: Final[tuple[str, ...]] = (
     r"^(?:pytest|py\.test|tox|nox)\b",
     r"^(?:jest|vitest|playwright|mocha)\b",

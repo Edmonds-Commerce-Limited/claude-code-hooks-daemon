@@ -454,7 +454,7 @@ handlers:
 
     host_seat_lane_guard:   # A teamchat seat with duty host runs no test, build, lint or QA
       enabled: true          # command: host seats deploy and triage (Plan 00635, ruling Q64 D3).
-      priority: 21            # Silent with no team seat; an unreadable duty keeps it armed.
+      priority: 21            # Silent with no team seat or a null duty; only duty host arms it.
       options:
         mode: advise           # off | advise | block (promote to block when ruled)
 

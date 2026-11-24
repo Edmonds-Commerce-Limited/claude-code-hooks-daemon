@@ -228,7 +228,7 @@ class RuleID:
     HUMAN_APPROVAL_MISSING: str = "R-HUMAN-APPROVAL-MISSING"
 
     #: A test, build, lint or QA command in a session holding a teamchat seat
-    #: with duty host (or whose duty cannot be read).
+    #: with duty host (or whose teamchat probe gives no answer).
     HOST_SEAT_LANE: str = "R-HOST-SEAT-LANE"
 
     # ------------------------------------------------------------------
