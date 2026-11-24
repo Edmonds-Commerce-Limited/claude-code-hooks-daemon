@@ -1218,6 +1218,26 @@ class TestAdoptedArchives:
         assert resumed.outcome == "removed"
         assert list(root.iterdir()) == []
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="parked RED: resume renames back instead of STUCK; see review-fixes-handoff-4.md",
+    )
+    def test_a_claim_naming_another_archive_than_the_adopted_one_is_stuck(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """PR 251 review F2 (adopt): the claim cannot be matched to the adopted archive."""
+        _entry(root)
+        _adopted(root, root_fd, store, tar, "none")
+        claimed = root / (CLAIM_PREFIX + "e1")
+        aside = root / "aside"
+        claimed.rename(aside)
+        aside.rename(root / "e1")  # same inode and birth: the claim below covers it
+        _claim(root_fd, "e1", store)  # a fresh id, not the adopted archive's
+        (claimed / "a.txt").unlink()
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "stuck"
+        assert (claimed / "sub" / "b.bin").read_bytes() == bytes(range(256))
+
     def test_resume_refuses_a_changed_remaining_file(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
