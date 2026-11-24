@@ -103,7 +103,9 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   the hit window as full at that moment. The only join is
   `session_state_document._limit_reset` (any window at 95% or more), which is
   read-only. A wrong `hard_limit` record would hold the session until the 7-day
-  reset, so the writer waits for the Phase 1 live capture.
+  reset, so the writer waits for the Phase 1 live capture. The screen
+  recogniser's `window_reset` is no help to the daemon either: it is keyed on
+  the Claude child's pid, not on the session id.
 - [x] ✅ **Task 2b.2**: A pause caused by a hard limit injects nothing, not even
   the single usage-pause `/compact` (`_usage_pause_outcome`), because every
   request fails until the reset. A ceiling pause keeps its `/compact`. TDD in

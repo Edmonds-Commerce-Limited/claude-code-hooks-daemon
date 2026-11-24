@@ -17,7 +17,10 @@ session that never receives a new prompt still pauses.
 supervisor message, human -- is blocked before it reaches the model, at zero
 token cost, after the ceiling is re-resolved: a host that no longer has a
 ceiling, or whose windows are back under it or past their reset, lifts the pause
-instead of holding, so a stale record can never lock the owner out. Two other
+instead of holding, so a stale record can never lock the owner out. A pause at
+the account's HARD limit (Plan 00523 Phase 2b) is held until its resume time
+whatever the ceiling says; ``usage-pause clear`` still ends it, and at the resume
+time a session still over the ceiling is moved to a ceiling pause. Two other
 gates keep the turn itself quiet: the PreToolUse gate refuses every tool but the
 cron tools, and the Stop gate accepts a stop only once exactly the resume cron
 remains. The one exception here is the resume cron's own tick.
@@ -72,7 +75,7 @@ from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_do
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import UsagePauseView
-from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+from claude_code_hooks_daemon.utils.usage_pause import CAUSE_HARD_LIMIT, UsagePause
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PauseEnvironment,
     active_usage_pause,
@@ -251,9 +254,18 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
                     f"ceiling re-check does not apply; the pause lifts at {until}."
                 ),
             )
-        if not current_breaches(hook_input, env):
+        breaches = current_breaches(hook_input, env)
+        if not breaches:
             logger.warning("usage_pause_gate: the ceiling no longer applies, lifting the pause")
             return self._lift(hook_input, session_id, held, env, verified_under_ceiling=True)
+        if held.cause == CAUSE_HARD_LIMIT:
+            # Past its resume time but over the ceiling: a ceiling pause takes over, and
+            # its directive sets up the resume cron a hard-limit pause never had.
+            renewed = start_pause(session_id, breaches, env)
+            if renewed is not None:
+                return BlockingResult(
+                    decision=Decision.ALLOW, context=[render_pause_directive(renewed)]
+                )
         until = resume_time_text(held.resume_at)
         reason = f"{RuleFormatter().verbose(_rule())}\n\nPaused on: {held.reason}. Resumes about {until}."
         logger.info("usage_pause_gate: dropping a prompt while paused until %s", until)

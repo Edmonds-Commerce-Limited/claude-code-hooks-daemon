@@ -27,6 +27,9 @@ from tests.unit.handlers.user_prompt_submit.test_usage_pause_gate import (
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.handlers.user_prompt_submit.usage_pause_gate import (
+    clear_in_session,
+)
 from claude_code_hooks_daemon.utils import usage_pause_gate as gate
 from claude_code_hooks_daemon.utils.usage_pause import (
     CAUSE_CEILING,
@@ -90,6 +93,27 @@ class TestHeldPromptAtTheResumeTime:
         result = _run(_handler(tmp_path, config=_config(None)), tmp_path, _input())
         assert result.decision == Decision.ALLOW
         assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_still_over_the_ceiling_at_resume_at_becomes_a_ceiling_pause_with_its_directive(
+        self, tmp_path: Path
+    ) -> None:
+        # The supervisor stops holding at resume_at, so leaving the hard-limit record to
+        # deny every prompt through its grace hour would waste each of them; a ceiling
+        # pause replaces it, and its directive sets up the resume cron.
+        _hard_limit_record(tmp_path, resume_at=_NOW)
+        result = _run(_handler(tmp_path, snapshot=_snapshot(five=91.0)), tmp_path, _input())
+        assert result.decision == Decision.ALLOW
+        assert "USAGE CEILING REACHED" in "\n".join(result.context)
+        renewed = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert renewed is not None
+        assert renewed.cause == CAUSE_CEILING
+
+
+class TestOwnerEscape:
+    def test_the_hard_limit_deny_carries_the_clear_command(self, tmp_path: Path) -> None:
+        _hard_limit_record(tmp_path)
+        result = _run(_handler(tmp_path, config=_config(None)), tmp_path, _input())
+        assert clear_in_session() in (result.reason or "")
 
 
 class TestEarlyResumeTick:
