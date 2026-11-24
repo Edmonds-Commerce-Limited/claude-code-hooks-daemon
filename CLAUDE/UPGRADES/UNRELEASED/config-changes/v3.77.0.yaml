@@ -312,7 +312,7 @@ config_changes:
       dormant: false
       description: >-
         NEW (Plan 00635). A session holding a teamchat seat whose duty is host
-        in any team (or whose duty cannot be read) has its test, build, lint and
+        in any team (or whose teamchat probe gives no answer) has its test, build, lint and
         QA commands refused with a message naming the lane: run it in a worker
         seat. Deployment and triage commands are untouched. mode: off | advise
         (default, allow with the refusal as context) | block (deny).
