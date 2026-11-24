@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.daemon.cli import cmd_find_plan
-from claude_code_hooks_daemon.plan_finder import find_plans
+from claude_code_hooks_daemon.plan_finder import _BODY_BYTES, find_plans
 
 _TERM = "zebrafish-quarantine"
 
@@ -72,6 +72,32 @@ class TestBodySearch:
         matches = find_plans(plan_tree, "CLAUDE/Plan", _TERM, search_body=True)
 
         assert [m.number for m in matches] == [130]
+
+
+class TestBodyReadIsBoundedAndTolerant:
+    def test_phrase_split_across_a_line_break_is_found(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, "00300-wrapped", "wrapped", "the zebrafish\nquarantine  rule")
+
+        matches = find_plans(tmp_path, "CLAUDE/Plan", "zebrafish quarantine", search_body=True)
+
+        assert [m.number for m in matches] == [300]
+
+    def test_text_past_the_size_cap_is_not_read(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, "00301-huge", "huge", ("x" * _BODY_BYTES) + f"\n{_TERM}")
+
+        assert find_plans(tmp_path, "CLAUDE/Plan", _TERM, search_body=True) == []
+
+    def test_undecodable_bytes_do_not_abort_the_search(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, "00302-binary", "binary", "ok")
+        document = plan_dir / "00302-binary" / "PLAN.md"
+        document.write_bytes(document.read_bytes() + b"\xff\xfe\x80 " + _TERM.encode())
+
+        matches = find_plans(tmp_path, "CLAUDE/Plan", _TERM, search_body=True)
+
+        assert [m.number for m in matches] == [302]
 
 
 class TestCli:

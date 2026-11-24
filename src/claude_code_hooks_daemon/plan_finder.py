@@ -43,6 +43,10 @@ _TITLE_LINE: Final[re.Pattern[str]] = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE
 # cheap enough to be reached for casually, which is the point of the tool.
 _HEADER_BYTES: Final[int] = 2048
 
+# A body search reads at most this much of each PLAN.md (1 MiB): far beyond any
+# real plan, yet a bound on a pathological or binary file.
+_BODY_BYTES: Final[int] = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class PlanMatch:
@@ -75,11 +79,19 @@ def _first_group(pattern: re.Pattern[str], text: str) -> str | None:
 
 
 def _read_body(plan_document: Path) -> str:
-    """Return a whole plan document, or empty on a read failure (see ``_read_header``)."""
+    """Return the searchable text of a plan document, or empty on a read failure.
+
+    At most ``_BODY_BYTES`` are read, undecodable bytes become replacement
+    characters, and runs of whitespace (line breaks included) collapse to one
+    space so a phrase wrapped across lines can still be found. See
+    ``_read_header`` for why a read failure yields empty rather than raising.
+    """
     try:
-        return plan_document.read_text(encoding="utf-8", errors="replace")
+        with plan_document.open("rb") as handle:
+            raw = handle.read(_BODY_BYTES)
     except OSError:
         return ""
+    return " ".join(raw.decode("utf-8", errors="replace").split())
 
 
 def find_plans(
@@ -103,7 +115,7 @@ def find_plans(
     if not root.is_dir():
         return []
 
-    needle = query.strip().lower()
+    needle = " ".join(query.split()).lower()
     # A bare number and a zero-padded one must find the same plan, so the
     # numeric form is compared as a NUMBER rather than as a substring:
     # "412" must not match plan 04120 by accident.

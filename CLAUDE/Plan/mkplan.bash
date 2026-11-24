@@ -106,7 +106,24 @@ readonly JOURNAL_CATEGORIES=(action finding decision thought blocker handoff cor
 # REF: HH:MM for an entry stamped today, or YY-MM-DD/HH:MM for one on an
 # earlier day of the same plan. The entry must exist when it is named.
 readonly JOURNAL_CORRECTION_CATEGORY="correction"
-readonly JOURNAL_CORRECTION_REF_PATTERN='^(([0-9]{2}-[0-9]{2}-[0-9]{2})/)?([0-9]{2}:[0-9]{2})$'
+#
+# The two forms are written ONCE, as the words the help prints; the regex is
+# built from them (each pair of letters is a two-digit field), so the help
+# text and the validator cannot drift apart.
+readonly JOURNAL_REF_TIME_FORM='HH:MM'
+readonly JOURNAL_REF_DAY_FORM='YY-MM-DD'
+_ref_form_to_pattern() {
+    local form="$1"
+    printf '%s' "${form//[HMYD][HMYD]/[0-9]{2\}}"
+}
+JOURNAL_CORRECTION_REF_PATTERN="^(($(_ref_form_to_pattern "$JOURNAL_REF_DAY_FORM"))/)?($(_ref_form_to_pattern "$JOURNAL_REF_TIME_FORM"))\$"
+readonly JOURNAL_CORRECTION_REF_PATTERN
+
+# What a plan folder name's slug may hold: letters, digits, dot, underscore,
+# plus and hyphen, starting with a letter or digit and never containing "..".
+# No slash, whitespace or glob character can pass, so the slug cannot be read
+# as a path or a pattern; the exact existing-directory check is the real gate.
+readonly JOURNAL_SLUG_PATTERN='^[A-Za-z0-9][A-Za-z0-9._+-]*$'
 
 # Populated once the lock file is held, so the EXIT trap only ever removes a lock
 # this process actually owns (never another runner's lock on a timeout-die).
@@ -130,8 +147,8 @@ journal_synopsis() {
     blank="${lead//?/ }"
     printf '%smkplan.bash --journal <plan-number|plan-folder-name> <%s> <body-file> [--ref R] [--title T]\n' \
         "$lead" "$categories"
-    printf '%s  (a correction REQUIRES --ref: HH:MM for an entry stamped today, YY-MM-DD/HH:MM for an earlier day)\n' \
-        "$blank"
+    printf '%s  (a correction REQUIRES --ref: %s for an entry stamped today, %s/%s for an earlier day)\n' \
+        "$blank" "$JOURNAL_REF_TIME_FORM" "$JOURNAL_REF_DAY_FORM" "$JOURNAL_REF_TIME_FORM"
 }
 
 usage() {
@@ -428,6 +445,9 @@ _journal_category_is_valid() {
 
 journal_usage() {
     journal_synopsis "Usage: " >&2
+    local category_list
+    category_list="$(IFS=,; printf '%s' "${JOURNAL_CATEGORIES[*]/#/ }")"
+    category_list="${category_list# }"
     cat >&2 <<'USAGE'
 
 Adds one entry to an existing plan's JOURNAL/ as its own new file,
@@ -443,15 +463,20 @@ correct it until the clock has passed the wrong time.
 Arguments:
   plan-number  Required. The plan's number, e.g. 427 or 00427, or its full
                folder name, e.g. 00427-my-plan (which must exist exactly).
-  category     Required. One of: action, finding, decision, thought,
-               blocker, handoff, correction.
+USAGE
+    printf '  category     Required. One of: %s.\n' "$category_list" >&2
+    cat >&2 <<'USAGE'
   body-file    Required. Path to a file holding the entry body (markdown).
 
 Options:
   --ref R      Optional task/phase reference (e.g. T2.1, P1). Defaults to
                the grammar's "no ref" marker (an em dash). REQUIRED for a
-               correction, where it names the entry being corrected: HH:MM
-               for an entry stamped today, or YY-MM-DD/HH:MM for one on an
+USAGE
+    printf '               correction, where it names the entry being corrected: %s\n' \
+        "$JOURNAL_REF_TIME_FORM" >&2
+    printf '               for an entry stamped today, or %s/%s for one on an\n' \
+        "$JOURNAL_REF_DAY_FORM" "$JOURNAL_REF_TIME_FORM" >&2
+    cat >&2 <<'USAGE'
                earlier day (in its entry folder or a legacy day-file). That
                entry must exist. The corrected
                entry is never edited or moved.
@@ -555,9 +580,12 @@ run_journal_mode() {
     # (00427-my-plan, a trailing slash from tab completion tolerated).
     local plan_slug=""
     plan_number="${plan_number%/}"
-    if [[ "$plan_number" =~ ^([0-9]{1,5})-([A-Za-z][A-Za-z0-9-]*)$ ]]; then
+    if [[ "$plan_number" =~ ^([0-9]{1,5})-(.*)$ ]]; then
         plan_number="${BASH_REMATCH[1]}"
         plan_slug="${BASH_REMATCH[2]}"
+        if [[ ! "$plan_slug" =~ $JOURNAL_SLUG_PATTERN || "$plan_slug" == *..* ]]; then
+            die "invalid plan '$plan_arg' -- a plan folder name is NNNNN- then letters, digits, . _ + or - only (no slash, space, glob character or '..')"
+        fi
     fi
     if [[ ! "$plan_number" =~ ^[0-9]{1,5}$ ]]; then
         die "invalid plan '$plan_arg' -- expected a number (427 or 00427) or a plan folder name (00427-my-plan)"

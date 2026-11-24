@@ -143,6 +143,124 @@ class TestSynopsisNamesCategoriesAndRef:
         assert "progress" not in synopsis
 
 
+def _make_plan_folder(repo: Path, name: str, parent: str = "") -> Path:
+    folder = repo / "CLAUDE" / "Plan" / parent / name
+    folder.mkdir(parents=True)
+    (folder / "PLAN.md").write_text(f"# Plan {name}\n")
+    return folder
+
+
+def _entries_in(folder: Path) -> list[Path]:
+    journal = folder / "JOURNAL"
+    return sorted(journal.rglob("*.md")) if journal.exists() else []
+
+
+class TestJournalFolderNameSlugs:
+    """The slug accepts real folder names; the existing directory is the gate."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["00103-v3.9.1-venv-resolution-failfast", "00104-3d-render", "00105-a_b+c"],
+    )
+    def test_dotted_and_digit_led_slugs_are_accepted(self, plan_repo: Path, name: str) -> None:
+        folder = _make_plan_folder(plan_repo, name)
+
+        result = _run(plan_repo, "--journal", name, "finding", "body.txt")
+
+        assert result.returncode == 0, result.stderr
+        assert len(_entries_in(folder)) == 1
+
+    def test_prefix_slug_is_refused_when_only_longer_name_exists(self, plan_repo: Path) -> None:
+        folder = _make_plan_folder(plan_repo, "00050-ab")
+
+        result = _run(plan_repo, "--journal", "00050-a", "finding", "body.txt")
+
+        assert result.returncode != 0
+        assert _entries_in(folder) == []
+
+    def test_slug_picks_the_right_folder_among_duplicate_numbers(self, plan_repo: Path) -> None:
+        first = _make_plan_folder(plan_repo, "00060-first")
+        second = _make_plan_folder(plan_repo, "00060-second", "Completed")
+
+        result = _run(plan_repo, "--journal", "00060-second", "finding", "body.txt")
+
+        assert result.returncode == 0, result.stderr
+        assert len(_entries_in(second)) == 1
+        assert _entries_in(first) == []
+
+    def test_bare_number_with_duplicate_numbers_is_still_ambiguous(self, plan_repo: Path) -> None:
+        first = _make_plan_folder(plan_repo, "00060-first")
+        second = _make_plan_folder(plan_repo, "00060-second", "Completed")
+
+        result = _run(plan_repo, "--journal", "60", "finding", "body.txt")
+
+        assert result.returncode != 0
+        assert _entries_in(first) == [] and _entries_in(second) == []
+
+    @pytest.mark.parametrize(
+        "argument",
+        [
+            "00042-",
+            "00042-../sample-plan",
+            "00042-sample-plan/../x",
+            "00042-sample*",
+            "00042-sampl?-plan",
+            "00042-[s]ample-plan",
+            "00042-.hidden",
+            "00042--flag",
+            "00042-a..b",
+            "00042-sample plan",
+            "/abs/00042-sample-plan",
+            "00042-sample-plan//",
+            "00042//sample-plan",
+        ],
+    )
+    def test_unsafe_arguments_are_refused_and_write_nothing(
+        self, plan_repo: Path, argument: str
+    ) -> None:
+        result = _run(plan_repo, "--journal", argument, "finding", "body.txt")
+
+        assert result.returncode != 0
+        assert _entries(plan_repo) == []
+
+
+class TestHelpDerivedFromDefinitions:
+    """The help text and the validators come from one definition each."""
+
+    @staticmethod
+    def _script_categories() -> list[str]:
+        text = _SCRIPT.read_text()
+        marker = "readonly JOURNAL_CATEGORIES=("
+        start = text.index(marker) + len(marker)
+        return text[start : text.index(")", start)].split()
+
+    def test_help_category_list_equals_the_array(self, plan_repo: Path) -> None:
+        categories = self._script_categories()
+        flat = " ".join(_run(plan_repo, "--journal").stderr.split())
+
+        assert f"One of: {', '.join(categories)}." in flat
+        assert "<" + "|".join(categories) + ">" in flat
+
+    def test_help_ref_forms_are_accepted_by_the_ref_pattern(self, plan_repo: Path) -> None:
+        flat = " ".join(_run(plan_repo, "--journal").stderr.split())
+        assert "HH:MM" in flat and "YY-MM-DD/HH:MM" in flat
+
+        for form in ("HH:MM", "YY-MM-DD/HH:MM"):
+            ref = form
+            for token in ("HH", "MM", "YY", "DD"):
+                ref = ref.replace(token, "11")
+            result = _run(plan_repo, "--journal", "42", "correction", "body.txt", "--ref", ref)
+
+            assert "needs --ref" not in result.stderr, (form, result.stderr)
+            assert "names no entry" in result.stderr, (form, result.stderr)
+
+    @pytest.mark.parametrize("ref", ["1:1", "11-11/11:11", "11:11:11", "aa:bb"])
+    def test_malformed_refs_are_refused_by_the_pattern(self, plan_repo: Path, ref: str) -> None:
+        result = _run(plan_repo, "--journal", "42", "correction", "body.txt", "--ref", ref)
+
+        assert "needs --ref" in result.stderr
+
+
 class TestExistingInvocationsUnchanged:
     """mkplan.bash is deployed to clients: every existing call shape still works."""
 
