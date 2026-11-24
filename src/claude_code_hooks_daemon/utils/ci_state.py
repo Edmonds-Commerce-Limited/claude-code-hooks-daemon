@@ -31,13 +31,17 @@ not-started status other than
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.simple_commands import simple_commands
+
+logger = logging.getLogger(__name__)
 
 _GH: Final[str] = "gh"
 _RESHAPE_OPTIONS: Final[frozenset[str]] = frozenset({"--jq", "-q", "--template", "-t"})
@@ -183,7 +187,14 @@ def _parse_time(value: object) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value)
-    except ValueError:
+    except ValueError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unparseable run time reads as no time (None), so the run is "
+            "judged without an age rather than failing the whole CI reading",
+            level=logging.DEBUG,
+        )
         return None
     if parsed.tzinfo is None or parsed.year < _EARLIEST_YEAR:
         return None

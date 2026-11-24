@@ -575,6 +575,12 @@
       "reason": "Plan 00298: standard tolerant-JSON-record pattern (same shape as goal_ledger._parse_entry). A missing, unreadable, or corrupt marker file all map to None -- the documented fail-open outcome consumed by failsafe_cron_blockage_suppressor as 'do not suppress', never a reason to raise out of a UserPromptSubmit handler."
     },
     {
+      "file": "utils/ci_state.py",
+      "function": "_parse_time",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00636 Task 2.3: None is the honest answer to 'when did this run start?' when gh emits a malformed or unset time -- the caller then judges the run WITHOUT an age (it reports the state as unreadable) rather than guessing one. The failure is logged at DEBUG with a reason; raising out of a PostToolUse CI-state advisory over one run's bad timestamp would fail the user's tool call over optional advice."
+    },
+    {
       "file": "plan_qa/checks/same_commit_plan_doc.py",
       "function": "_plan_status",
       "rule": "return-none-on-error",
