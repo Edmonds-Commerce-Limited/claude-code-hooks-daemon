@@ -878,6 +878,22 @@ class TestDecodeJsonDocument:
         text = " " * (teamchat_seat.MAX_OUTPUT_BYTES + 1)
         assert teamchat_seat.decode_json_document(text) is ProbeReason.OUTPUT_TOO_LARGE
 
+    def test_a_caller_may_name_a_larger_cap(self) -> None:
+        cap = teamchat_seat.MAX_OUTPUT_BYTES * 4
+        text = "{}" + " " * (cap - 2)
+        assert teamchat_seat.decode_json_document(text, max_bytes=cap) == {}
+        assert teamchat_seat.decode_json_document(text + " ", max_bytes=cap) is (
+            ProbeReason.OUTPUT_TOO_LARGE
+        )
+
+    def test_a_larger_cap_keeps_the_duplicate_key_and_depth_checks(self) -> None:
+        cap = teamchat_seat.MAX_OUTPUT_BYTES * 4
+        assert teamchat_seat.decode_json_document('{"a": 1, "a": 2}', max_bytes=cap) is (
+            ProbeReason.SHAPE_MISMATCH
+        )
+        deep = "[" * (teamchat_seat.MAX_JSON_DEPTH + 1) + "]" * (teamchat_seat.MAX_JSON_DEPTH + 1)
+        assert teamchat_seat.decode_json_document(deep, max_bytes=cap) is ProbeReason.NOT_JSON
+
 
 class TestRunKitCommand:
     def test_runs_the_kit_binary_with_only_the_runtime_overlay(self) -> None:

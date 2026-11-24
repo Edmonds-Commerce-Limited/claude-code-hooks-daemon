@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-import subprocess
+import subprocess  # nosec B404 - imported for the TimeoutExpired type only; nothing is spawned here
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -106,7 +106,8 @@ EXIT_RATE_LIMITED: Final[int] = 14
 DEFAULT_RECORD_TTL_SECONDS: Final[float] = 300.0
 #: How far in the future a line's ``sent_ms`` may sit before it is refused.
 FUTURE_SKEW_MS: Final[int] = 60_000
-#: Largest single-use ledger read; a larger file refuses every cite.
+#: Largest single-use ledger file. A larger file refuses every cite; a write
+#: evicts the oldest entries so the ledger itself never grows past it.
 MAX_LEDGER_BYTES: Final[int] = 256 * 1024
 LEDGER_VERSION: Final[int] = 1
 
@@ -442,6 +443,9 @@ class LedgerOutcome(StrEnum):
 
 
 _LedgerEntry = tuple[str, str, str]
+#: Serialises ledger use inside this daemon process only. There is no
+#: cross-process file lock: one daemon serves a project, so it is the only
+#: writer. Two processes writing one ledger could lose an entry (known limit).
 _LEDGER_LOCK: Final[threading.Lock] = threading.Lock()
 
 
@@ -450,9 +454,14 @@ class CiteLedger:
 
     The path is resolved only when the ledger is used, so with single use OFF
     nothing is resolved or opened. The file holds ids and act classes only,
-    never line text. An unreadable, oversized or unwritable file is
-    UNAVAILABLE, which refuses (fail closed). Deleting the file re-allows
-    every cite it recorded.
+    never line text, in use order (oldest first). An unreadable, oversized or
+    unwritable file is UNAVAILABLE, which refuses (fail closed). Deleting the
+    file re-allows every cite it recorded.
+
+    Bounded: a write that would pass :data:`MAX_LEDGER_BYTES` evicts the
+    oldest entries first, and an evicted cite is usable again. Several
+    thousand later uses must pass before that happens, so pair single use
+    with ``max_line_age_seconds`` for a hard bound.
     """
 
     def __init__(self, path: Callable[[], Path]) -> None:
@@ -463,7 +472,11 @@ class CiteLedger:
             entries = self._load()
         if entries is None:
             return LedgerOutcome.UNAVAILABLE
-        return LedgerOutcome.ALREADY_USED if _keys(cite, acts) & entries else LedgerOutcome.UNUSED
+        return (
+            LedgerOutcome.ALREADY_USED
+            if _keys(cite, acts).intersection(entries)
+            else LedgerOutcome.UNUSED
+        )
 
     def consume(self, cite: ApprovalCite, acts: frozenset[ActClass]) -> LedgerOutcome:
         """Check and record in one locked step."""
@@ -472,13 +485,12 @@ class CiteLedger:
             if entries is None:
                 return LedgerOutcome.UNAVAILABLE
             wanted = _keys(cite, acts)
-            if wanted & entries:
+            if wanted.intersection(entries):
                 return LedgerOutcome.ALREADY_USED
-            return (
-                LedgerOutcome.CONSUMED
-                if self._save(entries | wanted)
-                else (LedgerOutcome.UNAVAILABLE)
-            )
+            body = _bounded_body([*entries, *sorted(wanted)], must_keep=len(wanted))
+            if body is None:
+                return LedgerOutcome.UNAVAILABLE
+            return LedgerOutcome.CONSUMED if self._save(body) else LedgerOutcome.UNAVAILABLE
 
     def _resolve(self) -> Path | None:
         try:
@@ -491,7 +503,7 @@ class CiteLedger:
             )
             return None
 
-    def _load(self) -> set[_LedgerEntry] | None:
+    def _load(self) -> list[_LedgerEntry] | None:
         path = self._resolve()
         if path is None:
             return None
@@ -499,7 +511,7 @@ class CiteLedger:
             with path.open("rb") as handle:
                 raw = handle.read(MAX_LEDGER_BYTES + 1)
         except FileNotFoundError:
-            return set()
+            return []
         except OSError as exc:
             log_and_continue(
                 logger, exc, reason="the single-use ledger cannot be read, so the cite is refused"
@@ -507,14 +519,15 @@ class CiteLedger:
             return None
         if len(raw) > MAX_LEDGER_BYTES:
             return None
-        document: object = decode_json_document(raw.decode("utf-8", errors="replace"))
+        document: object = decode_json_document(
+            raw.decode("utf-8", errors="replace"), max_bytes=MAX_LEDGER_BYTES
+        )
         return _ledger_entries(document)
 
-    def _save(self, entries: set[_LedgerEntry]) -> bool:
+    def _save(self, body: str) -> bool:
         path = self._resolve()
         if path is None:
             return False
-        body = json.dumps({"v": LEDGER_VERSION, "used": sorted(list(e) for e in entries)})
         temporary = unique_temp_path(path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -526,15 +539,49 @@ class CiteLedger:
                 exc,
                 reason="the single-use ledger cannot be written, so the cite is refused",
             )
+            _discard(temporary)
             return False
         return True
+
+
+def _discard(temporary: Path) -> None:
+    """Remove a temporary file a failed write left behind."""
+    try:
+        temporary.unlink(missing_ok=True)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="a failed ledger write's temporary file could not be removed"
+        )
 
 
 def _keys(cite: ApprovalCite, acts: frozenset[ActClass]) -> set[_LedgerEntry]:
     return {(cite.team, cite.event_id, act.value) for act in acts}
 
 
-def _ledger_entries(document: object) -> set[_LedgerEntry] | None:
+def _bounded_body(entries: list[_LedgerEntry], *, must_keep: int) -> str | None:
+    """The ledger document for ``entries``, oldest first, within :data:`MAX_LEDGER_BYTES`.
+
+    Oldest entries are evicted until it fits. None when even the newest
+    ``must_keep`` entries (the use being recorded) cannot fit. ``json.dumps``
+    writes ASCII, so its length is the file's size in bytes.
+    """
+    rows = [json.dumps(list(entry)) for entry in entries]
+    budget = MAX_LEDGER_BYTES - len(json.dumps({"v": LEDGER_VERSION, "used": []}))
+    start, size = len(rows), 0
+    while start > 0:
+        # ", " separates every row after the first one kept.
+        added = len(rows[start - 1]) + (2 if start < len(rows) else 0)
+        if size + added > budget:
+            break
+        size += added
+        start -= 1
+    if len(rows) - start < must_keep:
+        return None
+    body = json.dumps({"v": LEDGER_VERSION, "used": [list(entry) for entry in entries[start:]]})
+    return body if len(body) <= MAX_LEDGER_BYTES else None
+
+
+def _ledger_entries(document: object) -> list[_LedgerEntry] | None:
     if not isinstance(document, dict) or set(document) != {"v", "used"}:
         return None
     if type(document["v"]) is not int or document["v"] != LEDGER_VERSION:
@@ -542,12 +589,13 @@ def _ledger_entries(document: object) -> set[_LedgerEntry] | None:
     used = document["used"]
     if not isinstance(used, list):
         return None
-    entries: set[_LedgerEntry] = set()
+    # A dict keeps file order (oldest first) and drops a repeated row.
+    entries: dict[_LedgerEntry, None] = {}
     for row in used:
         if not (isinstance(row, list) and len(row) == 3 and all(type(f) is str for f in row)):
             return None
-        entries.add((row[0], row[1], row[2]))
-    return entries
+        entries[(row[0], row[1], row[2])] = None
+    return list(entries)
 
 
 # --- arming and the decision ---------------------------------------------------------

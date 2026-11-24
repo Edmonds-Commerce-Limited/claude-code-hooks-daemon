@@ -418,6 +418,33 @@ class TestTeamchatVerifyCli:
         answer = TeamchatVerifyCli(runner=FakeRunner(error))(SIGNALS, CITE)
         assert answer == VerifyFailure(Refusal.VERIFY_UNAVAILABLE)
 
+    @staticmethod
+    def fake_kit(tmp_path: Path, script: str) -> SessionSignals:
+        """A kit whose ``bin/teamchat`` is ``script``, run by the real default runner."""
+        binary = tmp_path / "kit" / "bin" / "teamchat"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("#!/bin/sh\n" + script + "\n", encoding="utf-8")
+        binary.chmod(0o755)
+        return SessionSignals(runtime=str(tmp_path / "runtime"), kit=str(tmp_path / "kit"))
+
+    def test_the_real_runner_maps_a_not_found_exit_to_a_refusal(self, tmp_path: Path) -> None:
+        signals = self.fake_kit(tmp_path, "exit 23")
+        answer = TeamchatVerifyCli()(signals, CITE)
+        assert answer == VerifyFailure(Refusal.LINE_NOT_FOUND)
+
+    def test_the_real_runner_refuses_invalid_utf8_output(self, tmp_path: Path) -> None:
+        signals = self.fake_kit(tmp_path, "printf '\\377\\376{}\\n'")
+        answer = TeamchatVerifyCli()(signals, CITE)
+        assert answer == VerifyFailure(Refusal.ANSWER_UNREADABLE)
+
+    def test_the_real_runner_passes_a_valid_answer(self, tmp_path: Path) -> None:
+        """Control: the fake kit is trusted and its answer is read, so the refusals above
+        come from the output, not from the kit being refused."""
+        answer_line = fx.verify_answer().rstrip("\n").replace("'", "'\\''")
+        signals = self.fake_kit(tmp_path, f"printf '%s\\n' '{answer_line}'")
+        answer = TeamchatVerifyCli()(signals, CITE)
+        assert isinstance(answer, VerifiedLine)
+
     def test_a_raising_parse_refuses_and_never_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -750,11 +777,73 @@ class TestSingleUse:
         verdict = check(policy=self.POLICY, ledger=CiteLedger(lambda: path))
         assert (verdict.passed, verdict.refusal) == (False, Refusal.LEDGER_UNAVAILABLE)
 
+    @staticmethod
+    def padded_ledger(path: Path, rows: list[list[str]], size: int) -> None:
+        body = json.dumps({"v": 1, "used": rows})
+        path.write_text(body + " " * (size - len(body)), encoding="utf-8")
+
+    @staticmethod
+    def seeded_rows(count: int) -> list[list[str]]:
+        return [["alpha", "$" + f"{n:043d}", "push"] for n in range(count)]
+
+    def test_the_documented_cap_is_256_kib(self) -> None:
+        assert human_approval.MAX_LEDGER_BYTES == 256 * 1024
+
+    def test_a_ledger_exactly_at_the_cap_is_read(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        self.padded_ledger(path, [], human_approval.MAX_LEDGER_BYTES)
+        verifier = FixedVerifier(human_line())
+        verdict = check(policy=self.POLICY, ledger=CiteLedger(lambda: path), verifier=verifier)
+        assert verdict.passed is True
+
     def test_an_oversized_ledger_refuses(self, tmp_path: Path) -> None:
         path = tmp_path / "ledger.json"
-        path.write_text(" " * (human_approval.MAX_LEDGER_BYTES + 1), encoding="utf-8")
+        self.padded_ledger(path, [], human_approval.MAX_LEDGER_BYTES + 1)
         verdict = check(policy=self.POLICY, ledger=CiteLedger(lambda: path))
-        assert verdict.refusal is Refusal.LEDGER_UNAVAILABLE
+        assert (verdict.passed, verdict.refusal) == (False, Refusal.LEDGER_UNAVAILABLE)
+
+    def test_a_full_ledger_evicts_its_oldest_entries_and_keeps_accepting(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "ledger.json"
+        row_bytes = len(json.dumps(self.seeded_rows(1)[0])) + 2  # the row and its ", "
+        rows = self.seeded_rows((human_approval.MAX_LEDGER_BYTES - 32) // row_bytes)
+        path.write_text(json.dumps({"v": 1, "used": rows}), encoding="utf-8")
+        assert path.stat().st_size > human_approval.MAX_LEDGER_BYTES - 2 * row_bytes
+        ledger = CiteLedger(lambda: path)
+        fresh = [ApprovalCite("beta", "$" + f"{n:043d}") for n in range(10)]
+        for cite in fresh:
+            assert ledger.consume(cite, PUSH) is LedgerOutcome.CONSUMED
+            assert path.stat().st_size <= human_approval.MAX_LEDGER_BYTES
+        for cite in fresh:
+            assert ledger.used(cite, PUSH) is LedgerOutcome.ALREADY_USED
+        oldest = ApprovalCite("alpha", rows[0][1])
+        newest_seeded = ApprovalCite("alpha", rows[-1][1])
+        assert ledger.used(oldest, PUSH) is LedgerOutcome.UNUSED
+        assert ledger.used(newest_seeded, PUSH) is LedgerOutcome.ALREADY_USED
+
+    def test_new_entries_are_appended_in_use_order(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        ledger = CiteLedger(lambda: path)
+        first, second = CITE, ApprovalCite("alpha", OTHER_ID)
+        assert sorted([first.event_id, second.event_id]) == [second.event_id, first.event_id]
+        assert ledger.consume(first, PUSH) is LedgerOutcome.CONSUMED
+        assert ledger.consume(second, PUSH) is LedgerOutcome.CONSUMED
+        stored = json.loads(path.read_text(encoding="utf-8"))["used"]
+        assert stored == [["alpha", fx.HUMAN_ID, "push"], ["alpha", OTHER_ID, "push"]]
+
+    def test_a_failed_rename_leaves_no_temporary_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = tmp_path / "state"
+        path = state / "ledger.json"
+
+        def refuse(self: Path, target: Any) -> Path:
+            raise OSError("rename refused")
+
+        monkeypatch.setattr(Path, "replace", refuse)
+        assert CiteLedger(lambda: path).consume(CITE, PUSH) is LedgerOutcome.UNAVAILABLE
+        assert list(state.iterdir()) == []
 
     def test_a_ledger_under_a_file_is_unreadable_and_refuses(self, tmp_path: Path) -> None:
         blocker = tmp_path / "file"
