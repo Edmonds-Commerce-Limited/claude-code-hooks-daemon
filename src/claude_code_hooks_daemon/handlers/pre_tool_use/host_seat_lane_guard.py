@@ -106,8 +106,13 @@ LANE_BUILD_PATTERNS: Final[tuple[str, ...]] = (
     rf"^(?:gradle|gradlew|mvn){_SHIPPING_GOAL}\b",
     *BUILD_PATTERNS[1:],
 )
+#: A toolchain selector before the subcommand: ``cargo +nightly test``.
+LANE_TOOLCHAIN_PATTERNS: Final[tuple[str, ...]] = (
+    r"^cargo\s+\+\S+\s+(?:test|bench|build|check|clippy|fmt)\b",
+)
 LANE_PATTERNS: Final[tuple[str, ...]] = (
     *TEST_PATTERNS,
+    *LANE_TOOLCHAIN_PATTERNS,
     *LANE_BUILD_PATTERNS,
     *QA_PATTERNS,
     *LINT_PATTERNS,

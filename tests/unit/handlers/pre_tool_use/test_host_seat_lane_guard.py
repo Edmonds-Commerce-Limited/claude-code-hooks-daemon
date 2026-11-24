@@ -289,6 +289,47 @@ class TestWrapperSpellings:
     def test_wrapped_triage_command_is_untouched(self, command: str) -> None:
         assert is_lane_command(command) is False
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python3 -I -m pytest",
+            "python3 -X dev -m pytest",
+            "python3 -W error -m pytest -x",
+            "python3 -Im pytest",
+            "python3 -u scripts/qa/llm_qa.py changed",
+            "coverage run -m pytest",
+            "coverage run --source src -m pytest",
+            "python -m coverage run -m pytest",
+            "coverage run tests/test_x.py",
+            "uv run -p 3.12 pytest",
+            "uv run --python 3.12 pytest",
+            "uv run --with pytest-xdist pytest -n 4",
+            "uv run -m pytest",
+            "uvx --python 3.12 ruff check",
+            "poetry run -C sub pytest",
+            "cargo +nightly test",
+            "cargo +1.80 clippy",
+        ],
+    )
+    def test_launched_lane_command_is_refused(self, command: str) -> None:
+        assert is_lane_command(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python3 -c 'print(1)'",
+            "python3 -I scripts/deploy.py",
+            "python3 -X dev -m http.server",
+            "coverage report",
+            "coverage html",
+            "uv run -p 3.12 scripts/deploy.py",
+            "uvx --from httpie http GET example.com",
+            "cargo +nightly install ripgrep",
+        ],
+    )
+    def test_launched_triage_command_is_untouched(self, command: str) -> None:
+        assert is_lane_command(command) is False
+
     def test_nesting_too_deep_to_read_fails_closed(self) -> None:
         command = "eval " + "eval " * 12 + "ls"
         assert is_lane_command(command) is True

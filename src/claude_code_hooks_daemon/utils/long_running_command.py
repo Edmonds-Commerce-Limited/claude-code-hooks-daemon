@@ -157,6 +157,27 @@ _DEEP_COMMAND_OPTIONS: Final[dict[str, frozenset[str]]] = {
     "flock": frozenset({"-c", "--command"}),
     "env": frozenset({"-S", "--split-string"}),
 }
+#: Interpreter options with a value, before the ``-m`` module or the script.
+_DEEP_PYTHON_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-X", "-W"})
+_PYTHON_MODULE: Final = "-m"
+_PYTHON_CODE: Final = "-c"
+_LAUNCH_MODULE_OPTIONS: Final[frozenset[str]] = frozenset({"-m", "--module"})
+_UV_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-p", "--python", "--with", "--with-editable", "--with-requirements", "--from"}
+    | {"--directory", "--project", "--extra", "--group", "--only-group", "--package"}
+    | {"--env-file", "--index", "--default-index", "--index-url", "--extra-index-url"}
+)
+#: ``<launcher> run [options] <command>``: each launcher's value options.
+_DEEP_RUN_LAUNCHERS: Final[dict[str, frozenset[str]]] = {
+    "uv": _UV_VALUE_OPTIONS,
+    "poetry": frozenset({"-C", "-P", "--directory", "--project"}),
+    "pipenv": frozenset(),
+    "coverage": frozenset({"--rcfile", "--source", "--omit", "--include", "--context"})
+    | frozenset({"--data-file", "--concurrency", "--debug"}),
+}
+#: ``<launcher> [options] <command>`` with no ``run`` verb.
+_DEEP_DIRECT_LAUNCHERS: Final[dict[str, frozenset[str]]] = {"uvx": _UV_VALUE_OPTIONS}
+_RUN: Final = "run"
 #: Builtins that run their arguments as a command line.
 _EVAL: Final = "eval"
 #: How deep command text nested in command text (``eval``, ``-c``) is read; past
@@ -511,6 +532,32 @@ def _command_text(words: Sequence[str]) -> str | None:
     return " ".join(word for word in resolved if word is not None)
 
 
+def _deep_launcher(head: str, rest: list[str]) -> list[str] | None:
+    """The command a python, ``<launcher> run`` or ``uvx`` starts; None when ``head`` is none.
+
+    ``python -c`` code is not command text, so it yields no words (unjudged).
+    """
+    if _PYTHON.match(head):
+        options = _walk_options(
+            rest, _DEEP_PYTHON_VALUE_OPTIONS, frozenset({_PYTHON_MODULE, _PYTHON_CODE})
+        )
+        if options.flag == _PYTHON_CODE:
+            return []
+        if options.flag == _PYTHON_MODULE:
+            return [options.value, *rest[options.index :]] if options.value else []
+        return rest[options.index :] or None
+    if head in _DEEP_RUN_LAUNCHERS and rest[:1] == [_RUN]:
+        valued, rest = _DEEP_RUN_LAUNCHERS[head], rest[1:]
+    elif head in _DEEP_DIRECT_LAUNCHERS:
+        valued = _DEEP_DIRECT_LAUNCHERS[head]
+    else:
+        return None
+    options = _walk_options(rest, valued, _LAUNCH_MODULE_OPTIONS)
+    if options.flag is not None:
+        return [options.value, *rest[options.index :]] if options.value else []
+    return rest[options.index :]
+
+
 def _deep_wrapper(words: list[str], peeled: _Peeled) -> list[str] | None:
     """The words after one deep-peel wrapper, or None when ``words`` starts with none.
 
@@ -524,6 +571,9 @@ def _deep_wrapper(words: list[str], peeled: _Peeled) -> list[str] | None:
         if body is not None:
             peeled.bodies.append(body)
         return []
+    launched = _deep_launcher(head, rest)
+    if launched is not None:
+        return launched
     if head in _DEEP_WRAPPERS:
         valued, positionals = _DEEP_WRAPPERS[head]
     elif head in _DEEP_VALUE_OPTIONS:
