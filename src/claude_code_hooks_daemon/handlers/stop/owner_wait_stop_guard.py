@@ -31,8 +31,8 @@ unconfirmable wait is exactly the silent wait this guard exists to stop; the
 refusal tells the coordinator to post a notifying reply in each thread and stop
 again, and says why nothing could be confirmed. ``allow`` fails open with a
 WARNING log. ``auto`` (default) is ``refuse`` where the adapter's
-``flags_readable()`` is True, and otherwise (pingbus v1, where no post could
-ever be confirmed) fails open by design with an ADVISORY in the stop's context
+``flags_readable()`` is True, and otherwise (a bus whose posts carry no
+readable notify flag, so no post could ever be confirmed) fails open by design with an ADVISORY in the stop's context
 naming the team and the thread classes left unchecked. A raising
 ``flags_readable()`` makes ``auto`` refuse. The WARNING is always
 written. An invalid value fails CLOSED to ``refuse`` (not to the default).
@@ -127,6 +127,8 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContextResolver,
     SeatState,
     SessionSignals,
+    TeamOnlyGuidance,
+    shared_resolver,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
@@ -218,8 +220,8 @@ _RULE: Final[Rule] = Rule(
         "seen, and a post that does not notify lands silently"
     ),
     fix=(
-        "Run the one bump command the deny prints (or post a notifying `pingbus thread ... --ask` "
-        "reply in each thread), then stop again"
+        "Run the one bump command the deny prints (or post the notifying reply it names in "
+        "each thread), then stop again"
     ),
     verbose=(
         "Applies per team where the teamchat probe declares this seat coordinator, on a\n"
@@ -289,7 +291,7 @@ class _Stale:
     thread_ids: tuple[str, ...]
 
 
-class OwnerWaitStopGuardHandler(StopHandlerBase):
+class OwnerWaitStopGuardHandler(TeamOnlyGuidance, StopHandlerBase):
     """Refuse a coordinator's waiting stop until the owner was told, notifying, on the bus."""
 
     def __init__(self) -> None:
@@ -309,6 +311,8 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         self._bus: OwnerWaitBus = TeamchatOwnerWaitBus()
         self._clock: Callable[[], float] = time.time
         self._resolver: SeatContextResolver | None = None
+        # Injected by the registry from the top-level ``team_seat:`` block.
+        self._team_seat: TeamSeatConfig | None = None
         self._config_loader: Callable[[], Config] = self._default_config_loader
 
     def get_default_enabled(self) -> bool:
@@ -383,9 +387,6 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             )
             return default_config()
 
-    def _team_seat_config(self) -> TeamSeatConfig:
-        return self._config_loader().team_seat
-
     def _stand_in_reason(self, hook_input: dict[str, Any]) -> str | None:
         """auto_continue_stop's stand-in requirement for this stop, which this deny would hide.
 
@@ -415,10 +416,11 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         return None if requirement is None else requirement.reason
 
     def _resolve_seats(self, signals: SessionSignals) -> SeatContext:
-        """The 00631 seat context for this session (TTL-cached by the resolver)."""
-        if self._resolver is None:
-            self._resolver = SeatContextResolver.from_config(self._team_seat_config())
-        return self._resolver.resolve(signals)
+        """The 00631 seat context for this session (the shared, TTL-cached resolver)."""
+        resolver = (
+            self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
+        )
+        return resolver.resolve(signals)
 
     # -- matching ----------------------------------------------------------------
 
@@ -751,11 +753,12 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             "run it, then stop again.\n\n"
             "**Unreadable bus**: `options.on_unreadable_bus` is `auto` by default. Where the bus "
             "adapter can read notify flags, a wait the guard cannot confirm is refused once; on "
-            "pingbus v1 (no notify flag) it is allowed with an ADVISORY naming the team and the "
+            "a bus that exposes no notify flag (today's teamchat bus) it is allowed with an "
+            "ADVISORY naming the team and the "
             "thread classes it could not check (no advisory when the stop message itself "
             "cannot be read: nothing shows it is a wait). Either way: post a notifying reply in each "
-            "thread (`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
-            "owner-started message). `refuse` always refuses it once; `allow` lets it through "
+            "thread, using the reply commands the advisory or deny prints for this bus (one for "
+            "an open question, one for an owner-started message). `refuse` always refuses it once; `allow` lets it through "
             "with a log line only. An invalid value fails closed to `refuse`.\n\n"
             "An unreadable role or an unresolved seat probe stays armed and is treated like an "
             "unreadable bus.\n\n"

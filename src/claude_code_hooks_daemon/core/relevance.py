@@ -70,6 +70,7 @@ class RelevanceContext:
 
     project_root: Path
     languages: frozenset[str]
+    teams_declared: bool = False
 
     @classmethod
     def probe(
@@ -77,6 +78,7 @@ class RelevanceContext:
         project_root: Path,
         *,
         declared_languages: Iterable[str] | None = None,
+        teams_declared: bool = False,
     ) -> RelevanceContext:
         """Build a context for ``project_root``.
 
@@ -85,12 +87,16 @@ class RelevanceContext:
             declared_languages: The project's ``daemon.languages`` config,
                 when set. A declaration is authoritative over detection —
                 that is what the setting exists for.
+            teams_declared: Whether the project declares teamchat seats
+                (``team_seat.teams_in_use``, Plan 00474). Carried here
+                because the review builds handlers bare, with no config
+                injected.
         """
         if declared_languages is not None:
             languages = frozenset(language.lower() for language in declared_languages)
         else:
             languages = detect_languages(project_root)
-        return cls(project_root=project_root, languages=languages)
+        return cls(project_root=project_root, languages=languages, teams_declared=teams_declared)
 
     def has_file(self, *parts: str) -> bool:
         """Whether ``project_root / parts...`` exists as a regular file."""

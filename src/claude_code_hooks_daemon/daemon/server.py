@@ -33,7 +33,13 @@ from typing import Any, Final, Protocol, Self, runtime_checkable
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant, SessionModeIPC
-from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply, SocketLimit
+from claude_code_hooks_daemon.constants.protocol import (
+    TEAMCHAT_KIT_ENV_VAR,
+    TEAMCHAT_RUNTIME_ENV_VAR,
+    HookInputField,
+    RawTextReply,
+    SocketLimit,
+)
 from claude_code_hooks_daemon.core.debouncer import shutdown_debouncer
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
@@ -337,8 +343,8 @@ def _stamp_session_hostname(
 
 #: Session environment variable -> payload field, for the teamchat role probe.
 _TEAMCHAT_STAMPS: tuple[tuple[str, str], ...] = (
-    ("TEAMCHAT_RUNTIME", HookInputField.TEAMCHAT_RUNTIME),
-    ("TEAMCHAT_KIT", HookInputField.TEAMCHAT_KIT),
+    (TEAMCHAT_RUNTIME_ENV_VAR, HookInputField.TEAMCHAT_RUNTIME),
+    (TEAMCHAT_KIT_ENV_VAR, HookInputField.TEAMCHAT_KIT),
 )
 
 

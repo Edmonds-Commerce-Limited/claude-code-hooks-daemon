@@ -206,14 +206,14 @@ handlers:
 
     human_approval_check:   # A coordinator team seat's push, delete, world-writable chmod or
       enabled: true          # merge into main needs a cited questions-room line a human sent.
-      priority: 21            # Silent for a session with no team seat. block denies EVERY coordinator
+      priority: 21            # Silent with no team seat (a never-answering probe is none). block denies EVERY coordinator
       options:                # push until fedora-desktop issue 369 lands: the default verifier refuses every cite.
         mode: advise           # off | advise | block
         coordinator_seats_only: true   # arm only coordinator seats (and unreadable roles)
 
     host_seat_lane_guard:   # A teamchat seat with duty host runs no test, build, lint or QA
       enabled: true          # command: host seats are for deployment and triage.
-      priority: 21            # Silent with no team seat or a null duty; only duty host arms it.
+      priority: 21            # Silent with no team seat, a never-answering probe or a null duty; only duty host arms it.
       options:
         mode: advise           # off | advise | block
 
@@ -1382,6 +1382,14 @@ pseudo_events:
 #       max_used_percent: 80   # 0 < x <= 100, applies to both windows
 #       five_hour: 85          # optional per-window override
 #       seven_day: 70          # optional per-window override
+
+# Teamchat seats (Plans 00631, 00474). The team-only handlers stay enabled
+# and are silent in any session that resolves no team seat; this block only
+# says whether their guidance is written into CLAUDE.md for this project.
+# team_seat:
+#   teams_in_use: true        # default false: no team rules in the CLAUDE.md block
+#   detection: auto           # auto | off (off: every session reads as in no team)
+#   resolve_ttl_seconds: 60   # 1..3600, how long one role answer is reused
 
 # Documentation SSoT enforcement (Plan 00284): one canonical home per fact,
 # everything else points. OPT-IN: disabled by default. Enabling this feeds

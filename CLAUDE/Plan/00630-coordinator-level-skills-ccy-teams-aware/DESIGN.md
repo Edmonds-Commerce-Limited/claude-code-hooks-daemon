@@ -22,7 +22,7 @@ fedora-desktop vet.
 - **Duty**: what the seat is FOR, PER TEAM, declared host-side and carried to
   the session by `teamchat whoami --json`. An OPEN set: `coordinator`,
   `worker` and `host` now; `reviewer` and `observer` later; `null` means
-  unknown. A host-kind member defaults to duty `host`. A host member is never
+  undeclared and arms nothing (Plan 00474 D1). A host-kind member defaults to duty `host`. A host member is never
   the coordinator (teamchat's `declare check` refuses it), and host seats are
   not workers. Duty is static for a run. `coordinator` duty equals
   `role == coordinator`. A duty the daemon has no behaviour for switches

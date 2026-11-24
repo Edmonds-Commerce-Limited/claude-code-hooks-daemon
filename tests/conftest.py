@@ -77,6 +77,16 @@ def signal_safety_net() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def fresh_shared_seat_resolvers() -> Generator[None, None, None]:
+    """Give every test its own shared teamchat resolvers (cache and D3 memory)."""
+    from claude_code_hooks_daemon.utils.teamchat_seat import reset_shared_resolvers
+
+    reset_shared_resolvers()
+    yield
+    reset_shared_resolvers()
+
+
+@pytest.fixture(autouse=True)
 def no_refused_signal_left_behind(signal_safety_net: None) -> Generator[None, None, None]:
     """Fail a test whose code swallowed a refused signal instead of surfacing it."""
     from tests.signal_safety_net import installed_net

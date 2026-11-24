@@ -389,6 +389,23 @@ class CanBeDormant(Protocol):
         ...
 
 
+@runtime_checkable
+class HasGuidanceRelevance(Protocol):
+    """Protocol for handlers whose guidance applies only where a capability is declared.
+
+    Narrower than dormancy: the handler stays enabled and fires where it
+    applies, but its prose and rule rows are left out of the block while the
+    project has not declared the capability it serves (Plan 00474, ruling D4:
+    the team-only handlers, keyed on ``team_seat.teams_in_use``). Opt-in, and
+    deliberately not every handler's ``get_relevance``, which would also drop
+    guidance this project relies on (ledger N725).
+    """
+
+    def guidance_relevant(self) -> bool:
+        """Whether this handler's guidance belongs in this project's block."""
+        ...
+
+
 def _with_rule_ids(prose: str, rules: list[Rule]) -> str:
     """``prose`` followed by one ``IDs:`` line naming every rule the handler declares.
 
@@ -1188,6 +1205,9 @@ class ClaudeMdInjector:
             # left out entirely rather than listed under headings that call it
             # active and its rules enforced (Plan 00390 N2).
             if isinstance(handler, CanBeDormant) and handler.is_dormant():
+                continue
+            # Enabled, but serving a capability the project has not declared.
+            if isinstance(handler, HasGuidanceRelevance) and not handler.guidance_relevant():
                 continue
             content = handler.get_claude_md()
             rules = handler.get_rules() if isinstance(handler, HasRules) else []

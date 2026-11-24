@@ -28,16 +28,19 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils.team_role_gate import probe_coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
+    STATUS_COMMAND,
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    TeamOnlyGuidance,
+    shared_resolver,
 )
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
 
 BOARD_NOTE: Final[str] = (
-    "COORDINATOR BOARD (s7, B5): peers' state, where teamchat shows it, is `teamchat status`; "
+    "COORDINATOR BOARD (s7, B5): peers' state, where teamchat shows it, is "
+    f"`{STATUS_COMMAND}`; "
     "run it yourself when you need the board. Never read teamchat's files for it "
     "(status.json, the run directory, the seat store). A seat that view does not "
     "show, or whose state you cannot read, is unknown, not down: ask it on the bus "
@@ -50,7 +53,7 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
-class CoordinatorBoardHandler(SessionStartHandlerBase):
+class CoordinatorBoardHandler(TeamOnlyGuidance, SessionStartHandlerBase):
     """Tell a coordinator seat where the board is: `teamchat status`. Advisory, never denies."""
 
     def __init__(self) -> None:
@@ -75,12 +78,7 @@ class CoordinatorBoardHandler(SessionStartHandlerBase):
         return True
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def _armed(self, hook_input: dict[str, Any]) -> bool:
         return probe_coordinator_advisory_armed(

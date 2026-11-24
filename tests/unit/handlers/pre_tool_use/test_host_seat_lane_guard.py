@@ -2,8 +2,10 @@
 
 A session holding a teamchat seat whose duty in ANY held team is ``host``
 (owner ruling lts-infra Q62/Q64 D3) runs no test, build, lint or QA command:
-host seats are for deployment and triage. An unreadable ``whoami`` means the
-duty is unknown and the guard stays armed. No team means no change at all.
+host seats are for deployment and triage. A null or missing duty in a resolved
+seat is undeclared and arms nothing (D1). A probe that stops answering keeps the
+guard armed only in a session that already resolved a seat; one that never
+answered reads as no team (D3). No team means no change at all.
 
 Injection seams the handler exposes for these tests:
 
@@ -126,6 +128,16 @@ class TestIdentity:
 
     def test_declares_team_seat_for_injection(self) -> None:
         assert hasattr(HostSeatLaneGuardHandler(), "_team_seat")
+
+    def test_rule_text_scopes_the_no_answer_arming_to_a_resolved_session(self) -> None:
+        """Plan 00474 R8: a probe with no answer arms only after a seat resolved (D3)."""
+        rule = HostSeatLaneGuardHandler().get_rules()[0]
+        scoped = "a probe that stops answering in a session that resolved a seat"
+        assert scoped in rule.blocked
+        assert "a session that already resolved a seat" in rule.verbose
+        assert "probe gives no answer" not in rule.blocked
+        claude_md = HostSeatLaneGuardHandler().get_claude_md() or ""
+        assert "stays armed only in a session that already resolved a seat" in claude_md
 
     def test_ships_in_advise_mode(self) -> None:
         assert HostSeatLaneGuardHandler()._mode == "advise"
@@ -315,9 +327,22 @@ class TestArming:
         assert "holds a teamchat seat with duty host" in text
         assert "the guard stays armed" not in text
 
-    def test_subagent_is_silent(self) -> None:
-        handler, _ = make(HOST)
+    def test_subagent_of_a_host_seat_is_advised_never_denied(self) -> None:
+        """Owner answer to Q1: a host seat's sub-agents are guarded, in advise mode only."""
+        handler, _ = make(HOST, mode="block")
+        assert handler.matches(subagent(PYTEST)) is True
+        result = handler.handle(subagent(PYTEST))
+        assert result.decision is Decision.ALLOW
+        assert "worker seat" in _text(result)
+
+    @pytest.mark.parametrize("context", [UNRESOLVED, WORKER, NULL_DUTY, ABSENT])
+    def test_subagent_is_judged_on_a_declared_host_duty_only(self, context: SeatContext) -> None:
+        handler, _ = make(context)
         assert handler.matches(subagent(PYTEST)) is False
+
+    def test_main_thread_host_seat_is_still_denied_under_block(self) -> None:
+        handler, _ = make(HOST, mode="block")
+        assert handler.handle(bash(PYTEST)).decision is Decision.DENY
 
     def test_non_lane_command_is_silent_for_a_host_seat(self) -> None:
         handler, _ = make(HOST)

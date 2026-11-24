@@ -32,8 +32,8 @@ from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_do
 from claude_code_hooks_daemon.utils.team_role_gate import probe_coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    shared_resolver,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
@@ -117,12 +117,7 @@ class CoordinatorConductHandler(SessionStartHandlerBase):
         return True
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Add the conduct note, and the return note on resume or compact, on an armed seat."""

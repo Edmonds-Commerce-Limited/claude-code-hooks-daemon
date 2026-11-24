@@ -112,8 +112,9 @@ def duty_gate(
     """Whether ``duty`` in ANY held team applies to this event, for acts that name no team.
 
     ``APPLIES`` when some held team declares ``duty``; otherwise
-    ``ROLE_UNKNOWN`` when some duty could not be read (it might have been
-    this one), else ``NOT_APPLICABLE``. The decision's ``team`` is ``""``.
+    ``ROLE_UNKNOWN`` when the probe gave no answer at all (it might have been
+    this one), else ``NOT_APPLICABLE``. An undeclared duty in a resolved seat
+    is NOT_APPLICABLE: duty is optional (owner ruling D1). The decision's ``team`` is ``""``.
     ``include_subagents`` is as for :func:`role_gate`: a sub-agent is judged
     on a DECLARED duty only. Never raises.
     """

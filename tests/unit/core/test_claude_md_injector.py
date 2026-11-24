@@ -1925,6 +1925,98 @@ class TestADormantHandlerIsNotAnnouncedAsEnforced:
         assert "This project requires a human to close a plan" not in block
 
 
+class _ScopedStub(_StubHandler):
+    """A stub whose guidance applies only where the project declares a capability."""
+
+    def __init__(
+        self,
+        name: str,
+        claude_md: "str | None",
+        rules: "list[Any] | None" = None,
+        *,
+        relevant: bool,
+    ) -> None:
+        super().__init__(name, claude_md, rules)
+        self._relevant = relevant
+
+    def guidance_relevant(self) -> bool:
+        return self._relevant
+
+
+class TestGuidanceIsLeftOutWhereItDoesNotApply:
+    """Plan 00474 decoupling, owner ruling D4.
+
+    A team-only handler stays enabled (it costs nothing off a team seat), but
+    its guidance speaks of seats, questions rooms and buses a project with no
+    team has never heard of. ``guidance_relevant()`` is the narrow, opt-in
+    gate: unlike dormancy it does not switch the handler off, it only keeps
+    its prose and rule rows out of the generated block.
+    """
+
+    @staticmethod
+    def _block(tmp_path: Path, handlers: "list[Any]") -> str:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# P\n")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+        return claude_md.read_text(encoding="utf-8")
+
+    def test_an_irrelevant_handlers_rule_row_is_absent(self, tmp_path: Path) -> None:
+        block = self._block(tmp_path, [_ScopedStub("team", None, [_a_rule()], relevant=False)])
+        assert "This project requires a human to close a plan" not in block
+
+    def test_an_irrelevant_handlers_prose_is_absent(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
+        block = self._block(
+            tmp_path,
+            [
+                _ScopedStub("team", "## team\n\nSeat guidance.", relevant=False),
+                _StubHandler("loud", "## loud\n\nNeighbour guidance."),
+            ],
+        )
+        assert handler_names_in_guidance(block) == ["loud"]
+
+    def test_a_relevant_handler_is_announced(self, tmp_path: Path) -> None:
+        """The control: the gate must not simply drop every scoped handler."""
+        block = self._block(tmp_path, [_ScopedStub("team", None, [_a_rule()], relevant=True)])
+        assert "This project requires a human to close a plan" in block
+
+    def test_the_protocol_is_recognised_structurally(self) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import HasGuidanceRelevance
+
+        assert isinstance(_ScopedStub("team", None, relevant=True), HasGuidanceRelevance)
+        assert not isinstance(_StubHandler("plain", None), HasGuidanceRelevance)
+
+    def test_get_relevance_alone_does_not_drop_guidance(self, tmp_path: Path) -> None:
+        """Only the opt-in gate drops guidance, never ``get_relevance``.
+
+        ``model_downgrade_recorder`` is not applicable without an armed ccy
+        supervisor, yet it declares no ``guidance_relevant``, so its guidance
+        is still written. Were the injector to honour every handler's
+        relevance, npm, LSP and supervisor guidance would silently vanish.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            HasClaudeMd,
+            HasGuidanceRelevance,
+        )
+        from claude_code_hooks_daemon.core.relevance import RelevanceContext
+        from claude_code_hooks_daemon.handlers.post_tool_use.model_downgrade_recorder import (
+            ModelDowngradeRecorderHandler,
+        )
+
+        handler = ModelDowngradeRecorderHandler()
+        context = RelevanceContext(project_root=tmp_path, languages=frozenset())
+        assert handler.get_relevance(context).applicable is False
+        assert not isinstance(handler, HasGuidanceRelevance)
+        assert isinstance(handler, HasClaudeMd)
+        assert "model_downgrade_recorder" in self._block(tmp_path, [handler])
+        # Control: the name is not boilerplate every block carries.
+        neighbour = _StubHandler("loud", "## loud\n\nNeighbour guidance.")
+        assert "model_downgrade_recorder" not in self._block(tmp_path, [neighbour])
+
+
 class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
     """Ledger 00466 N7: the generated block is a pure function of the
     handler SET, never of caller iteration order.

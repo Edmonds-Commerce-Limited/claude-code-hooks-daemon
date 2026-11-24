@@ -24,20 +24,15 @@ detecting that a seat re-asked one.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
-from pydantic import ValidationError
-
-from claude_code_hooks_daemon.config.models import Config, TeamSeatConfig
 from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
+from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.automated_prompt import is_automated_prompt
-from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.owner_directives import (
     Directive,
@@ -47,9 +42,12 @@ from claude_code_hooks_daemon.utils.owner_directives import (
 from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    shared_resolver,
 )
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import TeamSeatConfig
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +75,8 @@ class OwnerDirectivesRegisterHandler(UserPromptSubmitHandlerBase):
         # Options, injected by the registry from ``options.<name>``; validated at use.
         self._directives: object = None
         self._prompt_interval: object = DEFAULT_PROMPT_INTERVAL
+        # Injected by the registry from the top-level ``team_seat:`` block.
+        self._team_seat: TeamSeatConfig | None = None
         # Seams, not config options.
         self._resolver: _SeatResolver | None = None
         self._prompts_since: BoundedFifoMap[str, int] = BoundedFifoMap(
@@ -118,24 +118,11 @@ class OwnerDirectivesRegisterHandler(UserPromptSubmitHandlerBase):
 
     # -- seat gate ---------------------------------------------------------------
 
-    def _team_seat_config(self) -> TeamSeatConfig:
-        root = getattr(self, "_workspace_root", None)
-        try:
-            project_root = Path(root) if root is not None else ProjectContext.project_root()
-            config: Config = load_config_cached(project_root / ".claude" / "hooks-daemon.yaml")
-        except (ValidationError, OSError, ValueError, RuntimeError) as exc:
-            log_and_continue(
-                logger,
-                exc,
-                reason="an unlocatable or unloadable project config falls back to the default team_seat block, which still probes a session carrying a teamchat runtime",
-            )
-            config = default_config()
-        return config.team_seat
-
     def _context(self, hook_input: dict[str, Any]) -> SeatContext:
-        if self._resolver is None:
-            self._resolver = SeatContextResolver.from_config(self._team_seat_config())
-        return self._resolver.resolve(SessionSignals.from_hook_input(hook_input))
+        resolver = (
+            self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
+        )
+        return resolver.resolve(SessionSignals.from_hook_input(hook_input))
 
     def _armed(self, hook_input: dict[str, Any]) -> bool:
         """Whether this seat gets the register: a coordinator, an unreadable role or a duty.

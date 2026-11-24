@@ -191,9 +191,14 @@ def test_duty_gate_subagent_is_not_applicable() -> None:
     assert duty_gate(SUBAGENT, context, duty="host").verdict is GateVerdict.NOT_APPLICABLE
 
 
-@pytest.mark.parametrize("context", [UNRESOLVED, parse_whoami(fx.ROLE_NULL)])
-def test_duty_gate_unreadable_duty_is_role_unknown(context: SeatContext) -> None:
-    assert duty_gate(MAIN, context, duty="host").verdict is GateVerdict.ROLE_UNKNOWN
+def test_duty_gate_unanswered_probe_is_role_unknown() -> None:
+    assert duty_gate(MAIN, UNRESOLVED, duty="host").verdict is GateVerdict.ROLE_UNKNOWN
+
+
+def test_duty_gate_null_duty_in_a_resolved_seat_is_not_applicable() -> None:
+    """Owner ruling D1: duty is optional; only a declared duty arms."""
+    context = parse_whoami(fx.ROLE_NULL)
+    assert duty_gate(MAIN, context, duty="host").verdict is GateVerdict.NOT_APPLICABLE
 
 
 def test_duty_gate_unknown_duty_switches_nothing_on() -> None:

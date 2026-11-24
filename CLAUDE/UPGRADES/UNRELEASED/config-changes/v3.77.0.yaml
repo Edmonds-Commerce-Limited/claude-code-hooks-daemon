@@ -1,4 +1,4 @@
-# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth), Plan 00631 (team_seat) and Plan 00636 (owner_wait_stop_guard).
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch), Plan 00594 (branches.wip.stack_max_depth), Plan 00631 (team_seat), Plan 00474 (team_seat.teams_in_use) and Plan 00636 (owner_wait_stop_guard).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -215,6 +215,21 @@ config_changes:
         team_seat:
           detection: auto
           resolve_ttl_seconds: 60
+          teams_in_use: false
+    - key: team_seat.teams_in_use
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00474). Whether this project holds teamchat seats. Read only
+        by the generated CLAUDE.md guidance and the optimise review: with the
+        default false the team-only handlers' rules (host seat lane, human
+        approval, owner wait, CI state reading) are left out of the block and
+        the review calls those handlers not applicable. The handlers stay
+        enabled either way and are silent in any session that resolves no team
+        seat. Set it true in a project that runs teamchat teams.
+      example_yaml: |
+        team_seat:
+          teams_in_use: true
     - key: handlers.stop.owner_wait_stop_guard
       recommended: true
       dormant: false

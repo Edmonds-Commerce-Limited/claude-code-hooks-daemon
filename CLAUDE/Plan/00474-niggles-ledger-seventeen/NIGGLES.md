@@ -8492,3 +8492,82 @@ Direction to consider for the open items (owner design call, since it trades usa
 **Severity**: LOW (log noise and a wasted probe per prompt; no behaviour change).
 
 **Status**: ⬜ Open. Store the counter before the seat check (or cache the not-armed result); parse the register once and cache it, or check for a machine prompt first; key the counter by something safer than the shared `unknown` when the session id is missing. Test-first.
+
+## Added by the Plan 00474 decoupling build (PR 250)
+
+Kept in its own section at the end so it merges trivially beside PR 249's edits to N719 and N720.
+
+### N725 — the CLAUDE.md injector does not honour every handler's relevance
+
+**Source**: decoupling build slice 1 handoff (`subagent-reports/261124-decoupling-build-r1-r8.md`), deferred from audit R5.
+
+**Evidence**: PR 250 gates only the team-only handlers' guidance on `team_seat.teams_in_use`. The ccy-only rows (`R-USAGE-PAUSE-*`, `ccy_supervisor_integrity`, `model_downgrade_recorder`) are still written into the generated guidance of a client with no ccy. Making the injector honour every handler's `get_relevance` would also drop the npm, LSP and supervisor guidance this repository relies on and break the guidance coverage test, so it was not done.
+
+**Severity**: LOW (guidance noise in clients without ccy; no behaviour change).
+
+**Status**: ⬜ Open. Decide per handler whether its guidance is ccy-only, then either extend the narrow `guidance_relevant` gate to those handlers or teach the injector a project-level relevance context. Owner call on which.
+
+### N726 — a malformed non-null duty arms nothing for the lane guard but makes a coordinator unknown
+
+**Source**: decoupling build slice 1 handoff, rulings D1 and D2.
+
+**Evidence**: `utils/teamchat_seat.py` `_merge`: a garbled duty (`"Host!"`, `["host"]`) downgrades a `coordinator` row to role UNKNOWN (review F2's caution: a garbled value might be a host), while `duty_gate(host)` reads the same value as undeclared and leaves the host lane guard silent. Deliberate, but asymmetric.
+
+**Severity**: LOW (only a malformed teamchat reply reaches it).
+
+**Status**: ✅ Fixed on the PR 250 branch (review finding 2, audit ruling D2 applied as written). `_merge` stops a coordinator only beside a declared `host` duty; `duty_malformed` is gone, so a garbled duty is undeclared for both gates. A role null in a resolved seat still reads unknown (D5).
+
+### N727 — `reset_shared_resolvers()` is not called on a daemon config reload
+
+**Source**: decoupling build slice 1 handoff (R4).
+
+**Evidence**: `utils/teamchat_seat.py` keeps one shared resolver per `(ttl, detection)`. A config reload builds new handlers but leaves the old resolvers (and their resolved-session memory) in the module map. A `team_seat` change keys a new resolver anyway, so no stale verdict is served; it is memory hygiene only.
+
+**Severity**: LOW.
+
+**Status**: ⬜ Open. Call `reset_shared_resolvers()` from the reload path, test-first.
+
+### N728 — secret-file guard: under `nocaseglob` a one-character bracket in a DIRECTORY component still reads a protected file (D-SEC finding on PR 249; pre-existing, not a regression)
+
+**Source**: D-SEC review of PR 249 (`fix-n710-secret-guard-glob-later-parts`).
+
+**Evidence**: `shopt -s nocaseglob; cat kit/[L]IB/id_rsa` and `cat ki[T]/lib/id_rsa` (any one-character bracket in a directory component, the file name spelled exactly) read the protected file and are allowed on every route. On PR 249's branch, `utils/secret_file_matching.py` ~3769-3772 hands the protected-file index only the bracket-EXPANDED forms (`kit/LIB/...`), and the expanded form is compared case-exact in the directory component, so it misses `kit/lib`. Also allowed on main.
+
+**Severity**: HIGH (security): a protected file's contents can be read.
+
+**Status**: ⬜ Open. Fix idea: also give the index the UNEXPANDED spelling when bash's defaults are not certain, so its own case-blind bracket reader judges the component. Test-first with both reproducers, then an independent security review.
+
+**Wording correction owed**: PR 249's N719 status and N720 item 1 entries say the case-blind bracket hole is "Fixed". That overstates it: the fix covers a bracket in the file-name component only. When PR 249 merges, reword both to "fixed for the file-name component; a directory-component bracket is still open (N728)".
+
+### N729 — secret-file guard: older gaps on main (D-RULE finding)
+
+**Source**: D-RULE review during PR 249.
+
+**Evidence**: all allowed on main today:
+
+- extglob forms enabled by `bash -O extglob`: `cat kit/lib/@(i)d_rsa`, `cat !(*.log)`;
+- `[a-z]*` and `I?_RSA` on the Write-script route (`R-SECRET-SCRIPT-AUTHOR`) and on the route that runs with no protected-file index.
+
+**Severity**: MEDIUM to HIGH (security): each reads, or authors a script that reads, a protected file.
+
+**Status**: ⬜ Open. Route both paths through the same glob reader the Bash route uses after PR 249, test-first, then an independent security review.
+
+### N730 — `human_approval_check`: the real runner decodes with replacement characters, so a record with a bad byte inside `text` or `headline` is accepted (PR 246 note)
+
+**Source**: PR 246 review note (Plan 00634).
+
+**Evidence**: the verify runner decodes `teamchat verify` output with `errors="replace"`, so an invalid UTF-8 byte inside the `text` or `headline` field becomes U+FFFD and the record still parses as valid. Neither field takes part in the decision (the line's text is never kept or logged), so no verdict changes.
+
+**Severity**: LOW (contract strictness only).
+
+**Status**: ⬜ Open. Either decode strictly and refuse the record, or document that the two fields are ignored. Owner call; no behaviour change is needed for safety.
+
+### N731 — `HANDLER_REFERENCE.md` still names pingbus v1 for `owner_wait_stop_guard`
+
+**Source**: PR 250 review-fix, finding 6.
+
+**Evidence**: the handler's module docstring no longer names a bus program. `docs/guides/HANDLER_REFERENCE.md` (the `owner_wait_stop_guard` "Unreadable bus" paragraph) still describes the `auto` behaviour "on pingbus v1". The adapter (`utils/owner_wait_bus.py`) may name its bus, so it is not in scope.
+
+**Severity**: LOW (human doc wording only).
+
+**Status**: ⬜ Open. Reword the paragraph so it says "a bus whose notify flag cannot be read", as the docstring now does.

@@ -14,8 +14,9 @@ Advisory only: it never denies, is never terminal, and runs no command or
 network call of its own. Silent when the output shows nothing waiting to start,
 so the seat probe runs only when there is something to say. The gate is the
 shared ``coordinator_advisory_armed``: a declared coordinator, a coordinator
-duty, an unreadable role or an unresolved probe hear it; a declared worker, no
-team and a sub-agent do not. A fault reading the seat counts as armed.
+duty, an unreadable role, or a probe that stops answering after this session
+resolved a seat hear it; a declared worker, no team (including a probe that
+never answered) and a sub-agent do not. A fault reading the seat counts as armed.
 """
 
 from __future__ import annotations
@@ -45,8 +46,9 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
-    SeatContextResolver,
     SessionSignals,
+    TeamOnlyGuidance,
+    shared_resolver,
 )
 
 if TYPE_CHECKING:
@@ -64,7 +66,7 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
-class CiStateReadingHandler(PostToolUseHandlerBase):
+class CiStateReadingHandler(TeamOnlyGuidance, PostToolUseHandlerBase):
     """Read a `gh` CI output as queued, stuck, pending or unknown. Advisory, never denies."""
 
     def __init__(self) -> None:
@@ -112,12 +114,7 @@ class CiStateReadingHandler(PostToolUseHandlerBase):
         return DEFAULT_STUCK_AFTER_MINUTES * _SECONDS_PER_MINUTE
 
     def _seat_resolver(self) -> _SeatResolver:
-        if self._resolver is None:
-            from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
-            self._resolver = SeatContextResolver.from_config(config)
-        return self._resolver
+        return self._resolver if self._resolver is not None else shared_resolver(self._team_seat)
 
     def _armed(self, hook_input: dict[str, Any]) -> bool:
         try:

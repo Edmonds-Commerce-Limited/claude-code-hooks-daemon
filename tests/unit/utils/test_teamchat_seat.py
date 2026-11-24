@@ -10,6 +10,8 @@ from __future__ import annotations
 import builtins
 import logging
 import os
+import subprocess  # nosec B404 - fixed argv, the test's own interpreter
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -373,26 +375,42 @@ class TestRolesAndDuties:
         [
             # Review F2: a host row merged with a null-duty row.
             [("alpha", "host"), ("alpha", None)],
-            # Review F2: a duty that fails the grammar might be host.
-            [("alpha", "Host!")],
-            [("alpha", None)],
+            # Another spelling of host normalises to host.
             [("alpha", " HOST ")],
             [("alpha", "Host")],
             [("alpha", "coordinator"), ("alpha", "host")],
-            [("alpha", "coordinator"), ("alpha", "worker")],
-            [("alpha", ["host"])],
             # A host row under another spelling of the same team name.
             [("Alpha", "host"), ("alpha", "coordinator")],
             [(" alpha", "host"), ("alpha", "coordinator")],
         ],
     )
-    def test_coordinator_needs_a_readable_non_host_duty(self, rows: list[tuple[str, Any]]) -> None:
+    def test_coordinator_is_unknown_beside_a_host_duty(self, rows: list[tuple[str, Any]]) -> None:
         seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
         context = probe(fx.whoami(*seats))
         answer = context.role_for_team("alpha")
         assert answer.kind is RoleKind.UNKNOWN
         assert not answer.holds_role("coordinator")
         assert answer.guards_armed is True
+
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            # Owner ruling D2: duty is optional, so null does not unmake a coordinator.
+            [("alpha", None)],
+            # Disagreeing non-host duties can never be host.
+            [("alpha", "coordinator"), ("alpha", "worker")],
+            # Owner ruling D2: only a declared host stops a coordinator; a
+            # duty that fails the name check arms nothing extra.
+            [("alpha", "Host!")],
+            [("alpha", ["host"])],
+            [("alpha", "Host!"), ("alpha", None)],
+        ],
+    )
+    def test_coordinator_stands_without_a_declared_duty(self, rows: list[tuple[str, Any]]) -> None:
+        seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
+        answer = probe(fx.whoami(*seats)).role_for_team("alpha")
+        assert answer.kind is RoleKind.DECLARED
+        assert answer.holds_role("coordinator")
 
     @pytest.mark.parametrize("duty", ["host", " host ", "HOST", "Host"])
     def test_any_host_row_makes_the_team_host(self, duty: str) -> None:
@@ -413,7 +431,8 @@ class TestRolesAndDuties:
             )
         )
         assert context.duty_in("alpha") == UNKNOWN
-        assert context.duty_unknown() is True
+        # D1: only a probe with no answer leaves duty unknown for the gates.
+        assert context.duty_unknown() is False
 
     def test_role_and_duty_are_normalised(self) -> None:
         context = probe(fx.whoami(fx.seat("alpha", " Worker ", duty=" WORKER")))
@@ -439,7 +458,8 @@ class TestRolesAndDuties:
         assert context.role_for_team("alpha").kind is RoleKind.UNKNOWN
         assert context.role_in("alpha") == UNKNOWN
         assert context.duty_in("alpha") == UNKNOWN
-        assert context.duty_unknown() is True
+        # D1: a null duty in a resolved seat is undeclared, not unknown.
+        assert context.duty_unknown() is False
 
     def test_probe_role_switches_nothing_on(self) -> None:
         answer = probe(fx.ROLE_PROBE).role_for_team("alpha")
@@ -933,3 +953,37 @@ class TestRunKitCommand:
         )
         assert outcome is ProbeReason.SIGNAL_NOT_A_PATH
         assert runner.calls == []
+
+
+class TestTheModuleImportsCold:
+    """A fresh interpreter can import the seat module first (PR 250 CI).
+
+    ``teamchat_seat`` reaches ``daemon`` through ``safe_signal``; the daemon
+    package imports ``server``, which needs the teamchat env-var names. If
+    those names live in ``teamchat_seat`` the cold import is circular, which
+    the warm test process never sees because ``daemon`` is already loaded.
+    """
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "claude_code_hooks_daemon.utils.teamchat_seat",
+            "claude_code_hooks_daemon.utils.team_role_gate",
+            "claude_code_hooks_daemon.handlers.post_tool_use",
+            "claude_code_hooks_daemon.handlers.post_tool_use_failure",
+        ],
+    )
+    def test_a_cold_import_succeeds(self, module: str) -> None:
+        import claude_code_hooks_daemon
+
+        src = Path(claude_code_hooks_daemon.__file__).resolve().parents[1]
+        env = {**os.environ, "PYTHONPATH": str(src)}
+        result = subprocess.run(  # nosec B603 - fixed argv
+            [sys.executable, "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
