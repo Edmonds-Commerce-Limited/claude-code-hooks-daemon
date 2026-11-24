@@ -13,6 +13,8 @@ turn: it consults the in-memory usage snapshot, lifts the pause when a FRESH rea
 ``resume_at`` silently when a fresh reading is still over on a different window, and is
 otherwise dropped. The first tick at or after ``resume_at`` re-reads usage and lifts the
 pause as before. The early read trusts the same host-wide snapshot a held prompt does.
+A pause whose cause is the account's HARD limit (:func:`hard_limit_holds`) takes none of
+those early exits: it holds until ``resume_at``.
 
 Every part of that protocol reads the same few facts, so they live here once:
 
@@ -73,6 +75,7 @@ from claude_code_hooks_daemon.utils.host_usage_ceiling import (
     resolve_host_usage_ceiling,
 )
 from claude_code_hooks_daemon.utils.usage_pause import (
+    CAUSE_HARD_LIMIT,
     WINDOW_FIVE_HOUR,
     WINDOW_SEVEN_DAY,
     UsagePause,
@@ -222,6 +225,17 @@ def is_resume_schedule(schedule: str) -> bool:
 def resume_is_due(pause: UsagePause, *, now: float) -> bool:
     """Whether a resume tick at ``now`` may end (or re-check) the pause."""
     return now >= pause.resume_at
+
+
+def hard_limit_holds(pause: UsagePause, *, now: float) -> bool:
+    """Whether ``pause`` holds at ``now`` whatever any usage reading or ceiling says.
+
+    True for a :data:`CAUSE_HARD_LIMIT` record before its ``resume_at`` (Plan 00523
+    Phase 2b): the account's hard limit fails every request until the reset, so a
+    reading under this host's ceiling, or a host with no ceiling, is no reason to lift
+    it. A ceiling record never holds by this rule.
+    """
+    return pause.cause == CAUSE_HARD_LIMIT and not resume_is_due(pause, now=now)
 
 
 def is_resume_tick(hook_input: Mapping[str, Any]) -> bool:
@@ -576,7 +590,9 @@ def rebase_pause(
     if directory is None:
         return False
     rebased = replace(
-        build_pause(record.session_id, breaches, now=env.clock()), paused_at=record.paused_at
+        build_pause(record.session_id, breaches, now=env.clock()),
+        paused_at=record.paused_at,
+        cause=record.cause,
     )
     try:
         write_usage_pause(directory, rebased)

@@ -126,7 +126,13 @@ class TestPinnedToTheDaemonRecord:
             usage_pause.FIELD_USED_PERCENTAGE,
             usage_pause.FIELD_CEILING,
             usage_pause.FIELD_REASON,
+            usage_pause.FIELD_CAUSE,
         )
+
+    def test_causes(self) -> None:
+        assert _mod._USAGE_PAUSE_CAUSES == usage_pause.CAUSES
+        assert _mod._USAGE_PAUSE_CAUSE_CEILING == usage_pause.CAUSE_CEILING
+        assert _mod._USAGE_PAUSE_CAUSE_HARD_LIMIT == usage_pause.CAUSE_HARD_LIMIT
 
     def test_windows(self) -> None:
         assert _mod._USAGE_PAUSE_WINDOWS == usage_pause.WINDOWS
@@ -462,6 +468,130 @@ class TestPauseLifted:
         lifted = _decide(sidecar_dir, machine, facts=_facts(now=late))
         assert lifted.noop_reason_log is not None
         assert "usage pause lifted" in lifted.noop_reason_log
+
+
+def _rewrite_cause(sidecar_dir: Path, value: object) -> None:
+    path = _write_pause_path(sidecar_dir)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["cause"] = value
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+class TestCause:
+    """Plan 00523 Phase 2b: the record says whether a ceiling or the hard limit paused it."""
+
+    def test_a_record_carrying_the_cause_is_read(self, sidecar_dir: Path) -> None:
+        _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
+        record = _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None)
+        assert record is not None
+        assert record.cause == usage_pause.CAUSE_HARD_LIMIT
+
+    def test_a_record_without_the_cause_is_a_ceiling_pause(self, sidecar_dir: Path) -> None:
+        path = _write_pause_path(sidecar_dir)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        del data["cause"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        record = _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None)
+        assert record is not None
+        assert record.cause == usage_pause.CAUSE_CEILING
+
+    @pytest.mark.parametrize(
+        "value", [[], {}, 5, None, True, "", "HARD_LIMIT", "hard_limit ", "quota"]
+    )
+    def test_an_unknown_cause_value_is_a_ceiling_pause_and_never_crashes(
+        self, sidecar_dir: Path, value: object
+    ) -> None:
+        _rewrite_cause(sidecar_dir, value)
+        record = _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None)
+        assert record is not None
+        assert record.cause == usage_pause.CAUSE_CEILING
+
+    def test_a_cause_the_older_parser_never_knew_leaves_the_rest_of_the_record_intact(
+        self, sidecar_dir: Path
+    ) -> None:
+        # The field is additive: every field the parser read before still parses.
+        written = _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
+        record = _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None)
+        assert record is not None
+        assert (record.session_id, record.paused_at, record.resume_at, record.window) == (
+            written.session_id,
+            written.paused_at,
+            written.resume_at,
+            written.window,
+        )
+
+
+class TestHardLimitPauseInjectsNothing:
+    """Task 2b.2: every request fails until the reset, so not even the single /compact."""
+
+    def test_no_compact_and_a_noop_that_names_the_hard_limit(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
+        outcome = _decide(sidecar_dir, machine)
+        assert outcome.payload is None
+        assert outcome.decision_value == "noop"
+        assert outcome.noop_reason_log is not None
+        assert "hard limit" in outcome.noop_reason_log
+        assert _RESUME_TEXT in outcome.noop_reason_log
+
+    def test_never_injects_across_many_ticks_even_with_a_red_context(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
+        for step in range(0, 12):
+            now = _NOW + step * 300.0
+            _write_red_sidecar(sidecar_dir, ts=now)
+            outcome = _decide(sidecar_dir, machine, facts=_facts(now=now))
+            assert outcome.payload is None
+        assert machine.pause_compacted_for is None
+
+    def test_an_await_in_flight_is_dropped_so_no_continue_follows(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        machine.state = _mod.SupervisorState.AWAIT_COMPACTING
+        _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
+        assert _decide(sidecar_dir, machine).payload is None
+        assert machine.state is _mod.SupervisorState.MONITOR
+        assert _decide(sidecar_dir, machine, facts=_facts(now=_NOW + 30.0)).payload is None
+
+    def test_a_ceiling_pause_keeps_its_single_compact(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _write_pause(sidecar_dir, cause=usage_pause.CAUSE_CEILING)
+        assert _decide(sidecar_dir, machine).payload is not None
+
+    def test_an_unknown_cause_keeps_the_ceiling_behaviour_and_no_more(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _rewrite_cause(sidecar_dir, "quota")
+        first = _decide(sidecar_dir, machine)
+        assert first.payload is not None
+        assert first.payload.startswith("/compact ")
+        assert _decide(sidecar_dir, machine, facts=_facts(now=_NOW + 30.0)).payload is None
+
+    def test_the_hold_ends_at_resume_at_with_no_grace(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # The supervisor does not wait on the resume cron for a hard-limit record: it
+        # stops holding at the reset itself; its next prompt is what lifts the record.
+        _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
+        _decide(sidecar_dir, machine)
+        assert (
+            _mod.load_usage_pause(sidecar_dir, now=_RESUME_AT - 1.0, own_sessions=None) is not None
+        )
+        assert _mod.load_usage_pause(sidecar_dir, now=_RESUME_AT + 1.0, own_sessions=None) is None
+        # The "usage pause lifted" line keys on the compact latch, which a hard-limit
+        # pause never sets; what matters is that the tick is no longer a pause hold.
+        lifted = _decide(sidecar_dir, machine, facts=_facts(now=_RESUME_AT + 1.0))
+        assert "usage pause until" not in (lifted.noop_reason_log or "")
+        assert "usage pause until" not in lifted.reason
+
+    def test_a_ceiling_pause_still_holds_through_its_grace(self, sidecar_dir: Path) -> None:
+        _write_pause(sidecar_dir)
+        assert (
+            _mod.load_usage_pause(sidecar_dir, now=_RESUME_AT + 60.0, own_sessions=None) is not None
+        )
 
 
 class TestMachineState:

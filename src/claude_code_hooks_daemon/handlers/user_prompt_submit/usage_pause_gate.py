@@ -17,7 +17,10 @@ session that never receives a new prompt still pauses.
 supervisor message, human -- is blocked before it reaches the model, at zero
 token cost, after the ceiling is re-resolved: a host that no longer has a
 ceiling, or whose windows are back under it or past their reset, lifts the pause
-instead of holding, so a stale record can never lock the owner out. Two other
+instead of holding, so a stale record can never lock the owner out. A pause at
+the account's HARD limit (Plan 00523 Phase 2b) is held until its resume time
+whatever the ceiling says; ``usage-pause clear`` still ends it, and at the resume
+time a session still over the ceiling is moved to a ceiling pause. Two other
 gates keep the turn itself quiet: the PreToolUse gate refuses every tool but the
 cron tools, and the Stop gate accepts a stop only once exactly the resume cron
 remains. The one exception here is the resume cron's own tick.
@@ -72,7 +75,7 @@ from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_do
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import UsagePauseView
-from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+from claude_code_hooks_daemon.utils.usage_pause import CAUSE_HARD_LIMIT, UsagePause
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PauseEnvironment,
     active_usage_pause,
@@ -80,6 +83,7 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import (
     current_breaches,
     default_usage_loader,
     fresh_breaches,
+    hard_limit_holds,
     is_resume_tick,
     load_project_config,
     override_notices,
@@ -124,7 +128,8 @@ def _rule() -> Rule:
             "The ceiling is re-checked on every prompt, so the pause lifts by itself as\n"
             "soon as this host has no ceiling (edit `hosts:` in .claude/hooks-daemon.yaml;\n"
             "the daemon reads it on its next config load) or every window is back under\n"
-            "it or past its reset.\n\n"
+            "it or past its reset. A pause recorded at the account's HARD limit\n"
+            "(`cause: hard_limit`) is the exception: it holds until its resume time.\n\n"
             "A human can also type, in this session's prompt:\n\n"
             f"    {clear_in_session()}\n\n"
             "It removes the pause record AND records an override that lasts until the\n"
@@ -233,10 +238,37 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
     def _hold_or_lift(
         self, hook_input: dict[str, Any], session_id: str, held: UsagePause, env: PauseEnvironment
     ) -> BlockingResult:
-        """Re-resolve the ceiling for a held prompt: lift if it no longer applies."""
-        if not current_breaches(hook_input, env):
+        """Re-resolve the ceiling for a held prompt: lift if it no longer applies.
+
+        A hard-limit pause (:func:`hard_limit_holds`) is not re-resolved before its
+        resume time: no ceiling reading says anything about the account's hard limit.
+        """
+        if hard_limit_holds(held, now=env.clock()):
+            until = resume_time_text(held.resume_at)
+            logger.info("usage_pause_gate: dropping a prompt at the hard limit until %s", until)
+            return BlockingResult(
+                decision=Decision.DENY,
+                reason=(
+                    f"{RuleFormatter().verbose(_rule())}\n\nPaused at the account's hard "
+                    f"limit: {held.reason}. Every request fails until the reset, so the "
+                    f"ceiling re-check does not apply; the pause lifts at {until}."
+                ),
+            )
+        breaches = current_breaches(hook_input, env)
+        if not breaches:
             logger.warning("usage_pause_gate: the ceiling no longer applies, lifting the pause")
             return self._lift(hook_input, session_id, held, env, verified_under_ceiling=True)
+        if held.cause == CAUSE_HARD_LIMIT:
+            # Past its resume time but over the ceiling: a ceiling pause takes over, and its
+            # directive sets up the resume cron the stop gate requires of every pause.
+            renewed = start_pause(session_id, breaches, env)
+            if renewed is not None:
+                return BlockingResult(
+                    decision=Decision.ALLOW, context=[render_pause_directive(renewed)]
+                )
+            # No ceiling pause could be kept (the owner's override, or the record could not
+            # be written and read back): lift as _resume does, never deny on a past resume time.
+            return self._lift(hook_input, session_id, held, env, verified_under_ceiling=False)
         until = resume_time_text(held.resume_at)
         reason = f"{RuleFormatter().verbose(_rule())}\n\nPaused on: {held.reason}. Resumes about {until}."
         logger.info("usage_pause_gate: dropping a prompt while paused until %s", until)
@@ -282,9 +314,12 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
         A fresh reading under the ceiling lifts the pause (the recorded window may belong to
         another account than the one the session runs on). A fresh reading still over re-bases the
         record's resume time silently when it differs materially, and the tick is dropped
-        either way. A stale or missing reading drops the tick unread.
+        either way. A stale or missing reading drops the tick unread. A hard-limit pause
+        is not read at all: no reading lifts or re-bases it before its resume time.
         """
-        breaches = fresh_breaches(hook_input, env)
+        breaches = (
+            None if hard_limit_holds(record, now=env.clock()) else fresh_breaches(hook_input, env)
+        )
         if breaches is not None and not breaches:
             logger.warning("usage_pause_gate: a fresh reading is under the ceiling, lifting early")
             return self._lift(hook_input, session_id, record, env, verified_under_ceiling=True)
@@ -366,7 +401,9 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             "the ceiling lifts the pause at once (the session may be on a different "
             "account than the one that paused), otherwise the tick is dropped.\n\n"
             "The ceiling is re-checked on every held prompt, so the pause lifts by itself "
-            "when it no longer applies. A human can type "
+            "when it no longer applies; the exception is a pause recorded at the account's "
+            "HARD limit (`cause: hard_limit`), which holds until its resume time because "
+            "every request fails until the reset. A human can type "
             f"`{clear_in_session()}` in the session: it removes the record and records an "
             "override until the latest reset among the windows over the ceiling (at most "
             "8 days), during which no pause is started for the session; each prompt then "

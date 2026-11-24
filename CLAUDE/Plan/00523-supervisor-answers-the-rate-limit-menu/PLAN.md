@@ -98,13 +98,44 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   `.usage-paused` record. Its `resume_at` is the reset time from the latest
   status payload's `rate_limits` (Plan 00479), or the reset time this plan's
   screen recogniser reads, whichever is available. TDD.
-- [ ] ⬜ **Task 2b.2**: A pause caused by a hard limit injects nothing, not even
+  Open: nothing in the repo shows that a `rate_limit` StopFailure is a
+  subscription-window hit rather than a short 429, or that the snapshot reads
+  the hit window as full at that moment. The only join is
+  `session_state_document._limit_reset` (any window at 95% or more), which is
+  read-only. A wrong `hard_limit` record would hold the session until the 7-day
+  reset, so the writer waits for the Phase 1 live capture. The screen
+  recogniser's `window_reset` is no help to the daemon either: it is keyed on
+  the Claude child's pid, not on the session id.
+  Acceptance criteria for the writer:
+  - It needs positive evidence that the stop failure is a usage-window hit and
+    not a passing 429; a `rate_limit` StopFailure alone is not that evidence.
+  - A `hard_limit` span is capped by its window: a `five_hour` record whose
+    `resume_at` is days out must not hold every prompt for days. The 8-day
+    `MAX_PAUSE_SPAN_SECONDS` cap alone is too loose for that.
+  - Open design point: the stop gate still requires exactly one resume cron for
+    every pause, a `hard_limit` one included, though nothing waits on that cron
+    to lift it before `resume_at`. Decide whether a hard-limit pause should have
+    a resume cron at all.
+- [x] ✅ **Task 2b.2**: A pause caused by a hard limit injects nothing, not even
   the single usage-pause `/compact` (`_usage_pause_outcome`), because every
   request fails until the reset. A ceiling pause keeps its `/compact`. TDD in
   the supervisor suite. (Whether the owner's "no usage ceiling" ruling retires
-  the Plan 00479 ceiling, and with it this branch, is Plan 00630 Q16.)
+  the Plan 00479 ceiling, and with it this branch, is Plan 00630 Q16. Building this
+  did not wait on Q16: a hard-limit pause should inject nothing however Q16 is ruled.)
+  As built: the record carries `cause` (`ceiling` | `hard_limit`) in both
+  readers. An absent or unknown value reads as `ceiling`. The supervisor stops
+  holding a `hard_limit` pause at `resume_at`, with no grace; it does not wait
+  on the resume cron, which the stop gate still requires. The prompt gate lifts
+  a `hard_limit` pause only at `resume_at` (`hard_limit_holds`), and a re-base
+  keeps the cause. At `resume_at` still over the ceiling it becomes a ceiling
+  pause; when that cannot be kept (the owner's override, or a failed write) it
+  is lifted unverified, never denied on a past resume time.
+  Inert until Task 2b.1 writes a `hard_limit` record.
 - [ ] ⬜ **Task 2b.3**: With no reset time known, back off rather than retrying
   every tick: double the interval after each identical failure, up to a cap.
+  Open: the supervisor does not read the stop-failure records, so it cannot
+  tell that its injections are failing. A back-off needs a new channel to the
+  supervisor, which is not designed yet.
 
 ### Phase 3: Verify and ship
 
@@ -135,10 +166,9 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   Fixed: output within 5 s of a vetoed resume send is not a re-check trigger.
 - [x] ✅ **F4**: a same-window re-answer after a D2 take-back, within the key
   cap. Fixed by a cap of 2 taken-back Enters per window.
-- Still open and blocked: Task 3.1 and Phase 1 (live capture) need a real
-  limit hit. Phase 2b (hold injections while a hard limit lasts) needs a design
-  ruling first: the `.usage-paused` record has no field to tell a hard limit
-  from a ceiling pause, and Plan 00630 Q16 may retire the ceiling pause.
+- Still open: Task 3.1 and Phase 1 (live capture) need a real limit hit.
+  Tasks 2b.1 and 2b.3 are open for the reasons given under them. Task 2b.2
+  is built.
 
 ## Success Criteria
 
@@ -146,8 +176,8 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   the reset, proven by tests that failed first and by one live observation.
 - [x] Release-bound consequences are recorded in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-  (`025-supervisor-answers-the-rate-limit-dialog.md`; no truth or config
-  changes).
+  (`025-supervisor-answers-the-rate-limit-dialog.md`; for Phase 2b,
+  `101-usage-pause-records-its-cause.md`; no truth or config changes).
 
 ## Delivery & Milestones
 
@@ -187,8 +217,8 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   in /workspace.
 
   The host part (the screen dump and the apply veto) takes effect on the next
-  ccy relaunch. Phase 1 (live capture) is still open; Phase 2b and Task 2.4
-  are built.
+  ccy relaunch. Phase 1 (live capture) is still open. Task 2.4 and Task
+  2b.2 are built; Tasks 2b.1 and 2b.3 are not.
 
   F2, F3 and F4 (the held-Enter take-back, the retried resume and the take-back
   cap) also need a ccy relaunch: the host writes the fields they read

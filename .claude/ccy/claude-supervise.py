@@ -3841,7 +3841,20 @@ _USAGE_PAUSE_FIELDS = (
     "used_percentage",
     "ceiling",
     "reason",
+    "cause",
 )
+# Why the pause exists (Plan 00523 Phase 2b). A ceiling pause gets its single
+# /compact; a hard-limit pause gets nothing (every request fails until the reset)
+# and ends here AT resume_at, with no grace. The daemon's stop gate still requires
+# its one resume cron, but the supervisor does not wait on that cron: the next
+# prompt after resume_at lifts the record, or turns it into a ceiling pause while
+# the host is still over its ceiling. An absent or unrecognised cause reads as a
+# ceiling pause, never as more injection.
+_USAGE_PAUSE_CAUSE_CEILING = "ceiling"
+_USAGE_PAUSE_CAUSE_HARD_LIMIT = "hard_limit"
+# Read only by the test pinning this copy to the daemon's CAUSES: this standalone
+# script cannot import the daemon, so the test is what keeps the two in step.
+_USAGE_PAUSE_CAUSES = frozenset({_USAGE_PAUSE_CAUSE_CEILING, _USAGE_PAUSE_CAUSE_HARD_LIMIT})
 _USAGE_PAUSE_WINDOWS = frozenset({"five_hour", "seven_day"})
 # How long past `resume_at` a record still counts: the daemon clears it when the
 # resume cron fires, and this is the backstop for a daemon that never did.
@@ -3863,10 +3876,22 @@ class UsagePauseRecord:
     used_percentage: float
     ceiling: float
     reason: str
+    cause: str = _USAGE_PAUSE_CAUSE_CEILING
+
+    @property
+    def is_hard_limit(self) -> bool:
+        """True for a pause at the account's hard limit (Plan 00523 Phase 2b)."""
+        return self.cause == _USAGE_PAUSE_CAUSE_HARD_LIMIT
 
     def is_live(self, now: float) -> bool:
-        """True while ``now`` is within [paused_at, resume_at + grace]."""
-        return self.paused_at <= now <= self.resume_at + _USAGE_PAUSE_GRACE_SECONDS
+        """True while ``now`` is within [paused_at, end].
+
+        The end is resume_at + grace for a ceiling pause (the daemon's resume cron
+        clears it). A hard-limit pause ends at resume_at: its resume cron is not
+        waited on, and the supervisor's next prompt is what lifts the daemon's record.
+        """
+        grace = 0.0 if self.is_hard_limit else _USAGE_PAUSE_GRACE_SECONDS
+        return self.paused_at <= now <= self.resume_at + grace
 
 
 def _usage_pause_number(value: object) -> float | None:
@@ -3897,7 +3922,14 @@ def _parse_usage_pause(data: object) -> UsagePauseRecord | None:
         return None
     if resume_at <= paused_at or resume_at - paused_at > _USAGE_PAUSE_MAX_SPAN_SECONDS:
         return None
-    return UsagePauseRecord(session_id, paused_at, resume_at, window, used, ceiling, reason)
+    # String check first: a list or dict cause must never reach a set membership test.
+    raw_cause = data.get("cause")
+    cause = (
+        _USAGE_PAUSE_CAUSE_HARD_LIMIT
+        if isinstance(raw_cause, str) and raw_cause == _USAGE_PAUSE_CAUSE_HARD_LIMIT
+        else _USAGE_PAUSE_CAUSE_CEILING
+    )
+    return UsagePauseRecord(session_id, paused_at, resume_at, window, used, ceiling, reason, cause)
 
 
 def load_usage_pause(
@@ -9387,7 +9419,8 @@ def _usage_pause_outcome(
     any of them would wake a session that exists to stay quiet. The compact
     waits for the session to STOP (the same ``idle`` + ``work_idle`` gates the
     band compaction uses, plus an empty input box) and is latched per pause
-    (``pause_compacted_for``) so a pause compacts exactly once.
+    (``pause_compacted_for``) so a pause compacts exactly once. A pause at the
+    account's hard limit gets no compact at all (Plan 00523 Task 2b.2).
     """
     resume = datetime.fromtimestamp(pause.resume_at, tz=UTC).strftime(_USAGE_PAUSE_TIME_FORMAT)
     held = f"usage pause until {resume} ({pause.window})"
@@ -9418,6 +9451,14 @@ def _usage_pause_outcome(
             Decision.NOOP,
             held,
             noop_reason_log=f"{_NOOP_LOG_PREFIX}: {held}: compaction wait dropped, no continue",
+        )
+    if pause.is_hard_limit:
+        # Plan 00523 Task 2b.2: every request fails until the reset, so even the
+        # single /compact would only be typed to fail. The latch is left unset.
+        return outcome(
+            Decision.NOOP,
+            held,
+            noop_reason_log=f"{_NOOP_LOG_PREFIX}: {held}: hard limit, nothing injected",
         )
     if machine.pause_compacted_for == pause.paused_at:
         return outcome(

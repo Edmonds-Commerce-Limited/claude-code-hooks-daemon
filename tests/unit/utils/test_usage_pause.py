@@ -69,6 +69,7 @@ class TestWrite:
             "used_percentage",
             "ceiling",
             "reason",
+            "cause",
         }
 
     def test_overwrites_an_earlier_record(self, tmp_path: Path) -> None:
@@ -218,6 +219,62 @@ class TestLiveness:
 
     def test_wrong_session_is_not_live(self) -> None:
         assert _pause().is_live(session_id="other", now=_NOW + 1) is False
+
+
+class TestCause:
+    """Plan 00523 Phase 2b: why the pause exists, a ceiling or the account's hard limit."""
+
+    def test_the_causes_are_a_closed_pair(self) -> None:
+        assert usage_pause.CAUSE_CEILING == "ceiling"
+        assert usage_pause.CAUSE_HARD_LIMIT == "hard_limit"
+        assert usage_pause.CAUSES == frozenset({"ceiling", "hard_limit"})
+        assert usage_pause.FIELD_CAUSE == "cause"
+
+    def test_a_record_built_without_a_cause_is_a_ceiling_pause(self) -> None:
+        assert _pause().cause == usage_pause.CAUSE_CEILING
+
+    def test_a_hard_limit_cause_round_trips(self, tmp_path: Path) -> None:
+        pause = _pause(cause=usage_pause.CAUSE_HARD_LIMIT)
+        usage_pause.write_usage_pause(tmp_path, pause)
+        assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1) == pause
+
+    def test_the_writer_refuses_an_unknown_cause(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="cause"):
+            usage_pause.write_usage_pause(tmp_path, _pause(cause="quota"))
+
+    def test_a_record_written_before_the_field_existed_reads_as_a_ceiling_pause(
+        self, tmp_path: Path
+    ) -> None:
+        path = usage_pause.write_usage_pause(tmp_path, _pause())
+        data = json.loads(path.read_text(encoding="utf-8"))
+        del data["cause"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        record = usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1)
+        assert record is not None
+        assert record.cause == usage_pause.CAUSE_CEILING
+
+    @pytest.mark.parametrize(
+        "value", [[], {}, 5, None, True, "", "HARD_LIMIT", "hard_limit ", "quota"]
+    )
+    def test_an_unknown_cause_value_reads_as_a_ceiling_pause_never_as_no_pause(
+        self, tmp_path: Path, value: object
+    ) -> None:
+        # Fail closed: an unreadable cause must not drop the pause (which would let
+        # every injection through) nor upgrade it to a hard limit.
+        path = usage_pause.write_usage_pause(tmp_path, _pause())
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["cause"] = value
+        path.write_text(json.dumps(data), encoding="utf-8")
+        record = usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1)
+        assert record is not None
+        assert record.cause == usage_pause.CAUSE_CEILING
+
+    def test_an_unknown_extra_key_does_not_reject_the_record(self, tmp_path: Path) -> None:
+        path = usage_pause.write_usage_pause(tmp_path, _pause())
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["a_field_from_a_later_version"] = 1
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1) is not None
 
 
 class TestClear:
