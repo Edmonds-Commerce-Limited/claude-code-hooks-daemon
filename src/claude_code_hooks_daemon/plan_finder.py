@@ -43,6 +43,10 @@ _TITLE_LINE: Final[re.Pattern[str]] = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE
 # cheap enough to be reached for casually, which is the point of the tool.
 _HEADER_BYTES: Final[int] = 2048
 
+# A body search reads at most this much of each PLAN.md (1 MiB): far beyond any
+# real plan, yet a bound on a pathological or binary file.
+_BODY_BYTES: Final[int] = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class PlanMatch:
@@ -74,13 +78,33 @@ def _first_group(pattern: re.Pattern[str], text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def find_plans(project_root: Path, plan_dir: str, query: str) -> list[PlanMatch]:
+def _read_body(plan_document: Path) -> str:
+    """Return the searchable text of a plan document, or empty on a read failure.
+
+    At most ``_BODY_BYTES`` are read, undecodable bytes become replacement
+    characters, and runs of whitespace (line breaks included) collapse to one
+    space so a phrase wrapped across lines can still be found. See
+    ``_read_header`` for why a read failure yields empty rather than raising.
+    """
+    try:
+        with plan_document.open("rb") as handle:
+            raw = handle.read(_BODY_BYTES)
+    except OSError:
+        return ""
+    return " ".join(raw.decode("utf-8", errors="replace").split())
+
+
+def find_plans(
+    project_root: Path, plan_dir: str, query: str, *, search_body: bool = False
+) -> list[PlanMatch]:
     """Every plan whose number, folder name or title matches ``query``.
 
     Args:
         project_root: Repository root; ``plan_dir`` is resolved beneath it.
         plan_dir: Repo-relative plan directory (e.g. ``CLAUDE/Plan``).
         query: Free text, a plan number, or empty to list every plan.
+        search_body: Also match the query against the whole PLAN.md text, not
+            just the folder name and title. Archives are searched either way.
 
     Returns:
         Matches ordered by plan number. Empty when nothing matches and when
@@ -91,7 +115,7 @@ def find_plans(project_root: Path, plan_dir: str, query: str) -> list[PlanMatch]
     if not root.is_dir():
         return []
 
-    needle = query.strip().lower()
+    needle = " ".join(query.split()).lower()
     # A bare number and a zero-padded one must find the same plan, so the
     # numeric form is compared as a NUMBER rather than as a substring:
     # "412" must not match plan 04120 by accident.
@@ -109,6 +133,8 @@ def find_plans(project_root: Path, plan_dir: str, query: str) -> list[PlanMatch]
         title = _first_group(_TITLE_LINE, header)
 
         haystack = f"{folder.name} {title or ''}".lower()
+        if search_body and needle:
+            haystack = f"{haystack}\n{_read_body(plan_document).lower()}"
         if needle and numeric != number and needle not in haystack:
             continue
 

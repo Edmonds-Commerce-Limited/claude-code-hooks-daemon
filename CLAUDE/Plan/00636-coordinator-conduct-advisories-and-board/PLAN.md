@@ -173,12 +173,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 `CLAUDE/Plan/mkplan.bash` is the template other repositories copy, so these
 land here. Not gated on a seat. Each task starts with a failing test.
 
-- [ ] ⬜ **Task 3.1**: `mkplan.bash --journal` accepts the full plan folder name
+- [x] ✅ **Task 3.1**: `mkplan.bash --journal` accepts the full plan folder name
   as well as the number (red: a slug-named call is refused today).
-- [ ] ⬜ **Task 3.2**: The one-line synopsis names the valid journal categories
+- [x] ✅ **Task 3.2**: The one-line synopsis names the valid journal categories
   and the `--ref` format (red: the synopsis lacks them; 8 of the 9 relayed
   errors were (unverified here: the relayed retrospective is not on disk) `progress` as a category or a correction without `--ref`).
-- [ ] ⬜ **Task 3.3**: `find-plan --body` searches PLAN.md bodies, `Completed/`
+- [x] ✅ **Task 3.3**: `find-plan --body` searches PLAN.md bodies, `Completed/`
   included (red: a body-only term finds nothing today).
 
 ## Dependencies
