@@ -70,7 +70,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     TarTool,
     VerifyFailed,
     members_of,
-    refuse_foreign_owner,
+    refuse_unrestorable,
     verify,
     verify_remaining,
 )
@@ -292,7 +292,7 @@ def _prove(
     if expected is not None and fingerprint_of(before) != expected:
         raise RemoveRefused("fingerprint changed since the claim")
     try:
-        refuse_foreign_owner(before, claimed_name)
+        refuse_unrestorable(before, claimed_name)
         members = members_of(before, claimed_name)
     except PackRefused as exc:
         raise RemoveRefused(str(exc)) from exc

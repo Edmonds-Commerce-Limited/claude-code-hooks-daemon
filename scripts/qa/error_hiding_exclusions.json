@@ -3,6 +3,18 @@
   "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) — and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
+      "file": "core/scratch_archive_claim.py",
+      "function": "_user_xattrs",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00627 Task 3.9 finding 3: None means 'xattrs unknown', and refuse_unrestorable refuses any entry holding such a node, so it is never archived and never removed (fail closed). Raising would abort the walk that restore and status also use, for a probe only packing needs. Covered by test_an_xattr_listing_that_fails_otherwise_is_unknown and the parametrised pack refusal test."
+    },
+    {
+      "file": "core/scratch_archive_claim.py",
+      "function": "_sparse",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00627 Task 3.9 finding 3: None means 'holes unknown', and refuse_unrestorable refuses any entry holding such a node, so it is never archived and never removed (fail closed). An unopenable or swapped file must not abort the walk restore and status also use. Covered by test_a_file_that_cannot_be_opened_for_the_hole_check_is_unknown and the parametrised pack refusal test."
+    },
+    {
       "file": "utils/encrypted_at_rest.py",
       "function": "_read_bounded",
       "rule": "return-none-on-error",

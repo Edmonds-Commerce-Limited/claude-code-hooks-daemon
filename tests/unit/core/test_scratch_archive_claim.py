@@ -303,3 +303,104 @@ class TestClaim:
             claim(root_fd, "e1", expected, max_inodes=100)
         assert (root / f"{CLAIM_PREFIX}e1" / "a.txt").exists()
         first.close()
+
+
+def _nodes_by_rel(root_fd: int, name: str) -> dict[str, Any]:
+    return {n.rel: n for n in walk_tree(root_fd, name, max_inodes=100).nodes}
+
+
+class TestWalkProbesWhatTarCannotCarry:
+    """Finding 3 (Task 3.9): user xattrs and holes are reported, so a pack can refuse."""
+
+    def test_a_plain_tree_has_no_user_xattrs_and_no_holes(self, root: Path, root_fd: int) -> None:
+        _entry(root)
+        (root / "e1" / "link").symlink_to("a.txt")
+        for node in _nodes_by_rel(root_fd, "e1").values():
+            assert node.user_xattrs == ()
+            assert node.sparse is False
+
+    def test_a_user_xattr_is_reported_on_a_file_and_a_directory(
+        self, root: Path, root_fd: int
+    ) -> None:
+        entry = _entry(root)
+        try:
+            os.setxattr(entry / "a.txt", "user.note", b"kept")
+            os.setxattr(entry / "sub", "user.tag", b"x")
+        except OSError as exc:
+            if exc.errno != errno.ENOTSUP:
+                raise
+            pytest.skip(f"this filesystem holds no user xattrs: {exc}")
+        nodes = _nodes_by_rel(root_fd, "e1")
+        assert nodes["a.txt"].user_xattrs == ("user.note",)
+        assert nodes["sub"].user_xattrs == ("user.tag",)
+        assert nodes["sub/b.txt"].user_xattrs == ()
+
+    def test_only_the_user_namespace_counts(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An SELinux label is on every file; it must not refuse everything."""
+        _entry(root)
+        monkeypatch.setattr(
+            claim_mod, "_list_xattrs", lambda path: ["security.selinux", "user.note"]
+        )
+        assert _nodes_by_rel(root_fd, "e1")["a.txt"].user_xattrs == ("user.note",)
+
+    def test_a_filesystem_without_xattrs_reports_none(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _entry(root)
+
+        def unsupported(path: str) -> list[str]:
+            raise OSError(errno.ENOTSUP, "not supported")
+
+        monkeypatch.setattr(claim_mod, "_list_xattrs", unsupported)
+        assert _nodes_by_rel(root_fd, "e1")["a.txt"].user_xattrs == ()
+
+    def test_an_xattr_listing_that_fails_otherwise_is_unknown(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _entry(root)
+
+        def denied(path: str) -> list[str]:
+            raise OSError(errno.EACCES, "denied")
+
+        monkeypatch.setattr(claim_mod, "_list_xattrs", denied)
+        assert _nodes_by_rel(root_fd, "e1")["a.txt"].user_xattrs is None
+
+    def test_a_file_with_a_hole_is_sparse(self, root: Path, root_fd: int) -> None:
+        entry = _entry(root)
+        with open(entry / "holey.bin", "wb") as handle:
+            handle.truncate(4 * 1024 * 1024)
+            handle.write(b"end")
+        if (entry / "holey.bin").stat().st_blocks * 512 >= 4 * 1024 * 1024:
+            pytest.skip("this filesystem stores no holes")
+        assert _nodes_by_rel(root_fd, "e1")["holey.bin"].sparse is True
+
+    def test_a_dense_file_is_not_sparse(self, root: Path, root_fd: int) -> None:
+        entry = _entry(root)
+        (entry / "dense.bin").write_bytes(b"d" * 1024 * 1024)
+        os.sync()
+        assert _nodes_by_rel(root_fd, "e1")["dense.bin"].sparse is False
+
+    def test_few_blocks_without_a_hole_is_not_sparse(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A compressing filesystem reports few blocks for a dense file: SEEK_HOLE decides."""
+        entry = _entry(root)
+        (entry / "dense.bin").write_bytes(b"d" * 1024 * 1024)
+        monkeypatch.setattr(claim_mod, "_has_hole", lambda fd, size: False)
+        monkeypatch.setattr(claim_mod, "_few_blocks", lambda info: True)
+        assert _nodes_by_rel(root_fd, "e1")["dense.bin"].sparse is False
+
+    def test_a_file_that_cannot_be_opened_for_the_hole_check_is_unknown(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entry = _entry(root)
+        (entry / "dense.bin").write_bytes(b"d" * 4096)
+        monkeypatch.setattr(claim_mod, "_few_blocks", lambda info: True)
+
+        def unreadable(fd: int, size: int) -> bool:
+            raise OSError(errno.EACCES, "denied")
+
+        monkeypatch.setattr(claim_mod, "_has_hole", unreadable)
+        assert _nodes_by_rel(root_fd, "e1")["dense.bin"].sparse is None

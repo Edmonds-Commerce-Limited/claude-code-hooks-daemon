@@ -86,7 +86,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     compression_of,
     digest_fd,
     members_of,
-    refuse_foreign_owner,
+    refuse_unrestorable,
     require_decompressor,
 )
 from claude_code_hooks_daemon.core.scratch_archive_restore import (
@@ -394,7 +394,7 @@ def _prove(
         listing = walk_tree(parent_fd, entry_name, max_inodes=max_inodes, max_depth=max_depth)
         if listing.root.kind != "dir":
             raise AdoptRefused("the entry is not a directory")
-        refuse_foreign_owner(listing, entry_name)
+        refuse_unrestorable(listing, entry_name)
         members = members_of(listing, entry_name)
     except (WalkRefused, PackRefused) as exc:
         raise AdoptRefused(f"the entry cannot be walked: {exc}") from exc

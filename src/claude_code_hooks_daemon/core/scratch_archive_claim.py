@@ -21,6 +21,7 @@ inodes and depth (and so in open descriptors).
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
 import stat
 import time
@@ -34,8 +35,17 @@ CLAIM_PREFIX = ".sweeping-"
 #: The deepest directory nesting a walk enters before refusing the entry.
 DEFAULT_MAX_DEPTH = 256
 
+#: The procfs directory of this process's descriptors, as path parts.
+PROC_FD_PARTS = ("", "proc", "self", "fd")
+
+#: The xattr namespace tar here does not carry and an unprivileged user can set.
+USER_XATTR_PREFIX = "user."
+
 _RENAME_NOREPLACE = 1
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+#: ``st_blocks`` counts 512-byte units whatever the filesystem's block size.
+_BLOCK_BYTES = 512
 
 
 def _load_renameat2() -> Callable[..., int] | None:
@@ -78,6 +88,10 @@ class Node:
     size: int
     uid: int = -1
     gid: int = -1
+    #: ``user.*`` extended attribute names; ``None`` when they could not be read.
+    user_xattrs: tuple[str, ...] | None = None
+    #: A regular file with a hole; ``None`` when that could not be checked.
+    sparse: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -124,7 +138,58 @@ def kind_of(mode: int) -> str:
     return "unknown"
 
 
-def _node(rel: str, info: os.stat_result) -> Node:
+def _list_xattrs(path: str) -> list[str]:
+    return os.listxattr(path, follow_symlinks=False)
+
+
+def _user_xattrs(dir_fd: int, name: str) -> tuple[str, ...] | None:
+    """The ``user.*`` xattr names of ``name`` in ``dir_fd``, never following a final link.
+
+    Read through the procfs link of the already-verified directory descriptor,
+    so a path swapped above it cannot redirect the probe. A filesystem without
+    xattrs has none; any other failure is unknown, which refuses a pack.
+    """
+    try:
+        names = _list_xattrs("/".join((*PROC_FD_PARTS, str(dir_fd), name)))
+    except OSError as exc:
+        if exc.errno == errno.ENOTSUP:
+            return ()
+        return None
+    return tuple(sorted(n for n in names if n.startswith(USER_XATTR_PREFIX)))
+
+
+def _few_blocks(info: os.stat_result) -> bool:
+    return info.st_blocks * _BLOCK_BYTES < info.st_size
+
+
+def _has_hole(fd: int, size: int) -> bool:
+    return os.lseek(fd, 0, os.SEEK_HOLE) < size
+
+
+def _sparse(dir_fd: int, name: str, info: os.stat_result) -> bool | None:
+    """Whether regular file ``name`` has a hole; ``None`` when that cannot be checked.
+
+    Few allocated blocks only suggest a hole (a compressing filesystem reports
+    the same), so the file is opened and ``SEEK_HOLE`` decides.
+    """
+    if not stat.S_ISREG(info.st_mode) or not _few_blocks(info):
+        return False
+    try:
+        fd = os.open(name, _FILE_FLAGS, dir_fd=dir_fd)
+    except OSError:
+        return None
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_ino, opened.st_dev) != (info.st_ino, info.st_dev):
+            return None
+        return _has_hole(fd, info.st_size)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _node(rel: str, info: os.stat_result, dir_fd: int, name: str) -> Node:
     return Node(
         rel=rel,
         kind=kind_of(info.st_mode),
@@ -136,6 +201,8 @@ def _node(rel: str, info: os.stat_result) -> Node:
         size=info.st_size,
         uid=info.st_uid,
         gid=info.st_gid,
+        user_xattrs=_user_xattrs(dir_fd, name),
+        sparse=_sparse(dir_fd, name, info),
     )
 
 
@@ -204,7 +271,7 @@ def walk_tree(
     if top.st_dev != os.fstat(parent_fd).st_dev:
         # The entry is itself a mount point: DESIGN section 5.3 gives it no action.
         raise WalkRefused(f"{name!r} is on a second device (a mount point)")
-    nodes = [_node("", top)]
+    nodes = [_node("", top, parent_fd, name)]
     if not stat.S_ISDIR(top.st_mode):
         return TreeListing(tuple(nodes))
     stack: list[tuple[int, str, Iterator[str]]] = []
@@ -225,7 +292,7 @@ def walk_tree(
                 raise WalkRefused(f"cannot lstat {child_rel!r}: {exc}") from exc
             if len(nodes) >= max_inodes:
                 raise WalkRefused(f"more than {max_inodes} inodes (inode cap)")
-            nodes.append(_node(child_rel, info))
+            nodes.append(_node(child_rel, info, fd, child))
             if not stat.S_ISDIR(info.st_mode):
                 continue
             if info.st_dev != top.st_dev:
