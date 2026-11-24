@@ -137,8 +137,8 @@
     file: src/claude_code_hooks_daemon/handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py
     function: handle
   right:
-    file: src/claude_code_hooks_daemon/handlers/user_prompt_submit/standing_authorisations.py
-    function: _is_automated_prompt
+    file: src/claude_code_hooks_daemon/utils/automated_prompt.py
+    function: is_automated_prompt
 
 - id: installer-file-writers-reach-the-backup-helper
   relation: reaches

@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from pydantic import ValidationError
 
@@ -84,9 +84,23 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     recent_stop_hook_block_texts,
     transcript_is_readable,
 )
+from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
+from claude_code_hooks_daemon.utils.teamchat_seat import (
+    SeatContext,
+    SeatContextResolver,
+    SessionSignals,
+)
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
+from claude_code_hooks_daemon.utils.wind_down import running_background_ids, wind_down_note
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import TeamSeatConfig
 
 logger = logging.getLogger(__name__)
+
+
+class _SeatResolver(Protocol):
+    def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
 def _last_block_is_owner_wait_guard(transcript_path: str | None) -> bool:
@@ -704,6 +718,10 @@ class AutoContinueStopHandler(StopHandlerBase):
         self.__stand_in_delay_hours: float = DEFAULT_STAND_IN_DELAY_HOURS
         # Injectable config source (tests substitute a fixed Config).
         self._config_loader: Callable[[], Config] = self._default_config_loader
+        # Plan 00636 Task 2.4: the coordinator gate for the wind-down note.
+        # Injected by the registry from the top-level ``team_seat:`` block.
+        self._team_seat: TeamSeatConfig | None = None
+        self._resolver: _SeatResolver | None = None
 
     @property
     def _stand_in_delay_hours(self) -> float:
@@ -954,6 +972,9 @@ class AutoContinueStopHandler(StopHandlerBase):
             challenge = self._goal_ledger_challenge(hook_input)
             if challenge is not None:
                 reason = f"{reason}\n\n{challenge}"
+            wind_down = self._wind_down_note(hook_input)
+            if wind_down is not None:
+                reason = f"{reason}\n\n{wind_down}"
             result = BlockingResult(
                 decision=Decision.DENY, reason=reason, rule=RuleID.STOP_NO_REASON
             )
@@ -965,6 +986,40 @@ class AutoContinueStopHandler(StopHandlerBase):
         result = BlockingResult(decision=Decision.ALLOW)
         self._log_stop_event(hook_input, Decision.ALLOW, "")
         return result
+
+    def _seat_resolver(self) -> _SeatResolver:
+        if self._resolver is None:
+            from claude_code_hooks_daemon.config.models import TeamSeatConfig
+
+            config = self._team_seat if self._team_seat is not None else TeamSeatConfig()
+            self._resolver = SeatContextResolver.from_config(config)
+        return self._resolver
+
+    def _coordinator_armed(self, hook_input: dict[str, Any]) -> bool:
+        try:
+            context = self._seat_resolver().resolve(SessionSignals.from_hook_input(hook_input))
+            return coordinator_advisory_armed(hook_input, context)
+        except Exception as exc:  # the seat probe is a boundary; the note only adds text
+            log_and_continue(
+                logger,
+                exc,
+                reason="auto_continue_stop could not read the seat, so the wind-down note counts as armed: it only adds text to a refusal already being given",
+                level=logging.WARNING,
+            )
+            return True
+
+    def _wind_down_note(self, hook_input: dict[str, Any]) -> str | None:
+        """The s8 wind-down note for a coordinator's no-reason stop around running agents.
+
+        Plan 00636 Task 2.4, advise-only. Appended to the existing refusal and
+        never given on its own: a Stop ALLOW carrying context makes Claude Code
+        continue the turn, so a standalone advisory would itself cost a failed
+        stop. The seat probe runs only when the payload reports a running task.
+        """
+        running = running_background_ids(hook_input)
+        if running is None or not self._coordinator_armed(hook_input):
+            return None
+        return wind_down_note(running)
 
     def _render_branch_message(self, rule_id: str, hook_input: dict[str, Any]) -> str:
         """Verbose-first/terse-after DENY message for one of the branch rules.

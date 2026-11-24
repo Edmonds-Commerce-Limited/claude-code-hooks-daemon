@@ -74,12 +74,18 @@ def reported_background_tasks(hook_input: dict[str, Any]) -> list[Any]:
     return tasks if isinstance(tasks, list) else []
 
 
+def running_background_tasks(hook_input: dict[str, Any]) -> list[dict[str, Any]]:
+    """The reported background tasks that are dicts carrying ``status == "running"``."""
+    return [
+        task
+        for task in reported_background_tasks(hook_input)
+        if isinstance(task, dict) and task.get(_TASK_STATUS_KEY) == _TASK_RUNNING
+    ]
+
+
 def has_running_background_task(hook_input: dict[str, Any]) -> bool:
     """True when a reported background task carries ``status == "running"``."""
-    return any(
-        isinstance(task, dict) and task.get(_TASK_STATUS_KEY) == _TASK_RUNNING
-        for task in reported_background_tasks(hook_input)
-    )
+    return bool(running_background_tasks(hook_input))
 
 
 def get_transcript_reader(hook_input: dict[str, Any]) -> TranscriptReader | None:
