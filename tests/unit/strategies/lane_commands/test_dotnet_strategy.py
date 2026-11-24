@@ -19,6 +19,8 @@ def test_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is True
 
 
-@pytest.mark.parametrize("command", ["dotnet publish", "dotnet run", "dotnet restore"])
+@pytest.mark.parametrize(
+    "command", ["dotnet publish", "dotnet run", "dotnet restore", "dotnet build-server shutdown"]
+)
 def test_not_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is False

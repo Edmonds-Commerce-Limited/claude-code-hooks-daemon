@@ -8,7 +8,7 @@ _LANGUAGE_NAME = "PHP"
 _LANE_PATTERNS: tuple[str, ...] = (
     r"^(?:phpstan|psalm|phpcs)\b",
     r"^phpunit\b",
-    r"^composer\s+(?:test|run(?:-script)?\s+test\S*)\b",
+    r"^composer\s+(?:test|run(?:-script)?\s+test\S*)(?=\s|$)",
 )
 _ACCEPTANCE_COMMAND = "composer test"
 

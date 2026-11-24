@@ -29,6 +29,9 @@ def test_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is True
 
 
-@pytest.mark.parametrize("command", ["composer install", "composer require x", "php artisan serve"])
+@pytest.mark.parametrize(
+    "command",
+    ["composer install", "composer require x", "php artisan serve", "composer test-deploy"],
+)
 def test_not_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is False

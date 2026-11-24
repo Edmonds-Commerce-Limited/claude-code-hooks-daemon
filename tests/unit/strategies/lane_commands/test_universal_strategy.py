@@ -54,6 +54,7 @@ def test_lane(command: str) -> None:
         "./test-connection.sh",
         "pre-commit install",
         "pre-commit autoupdate",
+        "pre-commit run-legacy",
         "./deploy.sh production",
     ],
 )

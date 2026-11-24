@@ -53,6 +53,7 @@ def test_lane(command: str) -> None:
         "npm install",
         "npm i",
         "npm token list",
+        "npm t-shirt",
         "npm start",
         "npm run deploy",
         "npx create-react-app x",

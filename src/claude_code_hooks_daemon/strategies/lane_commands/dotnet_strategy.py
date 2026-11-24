@@ -5,7 +5,7 @@ from typing import Any
 from claude_code_hooks_daemon.strategies.lane_commands.common import lane_acceptance_test
 
 _LANGUAGE_NAME = ".NET"
-_LANE_PATTERNS: tuple[str, ...] = (r"^dotnet\s+(?:test|build)\b",)
+_LANE_PATTERNS: tuple[str, ...] = (r"^dotnet\s+(?:test|build)(?=\s|$)",)
 _ACCEPTANCE_COMMAND = "dotnet test"
 
 

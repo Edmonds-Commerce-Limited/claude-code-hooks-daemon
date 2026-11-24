@@ -175,23 +175,23 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             self._resolver = SeatContextResolver.from_config(config)
         return self._resolver
 
-    def _verdict(self, hook_input: Mapping[str, Any]) -> tuple[GateVerdict, SeatState | None]:
-        """The duty gate on ``host`` and the probe state behind it.
+    def _verdict(self, hook_input: Mapping[str, Any]) -> GateVerdict:
+        """The duty gate on ``host``.
 
-        NOT_APPLICABLE (state None) with no teamchat runtime, and no probe run.
-        A probe that answered but declares no duty (null, absent or unreadable)
+        NOT_APPLICABLE with no teamchat runtime, and no probe run. ROLE_UNKNOWN
+        only when the probe gave no answer at all (UNRESOLVED). A probe that answered but declares no duty (null, absent or unreadable)
         is NOT_APPLICABLE too: duty is optional, so only a declared ``host``
         arms. ``duty_gate`` checks a declared duty first, so a host in one
         team is never disarmed by a null duty in another.
         """
         signals = SessionSignals.from_hook_input(hook_input)
         if not signals.runtime:
-            return GateVerdict.NOT_APPLICABLE, None
+            return GateVerdict.NOT_APPLICABLE
         context = self._seat_resolver().resolve(signals)
         verdict = duty_gate(hook_input, context, duty=DUTY_HOST).verdict
         if verdict is GateVerdict.ROLE_UNKNOWN and context.state is not SeatState.UNRESOLVED:
-            return GateVerdict.NOT_APPLICABLE, context.state
-        return verdict, context.state
+            return GateVerdict.NOT_APPLICABLE
+        return verdict
 
     def _is_lane(self, hook_input: Mapping[str, Any]) -> bool:
         command = get_bash_command(dict(hook_input)) or ""
@@ -208,7 +208,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         if self.is_dormant() or hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         try:
-            verdict, _state = self._verdict(hook_input)
+            verdict = self._verdict(hook_input)
         except Exception as exc:
             log_and_continue(
                 logger,
@@ -245,7 +245,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
             return self._refuse(_HANDLER_ERROR)
 
     def _judge(self, hook_input: dict[str, Any]) -> GatingResult:
-        verdict, _state = self._verdict(hook_input)
+        verdict = self._verdict(hook_input)
         if verdict is GateVerdict.NOT_APPLICABLE or not self._is_lane(hook_input):
             return GatingResult(decision=Decision.ALLOW)
         if verdict is GateVerdict.ROLE_UNKNOWN:

@@ -9,7 +9,7 @@ _LANE_PATTERNS: tuple[str, ...] = (
     r"^(?:jest|vitest|playwright|mocha)\b",
     r"^(?:npm|yarn|pnpm|bun)\s+(?:test|run\s+test\S*)\b",
     # npm and pnpm document `t` as their alias for `test`.
-    r"^(?:npm|pnpm)\s+t\b",
+    r"^(?:npm|pnpm)\s+t(?=\s|$)",
     r"^(?:npm|yarn|pnpm|bun)\s+(?:build|run\s+build\S*)\b",
     r"^(?:tsc|webpack)\b",
     r"^(?:eslint|prettier|stylelint)\b",

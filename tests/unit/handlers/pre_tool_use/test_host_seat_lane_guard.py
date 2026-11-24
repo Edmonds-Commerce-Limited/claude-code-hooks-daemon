@@ -289,6 +289,14 @@ class TestArming:
         assert result.decision == Decision.ALLOW
         assert not result.context
 
+    def test_host_and_worker_rows_for_one_team_stay_armed(self) -> None:
+        """A wire that says host for a team still arms, whatever else it says for it."""
+        context = parse_whoami(
+            fx.whoami(fx.seat("alpha", "worker", duty="host"), fx.seat("alpha", "worker"))
+        )
+        handler, _ = make(context)
+        assert handler.matches(bash(PYTEST)) is True
+
     def test_host_in_one_team_and_null_duty_in_another_is_armed(self) -> None:
         """A null duty elsewhere must never disarm an explicit host."""
         handler, _ = make(HOST_AND_NULL_DUTY)

@@ -12,7 +12,7 @@ _LANE_PATTERNS: tuple[str, ...] = (
     r"^make(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|all|ci)\b",
     r"^(?:cmake|ninja|bazel)\b",
     r"^(?:hadolint|markdownlint|yamllint)\b",
-    r"^pre-commit\s+run\b",
+    r"^pre-commit\s+run(?=\s|$)",
     # A script named for tests, QA or lint: `run_tests.sh`, `llm_qa.py`, `test_x.py`.
     # A deploy, smoke, health, publish or connection check is triage even when
     # its name carries `test` or `qa` (`deploy-qa.sh`, `smoke_test.sh`).
