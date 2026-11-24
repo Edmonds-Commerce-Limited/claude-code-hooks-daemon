@@ -317,6 +317,28 @@ def _dialog_facts(
     return _mod.TickFacts(**fields)
 
 
+def _write_hard_limit_pause(
+    sidecar_dir: Path, *, resume_at: float, paused_at: float | None = None
+) -> None:
+    """A daemon-written ``hard_limit`` usage pause for the gate session (Plan 00523 2b)."""
+    from claude_code_hooks_daemon.utils import usage_pause
+    from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+
+    usage_pause.write_usage_pause(
+        sidecar_dir.parent,
+        UsagePause(
+            session_id=_GATE_SESSION,
+            paused_at=resume_at - 3600.0 if paused_at is None else paused_at,
+            resume_at=resume_at,
+            window=usage_pause.WINDOW_FIVE_HOUR,
+            used_percentage=100.0,
+            ceiling=100.0,
+            reason="five_hour window at its hard limit",
+            cause=usage_pause.CAUSE_HARD_LIMIT,
+        ),
+    )
+
+
 def _write_red_sidecar(sidecar_dir: Path, *, now: float = _NOW) -> None:
     """A context reading that, absent the dialog, makes the supervisor compact."""
     (sidecar_dir / "fg.json").write_text(
@@ -400,6 +422,18 @@ class TestDialogKeys:
         assert second.decision_value == _KEY
         assert second.payload == "\r"
         assert second.submit is False
+
+    def test_enter_still_answers_the_dialog_under_a_hard_limit_pause(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Plan 00523 Phase 2b: the answer is ordered ahead of the usage pause and
+        # types no prompt, so a hard-limit pause must not hold it back.
+        _write_hard_limit_pause(sidecar_dir, resume_at=_NOW + 3600.0, paused_at=_NOW - 60.0)
+        assert _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None) is not None
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET))
+        second = _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, now=_NOW + 1))
+        assert second.decision_value == _KEY
+        assert second.payload == "\r"
 
     def test_arrow_never_enter_when_pointer_is_off_target(
         self, sidecar_dir: Path, machine: Any
@@ -831,6 +865,26 @@ class TestResumeGates:
         outcome = _resume(sidecar_dir, machine, _resume_facts(""))
         assert outcome.decision_value != _CONTINUE
         assert outcome.payload is None or "continue" not in outcome.payload.split()[-1:]
+
+    def test_continue_follows_once_a_hard_limit_pause_reaches_its_resume_time(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Plan 00523 Phase 2b: a hard-limit pause has no resume cron to clear it, so
+        # for the supervisor it ends AT resume_at (no grace), and the post-reset
+        # `continue` goes out; the daemon's gate lifts the record on that prompt.
+        _answer_and_close(sidecar_dir, machine)
+        _write_hard_limit_pause(sidecar_dir, resume_at=_AFTER - 1.0)
+        sent = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert sent.decision_value == _CONTINUE
+
+    def test_no_continue_before_a_hard_limit_pause_reaches_its_resume_time(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        _answer_and_close(sidecar_dir, machine)
+        _write_hard_limit_pause(sidecar_dir, resume_at=_AFTER + 3600.0)
+        outcome = _resume(sidecar_dir, machine, _resume_facts(""))
+        assert outcome.decision_value != _CONTINUE
+        assert outcome.payload is None
 
     def test_no_continue_while_awaiting_human(self, sidecar_dir: Path, machine: Any) -> None:
         # The entry an agent's `[awaiting-human]` stop writes (the stop writer

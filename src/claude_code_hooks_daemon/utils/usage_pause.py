@@ -55,6 +55,17 @@ FIELD_WINDOW: Final[str] = "window"
 FIELD_USED_PERCENTAGE: Final[str] = "used_percentage"
 FIELD_CEILING: Final[str] = "ceiling"
 FIELD_REASON: Final[str] = "reason"
+FIELD_CAUSE: Final[str] = "cause"
+
+#: Why the pause exists (Plan 00523 Phase 2b). A CEILING pause is this host's own
+#: limit and gets one `/compact` from the supervisor; a HARD_LIMIT pause is the
+#: account's limit, where every request fails until the reset, so it gets no
+#: injection and is never lifted before ``resume_at`` by a reading under a ceiling.
+#: An absent or unrecognised value reads as CEILING: the meaning every record had
+#: before the field existed, and never more injection than that.
+CAUSE_CEILING: Final[str] = "ceiling"
+CAUSE_HARD_LIMIT: Final[str] = "hard_limit"
+CAUSES: Final[frozenset[str]] = frozenset({CAUSE_CEILING, CAUSE_HARD_LIMIT})
 
 #: The closed set of usage windows a pause can be waiting on.
 WINDOW_FIVE_HOUR: Final[str] = "five_hour"
@@ -80,6 +91,7 @@ class UsagePause:
     ``paused_at`` and ``resume_at`` are epoch seconds. ``used_percentage`` and
     ``ceiling`` are the window's reading and the configured limit it crossed.
     ``reason`` is short human-readable text for logs and the status line.
+    ``cause`` is one of :data:`CAUSES`.
     """
 
     session_id: str
@@ -89,6 +101,7 @@ class UsagePause:
     used_percentage: float
     ceiling: float
     reason: str
+    cause: str = CAUSE_CEILING
 
     @property
     def expires_at(self) -> float:
@@ -141,7 +154,21 @@ def _validation_error(pause: UsagePause) -> str | None:
         return f"resume_at must be within {MAX_PAUSE_SPAN_SECONDS:g} s of paused_at"
     if not pause.reason.strip():
         return "a usage pause needs a reason"
+    if pause.cause not in CAUSES:
+        return f"unknown pause cause {pause.cause!r}; expected one of {sorted(CAUSES)}"
     return None
+
+
+def _cause_of(value: object) -> str:
+    """The recorded cause, or :data:`CAUSE_CEILING` for an absent or unrecognised one.
+
+    Checked as a string first, so a list or dict value can never raise on the
+    membership test. Coerced rather than rejected: rejecting would read the record
+    as no pause at all, which lets every injection through.
+    """
+    return (
+        CAUSE_HARD_LIMIT if isinstance(value, str) and value == CAUSE_HARD_LIMIT else CAUSE_CEILING
+    )
 
 
 def _validate(pause: UsagePause) -> None:
@@ -170,6 +197,7 @@ def write_usage_pause(daemon_untracked_dir: Path, pause: UsagePause) -> Path:
         FIELD_USED_PERCENTAGE: pause.used_percentage,
         FIELD_CEILING: pause.ceiling,
         FIELD_REASON: pause.reason,
+        FIELD_CAUSE: pause.cause,
     }
     tmp_path = unique_temp_path(final_path)
     try:
@@ -196,7 +224,8 @@ def _parse(data: object) -> UsagePause | None:
         return None
     if paused_at is None or resume_at is None or used is None or ceiling is None:
         return None
-    pause = UsagePause(session_id, paused_at, resume_at, window, used, ceiling, reason)
+    cause = _cause_of(data.get(FIELD_CAUSE))
+    pause = UsagePause(session_id, paused_at, resume_at, window, used, ceiling, reason, cause)
     return pause if _validation_error(pause) is None else None
 
 
