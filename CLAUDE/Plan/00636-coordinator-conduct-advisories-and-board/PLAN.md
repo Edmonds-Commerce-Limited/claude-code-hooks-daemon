@@ -146,9 +146,17 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
     block, as auto_continue_stop reads it), a real event and a session id.
     Residual: the last assistant message is not freshness-resolved (no poll),
     and the marker itself is written later, by auto_continue_stop.
-  - N5: the own-refusal lookback counts only blocks after the last real user
-    prompt (`recent_stop_hook_block_texts_this_chain`); feedback entries and
-    tool results are not prompts.
+  - N5: the own-refusal pass needs the guard's refusal in the chain after the
+    last real prompt (`recent_stop_hook_block_texts_this_chain`) with no
+    non-daemon block after it: a goal continuation closes the chain. A daemon
+    deny after it (auto_continue_stop) keeps the pass; the review's stricter
+    "latest block must be ours" made the two handlers refuse each other in
+    turn (found by `test_no_third_refusal_in_the_chain`) (PR 234 review,
+    `subagent-reports/261124-pr234-review-n4-n5-n6.md`). Feedback entries and
+    tool results are not prompts; a mid-continuation `queued_command` prompt
+    is. Review Suggestion 1 partly taken: a compaction summary is not a prompt;
+    task notifications, bus deliveries and other `isMeta` entries still count
+    as prompts (bounded: at most one extra refusal, never a loop).
   - N6: an unreadable stop message gets no v1 `auto` advisory (still refused
     where the flags are readable).
 - [ ] ⬜ **Task 2.2**: s3 directives register.

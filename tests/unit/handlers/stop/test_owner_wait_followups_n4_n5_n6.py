@@ -170,3 +170,104 @@ class TestN6UnreadableStopMessageIsNotAnnouncedAsAWait:
             "teamchat_kit": "/opt/teamchat",
         }
         assert guard.handle(hook_input).decision is Decision.DENY
+
+
+def _tool_use(i: int) -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": f"t{i}", "name": "Bash", "input": {}}],
+        },
+    }
+
+
+def _write(path: Path, entries: list[dict[str, Any]]) -> str:
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    return str(path)
+
+
+class TestN5OnlyTheGuardsOwnLatestBlockEarnsThePass:
+    """Review of PR 234: a goal continuation after the guard's refusal closes the chain."""
+
+    def _entries(self, first_reason: str | None) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = [_assistant(AWAITING)]
+        if first_reason is not None:
+            entries += [_feedback(first_reason), _tool_use(0), _tool_result(), _assistant(AWAITING)]
+        entries.append(_feedback("[ccy-supervisor] automated goal -- Work on Plan 00636"))
+        for i in range(1, 20):
+            entries += [_tool_use(i), _tool_result()]
+        entries.append(_assistant(AWAITING))
+        return entries
+
+    def test_a_goal_continuation_after_the_refusal_does_not_pass_a_new_wait(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _chain(_Bus(_stale()))
+        first = _run(chain, tmp_path, [_assistant(AWAITING)])
+        assert first.decision is Decision.DENY
+        result = _run(chain, tmp_path, self._entries(first.reason), active=True)
+        assert result.decision is Decision.DENY
+        assert "R-STOP-OWNER-WAIT-UNBUMPED" in result.reason
+
+    def test_the_new_refusal_becomes_the_latest_block_so_the_next_restop_passes(
+        self, tmp_path: Path
+    ) -> None:
+        chain = _chain(_Bus(_stale()))
+        first = _run(chain, tmp_path, [_assistant(AWAITING)])
+        entries = [*self._entries(first.reason), _feedback(first.reason), _assistant(AWAITING)]
+        assert _run(chain, tmp_path, entries, active=True).decision is Decision.ALLOW
+
+    def test_a_queued_prompt_attachment_closes_the_chain(self, tmp_path: Path) -> None:
+        queued = {
+            "type": "attachment",
+            "attachment": {"type": "queued_command", "commandMode": "prompt", "prompt": "hi"},
+        }
+        path = _write(tmp_path / "t.jsonl", [_feedback(OWN_BLOCK), queued, _assistant("x")])
+        assert recent_stop_hook_block_texts_this_chain(path, lookback=200) == ()
+
+    def test_a_queued_non_prompt_attachment_does_not_close_the_chain(self, tmp_path: Path) -> None:
+        queued = {
+            "type": "attachment",
+            "attachment": {"type": "queued_command", "commandMode": "bash", "prompt": "ls"},
+        }
+        path = _write(tmp_path / "t.jsonl", [_feedback(OWN_BLOCK), queued])
+        assert len(recent_stop_hook_block_texts_this_chain(path, lookback=200)) == 1
+
+    def test_an_attachment_only_own_refusal_before_a_prompt_is_dropped(self, tmp_path: Path) -> None:
+        attachment = {
+            "type": "attachment",
+            "attachment": {
+                "type": "hook_blocking_error",
+                "hookEvent": "Stop",
+                "blockingError": {"blockingError": OWN_BLOCK},
+            },
+        }
+        path = _write(tmp_path / "t.jsonl", [attachment, _prompt(), _assistant("x")])
+        assert recent_stop_hook_block_texts_this_chain(path, lookback=200) == ()
+
+    def test_a_compaction_summary_is_not_a_prompt(self, tmp_path: Path) -> None:
+        summary = {
+            "type": "user",
+            "isCompactSummary": True,
+            "message": {"role": "user", "content": "This session is being continued"},
+        }
+        path = _write(tmp_path / "t.jsonl", [_feedback(OWN_BLOCK), summary, _assistant("x")])
+        assert len(recent_stop_hook_block_texts_this_chain(path, lookback=200)) == 1
+
+
+class TestN6AllowPolicyOnAnUnreadableStopMessage:
+    def test_allow_policy_allows_with_no_context(self, tmp_path: Path) -> None:
+        guard = _Guard(_Bus(BusUnreadable("x")), ENABLED)
+        guard._on_unreadable_bus = "allow"
+        hook_input: dict[str, Any] = {
+            "hook_event_name": "Stop",
+            "session_id": "lead",
+            "transcript_path": str(tmp_path / "missing.jsonl"),
+            "stop_hook_active": False,
+            "teamchat_runtime": "/run/user/1000/teamchat/s1",
+            "teamchat_kit": "/opt/teamchat",
+        }
+        result = guard.handle(hook_input)
+        assert result.decision is Decision.ALLOW
+        assert result.context == []

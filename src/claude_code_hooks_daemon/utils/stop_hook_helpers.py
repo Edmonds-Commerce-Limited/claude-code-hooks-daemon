@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 _STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
 _HOOK_BLOCKING_ERROR_TYPE = "hook_blocking_error"
 _STOP_EVENT = "Stop"
+_QUEUED_COMMAND_TYPE = "queued_command"
+_QUEUED_PROMPT_MODE = "prompt"
 _DEFAULT_BLOCK_LOOKBACK = 20
 
 # Byte offset representing the start of a file.
@@ -306,8 +308,23 @@ def _block_texts(
 
 
 def _entry_is_real_prompt(entry: dict[str, Any]) -> bool:
-    """Whether an entry is a user prompt: a user message with text, not a tool result."""
-    if entry.get("type") != "user":
+    """Whether an entry starts a new stop chain.
+
+    Counted: any user message with text (a human message, a cron tick, a task
+    notification, a bus delivery, an ``isMeta`` notice) and a prompt the human
+    typed mid-continuation, which Claude Code records only as a
+    ``queued_command`` attachment. Not counted: a tool result, and an
+    auto-compaction summary (``isCompactSummary``). Over-counting costs at most
+    one extra refusal, bounded by Claude Code's consecutive-block override.
+    """
+    if entry.get("type") == "attachment":
+        attachment = entry.get("attachment")
+        return (
+            isinstance(attachment, dict)
+            and attachment.get("type") == _QUEUED_COMMAND_TYPE
+            and attachment.get("commandMode") == _QUEUED_PROMPT_MODE
+        )
+    if entry.get("type") != "user" or entry.get("isCompactSummary") is True:
         return False
     message = entry.get("message")
     if not isinstance(message, dict) or message.get("role") != "user":
