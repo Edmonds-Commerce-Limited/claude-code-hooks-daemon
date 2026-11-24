@@ -8458,8 +8458,18 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Source**: relayed by lts-infra.1 (peer, authority none) from fedora-desktop.1; not yet reproduced from this seat.
 
-**Evidence**: the confirmation line uses a fixed "a" before the category name, so the category `action` reads "wrote a action entry" (should be "an action"). The script is `CLAUDE/Plan/mkplan.bash` (daemon-owned; the bundled template must stay byte-identical). PR 235 edits the same script (Phase 3), so the fix lands after it merges.
+**Evidence**: the confirmation line uses a fixed "a" before the category name, so the category `action` reads "wrote a action entry" (should be "an action"). The script is `CLAUDE/Plan/mkplan.bash` (daemon-owned; the bundled template must stay byte-identical). PR 235 (Phase 3) edited the same script and has merged, so the fix is unblocked.
 
 **Severity**: LOW, cosmetic.
 
 **Status**: ⬜ Open. Test-first: a test that every category's confirmation line reads correctly (a/an by first letter); fix in the deployed script and the template together.
+
+### N724 — owner_directives_register: two low findings from the independent review of PR 237
+
+**Source**: independent review of PR 237 (Plan 00636 Task 2.2); both are non-blocking and the review approved the PR.
+
+**Evidence**: (L1) `handlers/user_prompt_submit/owner_directives_register.py` ~184-189: when a seat is not armed (a worker), its prompt counter is never stored, so the seat is re-probed on every human prompt instead of every N; the resolver's TTL cache keeps it cheap. (L2) ~175 and ~181: the register is parsed before the machine-prompt check, so a malformed entry logs a WARNING on every prompt, machine turns included; sessions with no session id all share one `unknown` counter.
+
+**Severity**: LOW (log noise and a wasted probe per prompt; no behaviour change).
+
+**Status**: ⬜ Open. Store the counter before the seat check (or cache the not-armed result); parse the register once and cache it, or check for a machine prompt first; key the counter by something safer than the shared `unknown` when the session id is missing. Test-first.
