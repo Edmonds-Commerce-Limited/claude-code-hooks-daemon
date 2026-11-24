@@ -19,8 +19,8 @@ import stat
 import subprocess
 import tarfile
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     claim,
     fingerprint_at,
     open_dir,
+    release,
 )
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar, pack
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
@@ -115,8 +116,12 @@ def _claim(
     store: ArchiveStore | None = None,
     checkout: str = CHECKOUT,
     at: datetime | None = None,
+    archive_id: str | None = None,
 ) -> Claimed:
-    """Claim ``name``; with a store, record the claim first (at ``at``, else NOW) as a sweep does."""
+    """Claim ``name``; with a store, record the claim first (at ``at``, else NOW) as a sweep does.
+
+    ``archive_id`` is the archive the claim names (a fresh id unless given).
+    """
     expected = fingerprint_at(root_fd, name, max_inodes=MAX)
     if store is not None:
         record_claim(
@@ -124,7 +129,7 @@ def _claim(
             expected,
             parent_fd=root_fd,
             name=name,
-            archive_id=new_archive_id(),
+            archive_id=new_archive_id() if archive_id is None else archive_id,
             original_path=f"untracked/scratch/{name}",
             checkout=checkout,
             at=NOW if at is None else at,
@@ -134,8 +139,19 @@ def _claim(
     return result
 
 
+def _claimed_id(store: ArchiveStore, name: str) -> str:
+    """The archive id the latest claim of ``name`` recorded; a fresh id when none did."""
+    claims = [
+        e
+        for e in store.read_events().events
+        if isinstance(e, ClaimEvent) and PurePosixPath(e.original_path).name == name
+    ]
+    return claims[-1].archive_id if claims else new_archive_id()
+
+
 def _record(name: str, store: ArchiveStore, handle: Claimed, tar: TarTool) -> ArchiveRecord:
-    result = pack(handle, store, new_archive_id(), tar=tar, max_inodes=MAX)
+    """Pack under the id the claim recorded, as a sweep does (``_apply_row``)."""
+    result = pack(handle, store, _claimed_id(store, name), tar=tar, max_inodes=MAX)
     return ArchiveRecord(
         archive_id=result.archive_id,
         original_path=f"untracked/scratch/{name}",
@@ -1110,7 +1126,8 @@ def _adopted(
     )
     record = store.read_index().by_id(adopted.archive_id)
     assert record is not None and ADOPT_PROOF_ID in record.proof_ids
-    _claim(root_fd, "e1", store)
+    # The claim names the adopted archive: only the archive a claim names proves it.
+    _claim(root_fd, "e1", store, archive_id=adopted.archive_id)
     return record
 
 
@@ -1341,6 +1358,56 @@ class TestResumeAfterARestore:
         _entry(root)
         _archived_with(root_fd, store, tar, at=datetime(2026, 11, 19, tzinfo=UTC))
         assert _resume(root_fd, store, tar).outcome == "removed"
+
+    def test_a_clock_step_back_before_the_pack_still_finishes_a_partial_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """PR 251 review F2: the claim's own archive proves it whatever the clock said."""
+        _entry(root)
+        _archived_with(
+            root_fd, store, tar, at=NOW, packed_at=(NOW - timedelta(seconds=1)).isoformat()
+        )
+        (root / (CLAIM_PREFIX + "e1") / "a.txt").unlink()  # crash mid-removal
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "removed"
+        assert list(root.iterdir()) == []
+
+    @pytest.mark.parametrize("second_claim_at", [NOW, datetime(2026, 11, 10, tzinfo=UTC)])
+    def test_a_renamed_back_tree_claimed_again_is_not_proved_by_the_first_claims_archive(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        second_claim_at: datetime,
+    ) -> None:
+        """PR 251 review F1: only the latest claim's archive proves it, by order, not by clock."""
+        _entry(root)
+        first = datetime(2026, 11, 13, 13, tzinfo=UTC)
+        handle, old = _archived_with(
+            root_fd,
+            store,
+            tar,
+            at=first,
+            verdict="UNCERTAIN",
+            packed_at=first.isoformat(),
+            expires_at=(first + timedelta(hours=168)).isoformat(),
+        )
+        release(handle, "test: renamed back after a refused removal")
+        _claim(root_fd, "e1", store, at=second_claim_at)  # crash before the pack
+        resumed = resume_claimed(
+            root_fd,
+            CLAIM_PREFIX + "e1",
+            store,
+            checkout=CHECKOUT,
+            tar=tar,
+            max_inodes=MAX,
+            clock=clock,
+            retention_hours={"DISPOSABLE": 24.0, "UNCERTAIN": 168.0},
+        )
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
+        assert _archive_path(store, old).exists()
 
 
 def _archive_path(store: ArchiveStore, record: ArchiveRecord) -> Path:

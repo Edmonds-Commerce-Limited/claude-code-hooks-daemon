@@ -229,38 +229,29 @@ def claim_event_covers(
     )
 
 
-def _first_claim_at(
+def _latest_claim(
     store: ArchiveStore,
     checkout: str,
     name: str,
     info: os.stat_result,
     birth: BirthStamp | None,
-) -> datetime | None:
-    """When the earliest claim event covering this very inode was written; None: no such event.
+) -> ClaimEvent | None:
+    """The last-appended claim event covering this very inode; None: no such event.
 
-    An event whose ``at`` cannot be parsed refuses the resume (fail closed).
+    "Last" is the events file's append order, never the events' ``at``: the
+    wall clock can step back, the order of appends under the store lock cannot.
     """
     try:
         events = store.read_events().events
     except StoreRefused as exc:
         raise RemoveRefused(str(exc)) from exc
-    times = [
-        _parsed(event.at, "claim event")
+    covering = [
+        event
         for event in events
         if isinstance(event, ClaimEvent)
         and claim_event_covers(event, checkout=checkout, name=name, info=info, birth=birth)
     ]
-    return min(times) if times else None
-
-
-def _parsed(stamp: str, what: str) -> datetime:
-    try:
-        moment = datetime.fromisoformat(stamp)
-    except ValueError as exc:
-        raise RemoveRefused(f"unparseable {what} time {stamp!r}") from exc
-    if moment.tzinfo is None:
-        raise RemoveRefused(f"{what} time {stamp!r} names no time zone")
-    return moment
+    return covering[-1] if covering else None
 
 
 def _names_entry(record: ArchiveRecord, name: str) -> bool:
@@ -533,9 +524,10 @@ def resume_claimed(
 ) -> Resumed:
     """Finish or undo a leftover claim.
 
-    Each record of this checkout naming the entry is tried, newest first, whole
-    and then as a partly removed tree; the first that verifies authorises the
-    removal. An archive that is expired, due or not complete authorises
+    Only the archive the latest covering claim event names is tried (a claim
+    records the id its pack will use, so a record of an earlier claim of the
+    same tree, or of an earlier tree of that name, never proves it), whole and
+    then as a partly removed tree; when it verifies it authorises the removal. An archive that is expired, due or not complete authorises
     nothing: against an intact tree it is skipped, and against a partly removed
     tree it leaves the claim stuck for a human to restore from it (never
     removed, never renamed back). When none verifies, the tree is renamed back; when its name is taken,
@@ -559,20 +551,19 @@ def resume_claimed(
         birth = birth_stamp(parent_fd, claimed_name)
     except OSError as exc:
         raise RemoveRefused(f"cannot read the birth of {claimed_name!r}: {exc}") from exc
-    claimed_at = _first_claim_at(store, checkout, name, info, birth)
-    if claimed_at is None:
+    latest = _latest_claim(store, checkout, name, info, birth)
+    if latest is None:
         return Resumed(
             name, "foreign", f"no claim record covers {claimed_name!r}: not a sweep's; left alone"
         )
-    # Task 3.9 finding 2: only a pack of THIS tree may prove it. A record packed
-    # before the claim is of an earlier tree of the same name (one since
-    # restored), whose retention is not this tree's.
+    # Only the archive the latest claim names may prove the tree (Task 3.9
+    # finding 2; PR 251 review F1/F2). Any other record naming the entry is of
+    # an earlier claim of it, whose tree and retention are not this one's. The
+    # binding is by id, so no clock reading takes part in it.
     candidates = [
         r
         for r in reversed(records)
-        if r.checkout == checkout
-        and _names_entry(r, name)
-        and _parsed(r.packed_at, "packed_at") >= claimed_at
+        if r.checkout == checkout and _names_entry(r, name) and r.archive_id == latest.archive_id
     ]
     unchecked = False
     for record in candidates:
@@ -629,7 +620,11 @@ def resume_claimed(
             return Resumed(name, "removed", f"archive {record.archive_id} verified", removed)
     if unchecked:
         return Resumed(name, "stuck", "a recorded archive could not be checked (tar did not run)")
-    reason = "no recorded archive verifies" if candidates else "no record names the entry"
+    reason = (
+        "the claim's archive does not verify"
+        if candidates
+        else f"no record of the claim's archive {latest.archive_id} (not packed)"
+    )
     try:
         rename_noreplace(parent_fd, claimed_name, name)
     except (OSError, ClaimRefused) as exc:
