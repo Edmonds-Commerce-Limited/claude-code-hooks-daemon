@@ -192,7 +192,21 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   asserted another seat's code (needs bus reads and judgement); the text form
   of `gh run view`; a long `in_progress` run (stuck while running) is not
   read; the default threshold is the builder's choice, not an owner ruling.
-- [ ] ⬜ **Task 2.4**: s8 wind-down mode.
+- [x] ✅ **Task 2.4** (advise-only part): s8 wind-down. No new handler: when a
+  coordinator-seat stop with no `STOPPING BECAUSE:` line is refused
+  (`R-STOP-NO-REASON`) and the Stop payload's `background_tasks` reports a
+  `running` entry, the refusal ends with a wind-down note (`utils/wind_down.py`):
+  the running ids (str ids of safe characters only, at most 5, truncated), one
+  stop line that passes and carries no human-wait wording, and `ListAgents` /
+  `TaskStop` for finished teammates still listed as running. Rides only on the
+  existing refusal, because a Stop ALLOW with context makes Claude Code continue
+  (a standalone advisory would itself cost a failed stop). Same
+  `coordinator_advisory_armed` gate; the probe runs only when a running task is
+  reported. Nothing newly allowed or refused. `branch_stop_guard` already hands
+  agent-owned branches over (`branch_stop_gate._hand_over`), so it is not a
+  cause. **Open, not built**: which denies made up the 109 failed stops (not
+  on disk); whether wind-down is a real session mode with entry and exit, and
+  which guards it may relax (owner decision: any relaxation loosens a guard).
 - [ ] ⬜ **Task 2.5**: s7 board and B5 liveness.
 - [ ] ⬜ **Task 2.6**: s11 carry-over; B1, B4, B6 guidance.
 
@@ -224,7 +238,9 @@ land here. Not gated on a seat. Each task starts with a failing test.
   (Task 2.1a: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-*.md` and
   `config-changes/v3.77.0.yaml`; Task 2.2: `release-notes/096-*.md` and the
   `owner_directives_register` entry in the same `config-changes` file; Task
-  2.3: `release-notes/097-*.md` and the `ci_state_reading` entry there).
+  2.3: `release-notes/097-*.md` and the `ci_state_reading` entry there; Task
+  2.4: `release-notes/098-*.md`, no config change so no `config-changes`
+  entry).
 
 ## Delivery & Milestones
 
