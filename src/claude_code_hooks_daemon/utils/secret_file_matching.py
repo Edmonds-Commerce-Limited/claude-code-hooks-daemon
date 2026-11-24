@@ -1117,6 +1117,70 @@ def _token_literal_residue(token: str) -> str:
     return residue
 
 
+def _class_aware_literal_residue(token: str) -> str:
+    """:func:`_token_literal_residue` with each bracket removed as bash scans it.
+
+    Ledger 00474 N720 item 2: :data:`_BRACKET_EXPRESSION_RE` closes a bracket
+    at its first ``]``, so ``[x[:lower:]]d_rsa`` left ``]d_rsa``, which is no
+    part of any stem. Here a class (``[:lower:]``, ``[=a=]``, ``[.a.]``) is one
+    member, a ``]`` first is a member, and a backslash escapes the next
+    character, as :func:`_bracket_end` reads it.
+
+    A token past :func:`_bash_bracket_scan_fits` gets the old residue: it can
+    name no file, and the scan is quadratic in its brackets.
+    """
+    if not _bash_bracket_scan_fits(token):
+        return _token_literal_residue(token)
+    kept: list[str] = []
+    index = 0
+    while index < len(token):
+        if token[index] == "[":
+            end = _bracket_end(token, index)
+            if end is not None:
+                index = end
+                continue
+        if token[index] not in "*?":
+            kept.append(token[index])
+        index += 1
+    return "".join(kept)
+
+
+#: Longest token, and most ``[``, the bash-aware bracket scan reads. A file name
+#: is at most 255 bytes, so a longer token names none; the bounds keep the
+#: scan's worst case (one pass per unclosed ``[``) small.
+_BASH_BRACKET_SCAN_MAX_CHARS: Final[int] = 1024
+_BASH_BRACKET_SCAN_MAX_OPENERS: Final[int] = 64
+
+
+def _bash_bracket_scan_fits(token: str) -> bool:
+    """Is ``token`` within the bounds :func:`_bracket_end` is run on?"""
+    return (
+        len(token) <= _BASH_BRACKET_SCAN_MAX_CHARS
+        and token.count("[") <= _BASH_BRACKET_SCAN_MAX_OPENERS
+    )
+
+
+def _bracket_end(token: str, start: int) -> int | None:
+    """Index just past the bracket opening at ``token[start]``; None when it never closes."""
+    index = start + 1
+    if index < len(token) and token[index] in _BRACKET_NEGATION_CHARS:
+        index += 1
+    first = True
+    while index < len(token):
+        char = token[index]
+        if char == "]" and not first:
+            return index + 1
+        first = False
+        kind = token[index + 1] if index + 1 < len(token) else ""
+        if char == "[" and kind and kind in ":=.":
+            close = token.find(kind + "]", index + 2)
+            if close != -1:
+                index = close + 2
+                continue
+        index += 2 if char == "\\" else 1
+    return None
+
+
 def _suffix_prefix_overlap_length(a: str, b: str) -> int:
     """Longest ``k`` such that ``a``'s last ``k`` characters equal ``b``'s
     first ``k`` characters (0 when no such ``k`` exists).
@@ -1350,6 +1414,45 @@ def _wildcard_regex(glob: str) -> re.Pattern[str]:
 
 
 def _globs_can_intersect(a: str, b: str) -> bool:
+    """:func:`_globs_can_intersect_read` with brackets read by this module's reader, OR bash's.
+
+    Ledger 00474 N720 item 2: the module's bracket regex closes a bracket at
+    its first ``]``, so ``id[x[:punct:]]rsa`` left a stray ``]`` and never met
+    ``id_rsa``. Each bracket bash would close (:func:`_bracket_end`) is also
+    read as one ``?``; that reading is added, never put in place of the old.
+    Like the old reading's own gate, it is only trusted when the token keeps
+    :data:`_MIN_GLOB_OVERLAP_CHARS` literal characters once its brackets are
+    gone: ``[[:alnum:]_]*`` asserts no name, and text alone cannot judge it.
+    """
+    if ("[" in a or "[" in b) and len(_class_aware_literal_residue(a)) >= _MIN_GLOB_OVERLAP_CHARS:
+        bash_a, bash_b = _brackets_as_one_character(a), _brackets_as_one_character(b)
+        if (bash_a, bash_b) != (a, b) and _globs_can_intersect_read(bash_a, bash_b):
+            return True
+    return _globs_can_intersect_read(a, b)
+
+
+def _brackets_as_one_character(token: str) -> str:
+    """``token`` with each bracket bash would close (:func:`_bracket_end`) replaced by ``?``.
+
+    Unchanged past :func:`_bash_bracket_scan_fits`, which leaves the old reading alone.
+    """
+    if not _bash_bracket_scan_fits(token):
+        return token
+    kept: list[str] = []
+    index = 0
+    while index < len(token):
+        if token[index] == "[":
+            end = _bracket_end(token, index)
+            if end is not None:
+                kept.append("?")
+                index = end
+                continue
+        kept.append(token[index])
+        index += 1
+    return "".join(kept)
+
+
+def _globs_can_intersect_read(a: str, b: str) -> bool:
     """True when some single string could be matched by BOTH ``a`` and ``b``,
     each read as a ``*``/``?`` glob (N10, Plan 00466 review).
 
@@ -3006,6 +3109,19 @@ def iter_protected_mentions(
             return None
         return found
 
+    if context == "bash":
+        # Ledger 00474 N720 item 4: judged BEFORE the token streams, whose brace
+        # stream can stop at a size limit first; a `b?n` word in the ordinary
+        # stream is judged before that limit, and an extglob word is too.
+        for word in _extglob_words(command):
+            if deadline is not None and time.monotonic() > deadline:
+                raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
+            pattern = _glob_link_mention(
+                word, effective, patterns, project_root, default_semantics=default_globs()
+            )
+            if pattern is not None and word not in yielded_tokens:
+                yielded_tokens.add(word)
+                yield (pattern, word)
     for token in tokens:
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
@@ -3024,14 +3140,6 @@ def iter_protected_mentions(
         if pattern is not None and token not in yielded_tokens:
             yielded_tokens.add(token)
             yield (pattern, token)
-    if context == "bash":
-        for word in _extglob_words(command):
-            pattern = _glob_link_mention(
-                word, effective, patterns, project_root, default_semantics=default_globs()
-            )
-            if pattern is not None and word not in yielded_tokens:
-                yielded_tokens.add(word)
-                yield (pattern, word)
 
 
 #: What ends an unquoted shell word outside an extglob group.
@@ -3548,6 +3656,11 @@ def _token_mention_judged(
                     return matched
         if context != "bash":
             continue
+        matched = _case_blind_expansion_mention(
+            raw_form, expansions, patterns, project_root, default_globs, expands_globs
+        )
+        if matched is not None:
+            return matched
         # Everything below judges a word bash would glob-expand. Text that a
         # pure text consumer takes quoted is literal to bash, so it is only
         # ever matched by the literal check above (ledger 00474 N269).
@@ -3558,7 +3671,10 @@ def _token_mention_judged(
                 continue
             basename = form.rsplit("/", maxsplit=1)[-1]
             residue = _token_literal_residue(basename)
-            if not residue:
+            # Ledger 00474 N720 item 2: the bracket-aware residue is a second
+            # candidate, never a replacement, so no word judged before is lost.
+            residues = tuple(dict.fromkeys((residue, _class_aware_literal_residue(basename))))
+            if not any(residues):
                 continue
             # Where the token's wildcard sits decides which overlap
             # direction is a plausible truncation (see the helper).
@@ -3604,14 +3720,15 @@ def _token_mention_judged(
                 # protected file and must still deny -- see
                 # ``_both_edges_residue_is_near_total_stem_match``.
                 # Ledger 00474 N716: case-blind unless bash's defaults (no nocaseglob) are certain.
-                if (
-                    len(residue) >= _MIN_GLOB_OVERLAP_CHARS
-                    and _residue_in_stem(residue, stem_basename, default_globs)
+                if any(
+                    len(candidate) >= _MIN_GLOB_OVERLAP_CHARS
+                    and _residue_in_stem(candidate, stem_basename, default_globs)
                     and (
                         not (has_leading_wildcard and has_trailing_wildcard)
-                        or _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
+                        or _both_edges_residue_is_near_total_stem_match(candidate, stem_basename)
                     )
                     and _component_spells(basename, stem_basename, ignore_case=not default_globs())
+                    for candidate in residues
                 ):
                     return pattern
                 # Plan 00272 gap fix (G2), GATED to leading-wildcard
@@ -3632,13 +3749,17 @@ def _token_mention_judged(
                 # test adds nothing there but false positives (a token
                 # like "sample*" or "id*" sharing a coincidental 2-char
                 # edge with "id_rsa" was denied before this gate).
-                if pattern.startswith("*") and _glob_token_overlaps_stem(
-                    residue,
-                    stem_basename,
-                    leading_wildcard=has_leading_wildcard,
-                    trailing_wildcard=has_trailing_wildcard,
-                    pattern_has_trailing_wildcard=_has_trailing_wildcard(pattern),
-                    token_has_wildcard_after_leading=_has_wildcard_after_leading(basename),
+                if (
+                    residue
+                    and pattern.startswith("*")
+                    and _glob_token_overlaps_stem(
+                        residue,
+                        stem_basename,
+                        leading_wildcard=has_leading_wildcard,
+                        trailing_wildcard=has_trailing_wildcard,
+                        pattern_has_trailing_wildcard=_has_trailing_wildcard(pattern),
+                        token_has_wildcard_after_leading=_has_wildcard_after_leading(basename),
+                    )
                 ):
                     return pattern
         if _is_glob_shaped(raw_form):
@@ -3710,6 +3831,31 @@ def _token_mention_judged(
             if found is not None:
                 return found
         return _overflow_mention(token, effective_cwds, patterns)
+    return None
+
+
+def _case_blind_expansion_mention(
+    raw_form: str,
+    expansions: list[str],
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    default_globs: Callable[[], bool],
+    expands_globs: Callable[[], bool],
+) -> str | None:
+    """The protected glob a finite bracket's expansion names under ``nocaseglob``, else None.
+
+    Ledger 00474 N720 item 1: ``[I]D_RSA`` expands to a literal spelling that
+    the literal check compares case-exactly, while bash with ``nocaseglob``
+    matches the bracketed word case-blind. Unless bash's defaults are certain,
+    each expansion is compared with every pattern with both case-folded.
+    """
+    if expansions == [raw_form] or not expands_globs() or default_globs():
+        return None
+    folded = [pattern.casefold() for pattern in patterns]
+    for form in expansions:
+        matched = first_matching_glob(form.casefold(), folded, project_root=project_root)
+        if matched is not None:
+            return patterns[folded.index(matched)]
     return None
 
 
@@ -3806,9 +3952,12 @@ def _strict_link_mention(
     bases = effective_cwds(command, cwd)
     default_globs = _default_globs_for(command)
     for token, start in tokens:
-        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
+        word = unquoted[start : start + len(token)]
+        has_glob_character = any(char in _GLOB_CHARACTERS for char in word)
+        # Ledger 00474 N720 item 4: an extglob word holds none of `*?[` and still expands.
+        globbed = has_glob_character or holds_extglob_opener(word)
         for form in _normalised_token_forms(token):
-            if index is not None and globbed and _is_glob_shaped(form):
+            if index is not None and has_glob_character and _is_glob_shaped(form):
                 match = index.glob_matches(form, bases, default_expansion=default_globs())
                 if match is not None:
                     return match
@@ -4697,6 +4846,11 @@ def _leads_to_directory(listed: _ListedEntry) -> bool:
     return listed.leads_to_directory
 
 
+def holds_extglob_opener(text: str) -> bool:
+    """Does ``text`` hold an extglob opener (``@(``, ``!(``...), a glob with none of ``*?[``?"""
+    return _EXTGLOB_OPENER.search(text) is not None
+
+
 def _component_is_pattern(component: str) -> bool:
     """Is ``component`` a pattern bash may expand: a wildcard, a bracket or an extglob."""
     return (
@@ -4843,6 +4997,9 @@ def _bracket_regex(pattern: str, start: int) -> tuple[str, int] | None:
         if char == "[" and following and following in _BRACKET_CLASS_KINDS:
             return _ANY_NAME_REGEX, len(pattern)
         if following == "-" and index + 2 < len(pattern) and pattern[index + 2] != "]":
+            if pattern[index + 2] < char:
+                # A reversed range the regex engine refuses: anything (N720, fail closed).
+                return _ANY_NAME_REGEX, len(pattern)
             members.append(f"{re.escape(char)}-{re.escape(pattern[index + 2])}")
             index += 3
             continue

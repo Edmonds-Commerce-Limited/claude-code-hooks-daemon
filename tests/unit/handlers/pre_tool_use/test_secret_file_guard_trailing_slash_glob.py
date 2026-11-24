@@ -348,7 +348,8 @@ class TestReviewFindings:
         from claude_code_hooks_daemon.utils.protected_file_index import _segments_match
 
         started = time.perf_counter()
-        assert _segments_match([name], [glob]) is False
+        # The case-blind reading (N719) is the slower one: it also adds a folded pattern.
+        assert _segments_match([name], [glob], ignore_case=True) is False
         assert time.perf_counter() - started < scaled_seconds(_BACKTRACK_BUDGET_SECONDS)
 
     @pytest.mark.parametrize(
@@ -368,7 +369,7 @@ class TestReviewFindings:
     def test_atomic_stars_keep_the_same_answers(self, glob: str, name: str, expected: bool) -> None:
         from claude_code_hooks_daemon.utils.protected_file_index import _segments_match
 
-        assert _segments_match([name], [glob]) is expected
+        assert _segments_match([name], [glob], ignore_case=False) is expected
 
     def test_a_glob_under_a_symlinked_literal_parent_is_judged(self, tmp_path: Path) -> None:
         (tmp_path / "up").symlink_to(tmp_path)

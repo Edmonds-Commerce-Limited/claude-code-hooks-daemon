@@ -198,7 +198,8 @@ class ProtectedFileIndex:
         names = [name for name, is_link in _listed_or_unresolvable(parent) if is_link]
         hits: list[tuple[str, str, bool]] = []
         for name in names:
-            if not _segments_match([name], [parts[first]]):
+            # Case-exact as before: no caller here knows the shell's case option.
+            if not _segments_match([name], [parts[first]], ignore_case=False):
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             real = os.path.realpath(link)
@@ -337,7 +338,11 @@ class ProtectedFileIndex:
                 glob_parts, _ = _glob_parts(reading, default_expansion)
                 for entry in self.files:
                     for root in self._roots():
-                        if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
+                        if _segments_match(
+                            _components(f"{root}/{entry.relpath}"),
+                            glob_parts,
+                            ignore_case=not default_expansion,
+                        ):
                             return entry.pattern
         return None
 
@@ -378,10 +383,14 @@ class ProtectedFileIndex:
                     parts = _components(f"{root}/{entry.relpath}")
                     for depth in range(1, len(parts)):
                         directory = "/" + "/".join(parts[:depth])
-                        if _segments_match(parts[:depth], glob_parts):
+                        if _segments_match(
+                            parts[:depth], glob_parts, ignore_case=not default_expansion
+                        ):
                             found[directory] = None
                         for through_parts, real, link in throughs:
-                            if _segments_match(parts[:depth], through_parts):
+                            if _segments_match(
+                                parts[:depth], through_parts, ignore_case=not default_expansion
+                            ):
                                 found[link + directory[len(real) :]] = None
             if literal == len(glob_parts) - 1:
                 for link in self._matching_symlinked_directories(glob_parts):
@@ -408,7 +417,7 @@ class ProtectedFileIndex:
         names = [name for name, is_link in _listed_or_unresolvable(parent) if is_link]
         links: list[str] = []
         for name in names:
-            if not _segments_match([name], [last]):
+            if not _segments_match([name], [last], ignore_case=False):
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             target = os.path.realpath(link)
@@ -576,19 +585,146 @@ def _skipped_below(base: str, absolute: str, skip: SkipHook) -> bool:
     return False
 
 
-def _segments_match(path: Sequence[str], glob: Sequence[str]) -> bool:
-    """Do the components of ``path`` match those of ``glob``, as the shell would?"""
+def _segments_match(path: Sequence[str], glob: Sequence[str], *, ignore_case: bool) -> bool:
+    """Do the components of ``path`` match those of ``glob``, as the shell would?
+
+    ``ignore_case`` is for a caller that cannot rule ``nocaseglob`` out
+    (Ledger 00474 N719): a pattern component then also matches case-blind.
+    """
     if not glob:
         return not path
     head, rest = glob[0], glob[1:]
     if head == _RECURSIVE_COMPONENT:
-        return any(_segments_match(path[skip:], rest) for skip in range(len(path) + 1))
+        return any(
+            _segments_match(path[skip:], rest, ignore_case=ignore_case)
+            for skip in range(len(path) + 1)
+        )
     if not path:
         return False
     name = path[0]
     if name.startswith(_HIDDEN_PREFIX) and not head.startswith(_HIDDEN_PREFIX):
         return False
-    return _component_pattern(head).fullmatch(name) is not None and _segments_match(path[1:], rest)
+    return _component_matches(head, name, ignore_case) and _segments_match(
+        path[1:], rest, ignore_case=ignore_case
+    )
+
+
+def _component_matches(glob: str, name: str, ignore_case: bool) -> bool:
+    """Does one glob component match ``name``: case-exactly, or case-blind when allowed?
+
+    Ledger 00474 N719: with ``nocaseglob`` possible (``ignore_case``), bash matches
+    a PATTERN component case-blind; a component with no pattern characters is
+    still compared exactly, as bash compares it. The case-blind reading is added
+    to the exact one, never put in its place, so nothing matched before is lost.
+    This index's own reader stays the translator: it reads a POSIX class as its
+    members, where the shared one widens it to any name, which against the files
+    that really exist would deny every class-bearing glob in their directory.
+    """
+    if _component_pattern(glob).fullmatch(name) is not None:
+        return True
+    if not ignore_case or not _has_glob_syntax(glob):
+        return False
+    if len(glob) > _FOLD_MAX_CHARS or glob.count("[") > _FOLD_MAX_OPENERS:
+        return False
+    return _component_pattern(_case_folded_glob(glob)).fullmatch(name) is not None
+
+
+#: Longest component given the case-blind reading. A file name is at most 255
+#: bytes, so a longer component names none, and the bracket scan is quadratic in it.
+_FOLD_MAX_CHARS: Final[int] = 1024
+_FOLD_MAX_OPENERS: Final[int] = 64
+
+
+@lru_cache(maxsize=1024)
+def _case_folded_glob(glob: str) -> str:
+    """``glob`` as bash reads it under ``nocaseglob``: each letter also matches its other case.
+
+    A POSIX class is left as it is: bash 5.2 does not fold one (``[[:upper:]]``
+    matches no lower-case name with ``nocaseglob`` on).
+    """
+    out: list[str] = []
+    position = 0
+    while position < len(glob):
+        char = glob[position]
+        if char == "\\" and position + 1 < len(glob):
+            out.append(_both_cases(glob[position + 1]) or glob[position : position + 2])
+            position += 2
+            continue
+        if char == "[":
+            folded = _case_folded_bracket(glob, position + 1)
+            if folded is not None:
+                out.append(folded[0])
+                position = folded[1]
+                continue
+        out.append(_both_cases(char) or char)
+        position += 1
+    return "".join(out)
+
+
+def _both_cases(char: str) -> str | None:
+    """``[xX]`` for a letter with a one-character other case, else None."""
+    other = char.swapcase()
+    if len(other) != 1 or other == char:
+        return None
+    return f"[{char}{other}]"
+
+
+def _case_folded_bracket(glob: str, start: int) -> tuple[str, int] | None:
+    """The bracket opened just before ``start`` with each letter member's other case added.
+
+    Parsed as :func:`_bracket_expression` parses it; None when it never closes.
+    """
+    position = start
+    members: list[str] = []
+    if position < len(glob) and glob[position] in _BRACKET_NEGATIONS:
+        members.append(glob[position])
+        position += 1
+    first = True
+    while position < len(glob):
+        char = glob[position]
+        if char == "]" and not first:
+            return "[" + "".join(members) + "]", position + 1
+        first = False
+        if glob.startswith("[:", position):
+            close = glob.find(":]", position + 2)
+            if close != -1 and glob[position + 2 : close] in _POSIX_CLASSES:
+                members.append(glob[position : close + 2])
+                position = close + 2
+                continue
+        escaped = char == "\\" and position + 1 < len(glob)
+        if escaped:
+            position += 1
+            char = glob[position]
+        if glob.startswith("-", position + 1) and glob[position + 2 : position + 3] not in (
+            "",
+            "]",
+        ):
+            high = glob[position + 2]
+            members.append(_escaped_member(char) + "-" + _escaped_member(high))
+            low_other, high_other = char.swapcase(), high.swapcase()
+            if (
+                len(low_other) == 1
+                and len(high_other) == 1
+                and (low_other, high_other)
+                != (
+                    char,
+                    high,
+                )
+            ):
+                members.append(_escaped_member(low_other) + "-" + _escaped_member(high_other))
+            position += 3
+            continue
+        members.append(_escaped_member(char))
+        other = char.swapcase()
+        if len(other) == 1 and other != char:
+            members.append(_escaped_member(other))
+        position += 1
+    return None
+
+
+def _escaped_member(char: str) -> str:
+    """A bracket member written so :func:`_bracket_expression` reads it as that one character."""
+    return "\\" + char if char in "\\]-[!^" else char
 
 
 @lru_cache(maxsize=1024)

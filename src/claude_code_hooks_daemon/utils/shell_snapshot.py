@@ -10,7 +10,7 @@ The hook payload names no snapshot and nothing inside one names a session, so
 the running shell's own snapshot cannot be picked out. The verdict is therefore
 the narrow one the owner ruled: bash's default expansion is assumed only when
 EVERY readable snapshot records both options, and ``nocaseglob`` (Ledger 00474
-N716), as off. Any snapshot that turns
+N716), as off, and ``globasciiranges`` (N719) as on. Any snapshot that turns
 either on, that cannot be read, that does not record both, or no snapshot at
 all, leaves the caller on the conservative reading. So does a command that
 runs ``shopt`` or ``set -O`` itself, since it may switch the options on for its
@@ -40,16 +40,24 @@ SNAPSHOT_DIRNAME: Final[str] = "shell-snapshots"
 MAX_SNAPSHOTS_READ: int = 200
 
 _GLOB_OPTIONS: Final[tuple[str, ...]] = ("globstar", "dotglob", "nocaseglob")
+#: Options bash's default reading needs ON: certain mode reads a bracket range in
+#: ASCII order, which only ``globasciiranges`` guarantees (Ledger 00474 N719).
+_GLOB_OPTIONS_ON: Final[tuple[str, ...]] = ("globasciiranges",)
 _SHOPT_LINE: Final[re.Pattern[str]] = re.compile(
-    r"^[ \t]*shopt[ \t]+-(?P<state>[su])[ \t]+(?P<option>globstar|dotglob|nocaseglob)[ \t]*$",
+    r"^[ \t]*shopt[ \t]+-(?P<state>[su])[ \t]+"
+    r"(?P<option>globstar|dotglob|nocaseglob|globasciiranges)[ \t]*$",
     re.MULTILINE,
 )
 #: A command that can change the options for its own run: ``shopt ...``, ``set -O ...``,
-#: ``bash -O ...``; ``GLOBIGNORE`` (dot names match) or ``BASHOPTS`` (any option) set
+#: ``bash -O ...`` (also inside a shell's flag cluster, ``bash -xO``/``-Ox``: Ledger
+#: 00474 N720; another program's cluster, ``ls -lO``, switches nothing);
+#: ``GLOBIGNORE`` (dot names match) or ``BASHOPTS`` (any option) set
 #: without ``shopt``; or code the guard does not read run first (``BASH_ENV``, ``source``,
 #: ``.``, ``eval``), which may run ``shopt`` itself (Ledger 00474 N716).
 _SWITCHES_OPTIONS: Final[re.Pattern[str]] = re.compile(
-    r"\bshopt\b|(?<!\S)[-+]O\b|\b(?:GLOBIGNORE|BASHOPTS|BASH_ENV)\b|\b(?:source|eval)\b"
+    r"\bshopt\b|(?<!\S)[-+]O\b"
+    r"|\b(?:ba|da|k|z)?sh\b[^;&|\n]*?(?<!\S)[-+][A-Za-z]*O[A-Za-z]*\b"
+    r"|\b(?:GLOBIGNORE|BASHOPTS|BASH_ENV)\b|\b(?:source|eval)\b"
     r"|(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*\.[ \t]",
     re.MULTILINE,
 )
@@ -124,7 +132,7 @@ def _signature(directory: Path) -> tuple[_Signature, list[str]]:
 
 
 def _records_both_off(path: Path) -> bool:
-    """Does the snapshot record every option of :data:`_GLOB_OPTIONS` as off, and none as on?"""
+    """Does the snapshot record :data:`_GLOB_OPTIONS` off and :data:`_GLOB_OPTIONS_ON` on, only?"""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
@@ -135,7 +143,9 @@ def _records_both_off(path: Path) -> bool:
             level=logging.DEBUG,
         )
         return False
-    states: dict[str, set[str]] = {option: set() for option in _GLOB_OPTIONS}
+    states: dict[str, set[str]] = {option: set() for option in (*_GLOB_OPTIONS, *_GLOB_OPTIONS_ON)}
     for match in _SHOPT_LINE.finditer(text):
         states[match.group("option")].add(match.group("state"))
-    return all(states[option] == {"u"} for option in _GLOB_OPTIONS)
+    return all(states[option] == {"u"} for option in _GLOB_OPTIONS) and all(
+        states[option] == {"s"} for option in _GLOB_OPTIONS_ON
+    )

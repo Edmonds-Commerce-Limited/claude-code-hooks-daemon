@@ -8420,9 +8420,14 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Evidence**: not reproduced as a leak. The index is a cache. The N716 tests show that every N716 reproducer is denied with the index switched off, so the walk and the spelling checks, not the index, carry the verdict. Two shapes are not modelled anywhere: a range read under a non-ASCII collation when `globasciiranges` is off (`[a-c]` can then match `B`), and `${x:-word}` defaults (the N710 review's finding 7).
 
-**Severity**: Low (defence in depth; no reproducer reads a protected file).
+**Severity**: HIGH. N720 item 1 is the reproducer this entry lacked: `shopt -s nocaseglob; cat kit/lib/[I]D_RSA` reads the file.
 
-**Status**: ⬜ Open. Route the index matcher's component matching through `secret_file_matching._component_regex` (case-blind unless bash's defaults are certain), test-first. Add `globasciiranges` to the snapshot options that must be recorded, or read ranges case-blind.
+**Status**: 🔄 Fixed on branch `fix-n710-secret-guard-glob-later-parts`, together with N720 item 1 (builder report `subagent-reports/261124-n720-plain-defects-opus-builder.md`); awaiting independent review.
+
+- **The index matcher.** It now also matches a pattern component case-blind unless bash's defaults are certain (`_segments_match(..., ignore_case=not default_expansion)`). A component with no pattern characters is still compared exactly, as bash compares it.
+- **Not routed through `_component_regex`.** That reader widens a POSIX class to any name, and against on-disk files that denied every class-bearing glob in the file's directory. The index keeps its own class-aware reader, with a case-blind reading added.
+- **`globasciiranges`.** It is now a required snapshot option and must be recorded ON.
+- **Still not modelled:** the `${x:-word}` default.
 
 ### N720 — secret-file guard: residual bypasses found by the independent review of PR 232 (all also allowed on main; PR 232 is a strict improvement)
 
@@ -8432,7 +8437,21 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Severity**: HIGH (security): a protected file's contents can be read through a link.
 
-**Status**: ⬜ Open. Direction to consider (owner design call, since it trades usability): the guard enumerates option-setting syntax, and an enumeration cannot be complete (item 3 is unbounded). A fail-closed alternative is to deny any command whose glob-relevant shell state cannot be established statically (dynamic command names, `eval`, `trap`, `printf -v`, `-O`, `--rcfile`, `source`, `.` in any position) when a protected-file link exists under the project, and to keep the narrow allow for the plain commands of normal repo work. Test-first with the review's reproducers; then an independent security review.
+**Status**: 🔄 Partly fixed on branch `fix-n710-secret-guard-glob-later-parts`, test-first, awaiting independent review. The builder report is `subagent-reports/261124-n720-plain-defects-opus-builder.md`. Fixed items:
+
+- **Item 1, with N719.** A finite bracket's expansions are compared case-blind whenever bash's defaults are not certain.
+- **Item 2.** A bash-aware bracket reading is added to the old one, in the stem residue and in the two-glob intersection.
+- **Item 3, `-O` in a flag cluster only.**
+- **Item 4.** An extglob opener counts as a glob after a scan gives up, and extglob words are judged before the brace stream.
+- **LOW items.** A reversed range no longer raises. `globasciiranges` is now required.
+
+Still open:
+
+- **The rest of item 3.** It waits on the doctrine amendment (`ARCHITECTURE.md:866-867`) and on the decision report `261124-security-decisions-q66-n720-fable.md` (Decision B).
+- **Item 5.**
+- **The `awk` LOW item.**
+
+Direction to consider for the open items (owner design call, since it trades usability): the guard enumerates option-setting syntax, and an enumeration cannot be complete (item 3 is unbounded). A fail-closed alternative is to deny any command whose glob-relevant shell state cannot be established statically (dynamic command names, `eval`, `trap`, `printf -v`, `-O`, `--rcfile`, `source`, `.` in any position) when a protected-file link exists under the project, and to keep the narrow allow for the plain commands of normal repo work. Test-first with the review's reproducers; then an independent security review.
 
 ### N721 — R-GIT-WORKTREE-REMOVE-FORCE calls a tracked file lost although a remote ref holds its exact content
 
