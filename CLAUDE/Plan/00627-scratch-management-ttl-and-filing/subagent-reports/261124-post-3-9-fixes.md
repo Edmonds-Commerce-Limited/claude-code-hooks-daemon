@@ -1,6 +1,6 @@
 # Post-Task-3.9 fixes: progress and handoff
 
-**Status: partial.** Steps 1 and 2 of 6 are done, committed and pushed. The agent stopped after it went over its context budget. Steps 3 to 6 are left for a fresh agent.
+**Status: complete** (fourth agent; see the last section). Every step is done, committed and pushed. PR #251 is open and not merged; the full QA gate is the coordinator's.
 
 - **Branch:** `plan-00635-host-seat-lane-guard`. The name is historical: it is a merged branch reused because the merged pool is at its cap.
 - **Worktree:** `/workspace/untracked/worktrees/plan-00635-host-seat-lane-guard`.
@@ -118,3 +118,12 @@ Steps 4, 5 and 6, then the PR #251 body, as listed above.
 - **7.** NIGGLES.md (Plan 00474): ACLs / `security.capability` not refused; step-2 resume test never seen failing on old code; other `worktree_blockers` callers keep a check-to-remove gap.
 - **8.** PR #251 body: findings 1-4 fixed, open-descriptor row closed, open items above. Ends with the Claude Code generated line.
 - Pre-push: `scripts/qa/error_hiding_exclusions.json` was NOT changed for the new `FileNotFoundError` catches (they use `log_and_continue`; the audit test passed). Invariant pairs, bandit and changed_tests_map not re-checked for step 5a.
+
+## Continuation (fourth agent): steps 5b to 9 done
+
+- **5b (commit 444c9a265):** a linked-worktree `--apply` sets `expire=False` (`cli.py` `_scratch_apply`), says so on stderr, and the consent prompt says expiry runs from the main checkout only. Test `test_apply_in_a_linked_worktree_expires_none_of_the_main_checkouts_archives` seen RED first (main's archive expired), plus a main-checkout control. DESIGN.md row closed; the reverse direction (main judging worktree-packed archives) is written as an owner question there and in N735. Release note 106 extended.
+- **6 (commit 1ac9bb1ca, plus a follow-up):** PLAN.md Task 3.9 done with the verdict; Task 6B.0 notes Q66 is peer-confirmed only. 6B not built.
+- **7 (commit 79adbc455):** NIGGLES N732 (ACLs, `security.capability`), N733 (resume test never seen RED), N734 (other `worktree_blockers` callers), N735 (owner question).
+- **8:** no file changes. black, ruff (incl. B009/B010), mypy clean on all 13 changed src files; bandit (all severities) shows only a pre-existing B101 at `cli.py:12055`; the error-hiding auditor reports nothing per file; declared invariant pairs hold (18 rows); changed modules map to their tests by name; cold import works; release note 106 has no number clash on main or open PRs.
+- **9:** PR #251 body replaced (findings 1-4, the two rows, open items, historical branch name).
+- **Trailer:** commits use Opus 5.5 per the harness attribution reminder, not the requested Sonnet 5.5.
