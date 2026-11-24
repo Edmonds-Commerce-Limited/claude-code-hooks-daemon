@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
-from tests.support import teamchat as fx
 
 from claude_code_hooks_daemon.config.models import TeamSeatConfig
 from claude_code_hooks_daemon.constants import HookInputField
@@ -39,6 +38,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     reset_shared_resolvers,
 )
 from claude_code_hooks_daemon.utils.wind_down import WIND_DOWN_HEADING
+from tests.support import teamchat as fx
 
 #: Every handler carrying ``_team_seat`` today. A new one fails the pin until
 #: it is given an arming payload below.
@@ -147,13 +147,13 @@ def _team_handlers() -> list[Handler]:
     for name in registry.list_handlers():
         handler_cls = registry.get_handler_class(name)
         assert handler_cls is not None, name
-        if "_team_seat" not in getattr(handler_cls.__init__, "__code__").co_names:
+        if "_team_seat" not in handler_cls.__init__.__code__.co_names:
             continue
         handler = handler_cls()
         if hasattr(handler, "_team_seat"):
-            setattr(handler, "_team_seat", TeamSeatConfig())
+            handler._team_seat = TeamSeatConfig()
             if hasattr(handler, "_directives"):
-                setattr(handler, "_directives", DIRECTIVES)
+                handler._directives = DIRECTIVES
             found.append(handler)
     return found
 
@@ -264,7 +264,7 @@ def _approval_check() -> Handler:
 
 
 def _resolved(handler: Handler, runner: Callable[..., CommandOutcome]) -> Handler:
-    setattr(handler, "_resolver", SeatContextResolver(runner=runner))
+    handler._resolver = SeatContextResolver(runner=runner)
     return handler
 
 
@@ -364,7 +364,7 @@ def _run_every_team_payload(tmp_path: Path, *, fresh_resolver_each: bool) -> Non
     handlers = _team_handlers()
     assert {type(h).__name__ for h in handlers} == TEAM_HANDLER_CLASSES
     for handler in handlers:
-        assert getattr(handler, "_resolver") is None, type(handler).__name__
+        assert handler._resolver is None, type(handler).__name__
         if fresh_resolver_each:
             reset_shared_resolvers()
         for build in PAYLOADS[_event_dir(handler)]:

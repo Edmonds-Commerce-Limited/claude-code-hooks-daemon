@@ -127,6 +127,7 @@ rules:
       - tests/integration/test_acceptance_contract.py
       - tests/integration/test_acceptance_negative_case_requirement.py
       - tests/integration/test_acceptance_test_coverage.py
+      - tests/integration/test_bare_claude_code_environment.py
       - tests/integration/test_bash_write_blindness_coverage.py
       - tests/integration/test_claude_md_guidance_coverage.py
       - tests/integration/test_declared_behaviour_matches_source.py

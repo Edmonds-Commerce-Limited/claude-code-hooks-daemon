@@ -9425,6 +9425,7 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
         2 when the config cannot be read.
     """
     from claude_code_hooks_daemon.config.loader import ConfigLoader
+    from claude_code_hooks_daemon.config.models import TeamSeatConfig
     from claude_code_hooks_daemon.config_optimisation.checklist import (
         build_checklist,
         optional_suggestions,
@@ -9435,7 +9436,6 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
         git_worktree_paths,
         suggest_claudemd_excludes,
     )
-    from claude_code_hooks_daemon.config.models import TeamSeatConfig
     from claude_code_hooks_daemon.core.relevance import RelevanceContext
     from claude_code_hooks_daemon.utils.teamchat_seat import teams_declared
 

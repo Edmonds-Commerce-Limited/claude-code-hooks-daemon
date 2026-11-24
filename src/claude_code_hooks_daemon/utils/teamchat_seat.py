@@ -62,7 +62,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.constants.protocol import (
+    TEAMCHAT_KIT_ENV_VAR,
+    TEAMCHAT_RUNTIME_ENV_VAR,
+    HookInputField,
+)
 from claude_code_hooks_daemon.core.relevance import Relevance
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
@@ -77,8 +81,8 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-RUNTIME_ENV_VAR: Final[str] = "TEAMCHAT_RUNTIME"
-KIT_ENV_VAR: Final[str] = "TEAMCHAT_KIT"
+RUNTIME_ENV_VAR: Final[str] = TEAMCHAT_RUNTIME_ENV_VAR
+KIT_ENV_VAR: Final[str] = TEAMCHAT_KIT_ENV_VAR
 #: The kit command that shows peers' state (the coordinator board, Plan 00636).
 STATUS_COMMAND: Final[str] = "teamchat status"
 WHOAMI_ARGS: Final[tuple[str, ...]] = ("whoami", "--json")

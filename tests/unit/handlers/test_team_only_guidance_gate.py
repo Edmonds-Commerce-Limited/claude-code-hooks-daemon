@@ -49,7 +49,7 @@ TEAM_ONLY_GUIDANCE: tuple[type[Handler], ...] = (
 def _with_seat(handler_cls: type[Handler], config: TeamSeatConfig | None) -> Handler:
     """A handler with ``config`` injected the way the registry injects it."""
     handler = handler_cls()
-    setattr(handler, "_team_seat", config)
+    handler._team_seat = config
     return handler
 
 

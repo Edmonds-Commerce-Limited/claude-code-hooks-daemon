@@ -19,6 +19,8 @@ Usage:
 
 from __future__ import annotations
 
+from typing import Final
+
 
 class HookInputField:
     """Hook input field names (snake_case) - single source of truth.
@@ -250,7 +252,18 @@ class RequestEnvelopeField:
     RELAY_UNUSED = "relay_unused"
 
 
+#: The session environment variables a teamchat seat is read from. Defined in
+#: this leaf module because both ``daemon.server`` (stamping them on the
+#: payload) and ``utils.teamchat_seat`` (reading them) need them, and the seat
+#: module reaches the ``daemon`` package through ``safe_signal``: a definition
+#: in ``teamchat_seat`` makes a cold import circular.
+TEAMCHAT_RUNTIME_ENV_VAR: Final[str] = "TEAMCHAT_RUNTIME"
+TEAMCHAT_KIT_ENV_VAR: Final[str] = "TEAMCHAT_KIT"
+
+
 __all__ = [
+    "TEAMCHAT_KIT_ENV_VAR",
+    "TEAMCHAT_RUNTIME_ENV_VAR",
     "HookInputField",
     "HookOutputField",
     "PermissionDecision",

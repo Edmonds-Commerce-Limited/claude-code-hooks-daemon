@@ -44,7 +44,7 @@ def _block(tmp_path: Path, team_seat: TeamSeatConfig) -> str:
         CiStateReadingHandler,
     ):
         handler = handler_cls()
-        setattr(handler, "_team_seat", team_seat)
+        handler._team_seat = team_seat
         handlers.append(handler)
     claude_md = tmp_path / "CLAUDE.md"
     claude_md.write_text("# P\n")

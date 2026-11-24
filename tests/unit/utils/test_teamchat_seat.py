@@ -10,6 +10,8 @@ from __future__ import annotations
 import builtins
 import logging
 import os
+import subprocess  # nosec B404 - fixed argv, the test's own interpreter
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -951,3 +953,37 @@ class TestRunKitCommand:
         )
         assert outcome is ProbeReason.SIGNAL_NOT_A_PATH
         assert runner.calls == []
+
+
+class TestTheModuleImportsCold:
+    """A fresh interpreter can import the seat module first (PR 250 CI).
+
+    ``teamchat_seat`` reaches ``daemon`` through ``safe_signal``; the daemon
+    package imports ``server``, which needs the teamchat env-var names. If
+    those names live in ``teamchat_seat`` the cold import is circular, which
+    the warm test process never sees because ``daemon`` is already loaded.
+    """
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "claude_code_hooks_daemon.utils.teamchat_seat",
+            "claude_code_hooks_daemon.utils.team_role_gate",
+            "claude_code_hooks_daemon.handlers.post_tool_use",
+            "claude_code_hooks_daemon.handlers.post_tool_use_failure",
+        ],
+    )
+    def test_a_cold_import_succeeds(self, module: str) -> None:
+        import claude_code_hooks_daemon
+
+        src = Path(claude_code_hooks_daemon.__file__).resolve().parents[1]
+        env = {**os.environ, "PYTHONPATH": str(src)}
+        result = subprocess.run(  # nosec B603 - fixed argv
+            [sys.executable, "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
