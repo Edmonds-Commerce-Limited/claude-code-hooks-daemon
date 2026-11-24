@@ -3147,3 +3147,34 @@ class TestUnderShippedDefaultDeadline:
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
         assert result.result.reason.startswith("denied")
+
+
+class TestDuplicateHandlerName:
+    """A duplicate handler NAME on one chain is loud, never fatal and never dropped."""
+
+    def test_duplicate_name_logs_error_once_and_keeps_both(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        chain = HandlerChain(event_type="stop")
+        with caplog.at_level("ERROR", logger=chain_module.logger.name):
+            chain.add(MockHandler("twin", priority=10))
+            chain.add(MockHandler("twin", priority=20))
+            chain.add(MockHandler("twin", priority=30))
+
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert len(errors) == 1
+        message = errors[0].getMessage()
+        assert "twin" in message
+        assert "stop" in message
+        assert "10" in message
+        assert "20" in message
+        assert len(chain) == 3
+
+    def test_distinct_names_log_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        chain = HandlerChain(event_type="stop")
+        with caplog.at_level("DEBUG", logger=chain_module.logger.name):
+            chain.add(MockHandler("one"))
+            chain.add(MockHandler("two"))
+
+        assert [r for r in caplog.records if r.levelname == "ERROR"] == []
+        assert len(chain) == 2

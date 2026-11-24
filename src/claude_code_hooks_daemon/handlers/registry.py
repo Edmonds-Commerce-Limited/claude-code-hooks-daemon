@@ -114,7 +114,9 @@ def event_dir_name_matches_module(event_dir_name: str, module: str) -> bool:
     return event_dir_name in module.split(".")
 
 
-def is_discoverable_handler(attr: object) -> TypeGuard[type[Handler]]:
+def is_discoverable_handler(
+    attr: object, defined_in: str | None = None
+) -> TypeGuard[type[Handler]]:
     """Is this module attribute a handler class discovery should register?
 
     The single definition of that question. It was previously written out three
@@ -132,8 +134,13 @@ def is_discoverable_handler(attr: object) -> TypeGuard[type[Handler]]:
     ``handle`` as abstract cannot be instantiated, so it can never be a handler,
     whatever it is called or wherever it is imported.
 
+    A scan passes ``defined_in`` (the scanned module's name) so a handler class
+    merely IMPORTED into another handler's module (to reuse its helpers) is not
+    found a second time and registered twice.
+
     Args:
         attr: Any attribute read off a scanned module.
+        defined_in: Module name the class must be defined in; None skips the check.
 
     Returns:
         True if this is a concrete, public ``Handler`` subclass.
@@ -144,6 +151,7 @@ def is_discoverable_handler(attr: object) -> TypeGuard[type[Handler]]:
         and attr is not Handler
         and not attr.__name__.startswith(_PRIVATE_PREFIX)
         and not inspect.isabstract(attr)
+        and (defined_in is None or attr.__module__ == defined_in)
     )
 
 
@@ -222,7 +230,7 @@ def iter_builtin_handler_classes() -> Iterator[BuiltinHandlerRef]:
             )
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
-                if is_discoverable_handler(attr):
+                if is_discoverable_handler(attr, module.__name__):
                     yield BuiltinHandlerRef(
                         event_dir=dir_name,
                         config_key=_get_config_key(attr.__name__),
@@ -553,7 +561,7 @@ class HandlerRegistry:
                 module = importlib.import_module(modname)
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if is_discoverable_handler(attr):
+                    if is_discoverable_handler(attr, modname):
                         found[attr.__name__] = attr
                         count += 1
                         logger.debug("Discovered handler: %s", attr.__name__)
@@ -712,7 +720,7 @@ class HandlerRegistry:
 
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if is_discoverable_handler(attr):
+                    if is_discoverable_handler(attr, module_name):
                         config_key = _get_config_key(attr.__name__)
                         # `or {}`: a bare `key:` parses to None. An absent block
                         # has no options to collect, so the default needs no
@@ -780,7 +788,7 @@ class HandlerRegistry:
                 # Find Handler subclasses in the module
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if is_discoverable_handler(attr):
+                    if is_discoverable_handler(attr, module_name):
                         # Check handler-specific config (use config key from HandlerID constant)
                         config_key = _get_config_key(attr.__name__)
                         # Read presence BEFORE the `or {}`: an absent block and a

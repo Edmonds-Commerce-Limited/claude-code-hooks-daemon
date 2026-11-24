@@ -379,69 +379,6 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 IDs: R-STOP-QA-FAILURE, R-STOP-TAUTOLOGICAL-QUESTION, R-STOP-AFTER-TOOL-ERROR, R-STOP-CONFIRMATION-QUESTION, R-STOP-NO-REASON, R-STOP-GOAL-LEDGER, R-STOP-STAND-IN-MISSING
 
-<!-- handler: auto-continue-stop -->
-
-### Stop Explanation Required
-
-Before stopping, **prefix your final message** with `STOPPING BECAUSE:` followed by a clear reason:
-
-```
-STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
-```
-
-**Why**: The stop hook enforces intentional stops. Stopping without an explanation triggers an auto-block that asks you to explain or continue.
-
-**Alternatives**:
-
-- `STOPPING BECAUSE: <reason>` — stops cleanly with explanation
-- Continue working — no need to stop unless all work is genuinely complete
-
-**Do NOT**:
-
-- Stop mid-task without explanation
-- Ask confirmation questions and then stop (the hook auto-continues those)
-- Smuggle a rhetorical continue question inside a `STOPPING BECAUSE:` message ('STOPPING BECAUSE: slice 1 done. Want me to build slice 2?') — this is HARD-BLOCKED; the prefix does not exempt tautological questions. Just continue with the next unit of work
-- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely
-
-**Before asking a question, evaluate it critically**:
-
-- Tautological/rhetorical questions with obvious answers ("Should I continue?", "Would you like me to proceed?") — do NOT ask, just do it
-- Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
-- Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question
-
-**Recovering from a `tool_use_error` — do NOT stop silently**:
-
-Some tool errors require an explicit recovery action, not a halt. The most common shape:
-
-- You call `Edit` or `Write` on a file you have not yet read.
-- Claude Code returns a `tool_use_error` (e.g. "File has not been read yet").
-- The correct recovery is **Read the file, then retry Edit/Write** — **do not stop**. Stopping silently after a tool error triggers a Stop-hook re-entry loop and wastes a turn.
-
-**Rule: Read before Edit/Write.** If you must edit a file you have not read, Read it first in the same turn. The daemon's Stop handler will detect a `tool_use_error` followed by a silent stop and re-fire to force recovery.
-
-**On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
-
-**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron and every declared `persistent_crons` job off**. Put the token immediately after the prefix:
-
-```
-STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B before anything else can move.
-```
-
-The token is matched exactly, so any wording after it works. These older phrasings are also still recognised, and are kept working rather than extended — a new wording is handled by the token, not by adding another phrase here:
-
-- `blocked only on human input`
-- `blocked only on the owner's input`
-- `need user input`
-- `waiting only on the user's decision`
-
-Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick, and every declared job's tick, before it reaches you, at zero token cost. Another cron's tick never clears it, provided its prompt still carries the daemon's `[tick:...]` first line. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks. The marker is the `awaiting-human` session mode, ended only by a human prompt in THIS session; every mode and what it suppresses: `CLAUDE/SessionModes.md`.
-
-**Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
-
-**An `[awaiting-human]` stop must also schedule a one-off stand-in.** With `persistent_crons.enabled`, a main-thread stop that declares it is blocked on the human is denied until `session_crons` holds a cron led by `[tick:stand-in]`; the deny gives the exact `CronCreate` (`recurring: false`, about `options.stand_in_delay_hours` = 3 hours out, valid above 0 and below 24). If the marker is still live when it fires, a `model: fable` sub-agent picks among the options you laid out and the choice is journalled as the stand-in's ruling, never the owner's. It may choose only engineering options: releases, force and remote-branch deletes, QA suppressions, history rewrites, upgrade approvals and anything a guard says to ask the user stay blocked. The stand-in tick is not dropped by the live marker, and a sub-agent or teammate stop is never asked for one.
-
-IDs: R-STOP-QA-FAILURE, R-STOP-TAUTOLOGICAL-QUESTION, R-STOP-AFTER-TOOL-ERROR, R-STOP-CONFIRMATION-QUESTION, R-STOP-NO-REASON, R-STOP-GOAL-LEDGER, R-STOP-STAND-IN-MISSING
-
 ## All other enforced rules
 
 <!-- handler: auto-approve-reads -->
