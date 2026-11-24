@@ -49,12 +49,14 @@ _SHOPT_LINE: Final[re.Pattern[str]] = re.compile(
     re.MULTILINE,
 )
 #: A command that can change the options for its own run: ``shopt ...``, ``set -O ...``,
-#: ``bash -O ...`` (also inside a flag cluster, ``bash -xO``/``-Ox``: Ledger 00474 N720);
+#: ``bash -O ...`` (also inside a shell's flag cluster, ``bash -xO``/``-Ox``: Ledger
+#: 00474 N720; another program's cluster, ``ls -lO``, switches nothing);
 #: ``GLOBIGNORE`` (dot names match) or ``BASHOPTS`` (any option) set
 #: without ``shopt``; or code the guard does not read run first (``BASH_ENV``, ``source``,
 #: ``.``, ``eval``), which may run ``shopt`` itself (Ledger 00474 N716).
 _SWITCHES_OPTIONS: Final[re.Pattern[str]] = re.compile(
-    r"\bshopt\b|(?<!\S)[-+][A-Za-z]*O[A-Za-z]*\b"
+    r"\bshopt\b|(?<!\S)[-+]O\b"
+    r"|\b(?:ba|da|k|z)?sh(?:[ \t]+[-+][A-Za-z]*)*?[ \t]+[-+][A-Za-z]*O[A-Za-z]*\b"
     r"|\b(?:GLOBIGNORE|BASHOPTS|BASH_ENV)\b|\b(?:source|eval)\b"
     r"|(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*\.[ \t]",
     re.MULTILINE,

@@ -79,6 +79,11 @@ class TestVerdict:
             "shopt -s dotglob",
             "set -O globstar",
             "bash -O dotglob -c x",
+            # Ledger 00474 N720: -O inside a shell's flag cluster.
+            "bash -xO dotglob -c x",
+            "bash -Ox dotglob -c x",
+            "/bin/bash -e -xO dotglob -c x",
+            "sh -eO dotglob -c x",
             # Ledger 00474 N716: dot names and case switched on without shopt.
             "GLOBIGNORE=zz; ls *",
             "env BASHOPTS=dotglob bash -c 'ls *'",
