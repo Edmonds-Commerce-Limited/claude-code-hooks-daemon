@@ -97,6 +97,7 @@ class EventRouter:
         """
         self._chains: dict[EventType, HandlerChain] = {
             event_type: HandlerChain(
+                event_type=event_type.value,
                 allow_is_final=event_type in _ALLOW_IS_FINAL_EVENTS,
                 context_transform=(
                     prefix_context_with_tier if event_type in _SESSION_TIER_EVENTS else None

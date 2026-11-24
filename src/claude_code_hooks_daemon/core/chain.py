@@ -447,17 +447,27 @@ class HandlerChain:
             an ALLOW never ends the chain.
     """
 
-    __slots__ = ("_handlers", "_sorted", "allow_is_final", "context_transform")
+    __slots__ = (
+        "_duplicate_names_reported",
+        "_handlers",
+        "_sorted",
+        "allow_is_final",
+        "context_transform",
+        "event_type",
+    )
 
     def __init__(
         self,
         *,
+        event_type: str | None = None,
         allow_is_final: bool = False,
         context_transform: "Callable[[Handler, list[str]], list[str]] | None" = None,
     ) -> None:
         """Initialise empty handler chain.
 
         Args:
+            event_type: Name of the event this chain serves; used only to
+                make a duplicate-registration error say where it happened.
             allow_is_final: Let a terminal ALLOW end the chain (see class
                 docstring). Keyword-only so the opt-in is always spelled out.
             context_transform: Optional per-handler post-processing applied to
@@ -472,15 +482,32 @@ class HandlerChain:
         """
         self._handlers: list[Handler] = []
         self._sorted = True
+        self.event_type = event_type
+        self._duplicate_names_reported: set[str] = set()
         self.allow_is_final = allow_is_final
         self.context_transform = context_transform
 
     def add(self, handler: "Handler") -> None:
         """Add a handler to the chain.
 
+        A second handler with the same name is still added (raising could take
+        down startup, skipping could hide a real handler) but is logged at
+        ERROR, once per name, so a duplicate registration is never silent.
+
         Args:
             handler: Handler to add
         """
+        if handler.name not in self._duplicate_names_reported:
+            existing = self.get(handler.name)
+            if existing is not None:
+                self._duplicate_names_reported.add(handler.name)
+                logger.error(
+                    "Duplicate handler name %r on the %s chain: priorities %s and %s",
+                    handler.name,
+                    self.event_type or "unnamed",
+                    existing.priority,
+                    handler.priority,
+                )
         self._handlers.append(handler)
         self._sorted = False
 

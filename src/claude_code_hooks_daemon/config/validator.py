@@ -171,7 +171,7 @@ class ConfigValidator:
                     module = importlib.import_module(modname)
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
-                        if is_discoverable_handler(attr):
+                        if is_discoverable_handler(attr, modname):
                             # Convert class name to snake_case config key
                             handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
                             handlers.add(handler_config_name)
