@@ -29,13 +29,13 @@ The review's link form needs one correction. Under `nocaseglob`, bash compares a
 
 - **Item 1.**
   - `secret_file_matching._case_blind_expansion_mention` handles the guard's own matching. Unless bash's defaults are certain and the word can expand, it compares each finite-bracket expansion with every pattern, with both sides case-folded.
-  - **N719 (index matcher).** `protected_file_index._segments_match(..., ignore_case=not default_expansion)` adds a case-blind reading for PATTERN components only. The index keeps its own class-aware reader.
+  - **N719 (index matcher).** `protected_file_index._segments_match(..., ignore_case=not default_expansion)` adds a case-blind reading for PATTERN components only. It folds each letter and each letter range, but leaves POSIX classes as they are; this was checked in bash 5.2, where `[[:upper:]]*` lists no lower-case name under `nocaseglob`. The index keeps its own class-aware reader.
   - **Deviation from the decision report.** The report said to route the index through `_component_regex`. That reader widens a POSIX class to "any name", and on the index (on-disk truth) that denied every class-bearing glob in a protected file's directory, which a test caught. So the index matcher was not routed through it.
 - **`globasciiranges`.** It is now a required snapshot option, and it must be recorded as `-s`. The three test snapshot constants were updated so that certain mode still really runs in those tests.
 - **Item 2.** `_class_aware_literal_residue` and `_bracket_end` scan a bracket as bash does: a class counts as one member, a `]` placed first is a member, and a backslash escapes the next character. The new residue is a SECOND candidate at the stem deny gate. The skip gates and the overlap check still use the old residue, so neither can skip something it did not skip before.
   - `_globs_can_intersect` also tries a reading in which each bash-closed bracket stands for one `?`. That reading is used only when at least two literal characters remain. Without that limit, `ls dir/[[:alnum:]_]*` would be denied by text alone.
   - The old reader `_BRACKET_EXPRESSION_RE` is intentionally still used at its other sites. Swapping it out could flip a deny to an allow, which this change must never do.
-- **Item 3a.** In `shell_snapshot._SWITCHES_OPTIONS`, `(?<!\S)[-+][A-Za-z]*O[A-Za-z]*\b` replaces `[-+]O\b`. A side effect is that `curl -LO` now gets the conservative glob reading. That only matters for globs that reach protected files.
+- **Item 3a.** In `shell_snapshot._SWITCHES_OPTIONS`, a new alternative matches a cluster containing `O` that follows a shell command word (`bash`, `sh`, `dash`, `ksh`, `zsh`, with any earlier flags in between). The old `[-+]O\b` stays in place. `ls -lO` is still not treated as a switch.
 - **Item 4.**
   - `_holds_search_or_glob` now counts an extglob opener, which fixes the Bash route.
   - `_strict_link_mention` treats an extglob word as globbed.
@@ -64,7 +64,14 @@ The tests listed below were run with `nice -n 19` in the worktree:
 - `tests/unit/qa/test_audit_error_hiding.py` and `tests/unit/qa/test_check_generated_doc_drift.py`;
 - `tests/unit/handlers/test_session_mode_readers.py`.
 
-The pass counts are recorded in the PR body.
+Results:
+
+- **The `test_secret_file_guard*` files:** 3383 passed, 14 skipped.
+- **utils, config, `tests/unit/qa`, handler instantiation and session-mode readers:** 13665 passed, 28 failed.
+  - One failure was the branch's own: `test_shell_snapshot` pins `ls -lO` as not a switch. It was fixed by matching `-O` inside a cluster only after a shell command word. Rerun: 277 passed across the snapshot, n720, bash-options and default-globs files.
+  - The other 27 are `tests/unit/qa` tests of `llm_qa.py` itself (`main_moved`, `venv_resolution`, `run_test_matrix`). Each one raises `VenvResolutionError`, because this worktree has no venv of its own. That comes from the environment, not from this change.
+- **Release-note and holding-area tests:** 127 passed.
+- **`check_declared_invariant_pairs.py`:** passes.
 
 ## Open items
 
