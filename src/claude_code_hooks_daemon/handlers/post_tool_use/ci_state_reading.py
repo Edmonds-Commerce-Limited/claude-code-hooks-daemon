@@ -179,23 +179,22 @@ class CiStateReadingHandler(PostToolUseHandlerBase):
 
         return [
             AcceptanceTest(
-                title="ci-state reading is silent off a coordinator seat",
-                command="gh run list --limit 3",
+                title="ci-state reading ignores gh named only as text",
+                command='echo "gh run list: queued"',
                 description=(
-                    "Default state check. Outside a teamchat coordinator seat (an"
-                    " acceptance run holds none), running `gh run list` must add NO"
-                    " 'CI STATE READING' context, whatever the runs' states."
-                    " Readings themselves are covered by"
+                    "Negative case, deterministic on any seat. `gh` is not in"
+                    " command position here (it is echo's text) and no gh output"
+                    " exists, so NO 'CI STATE READING' context may be added, even"
+                    " on a coordinator seat. Readings themselves need a queued run"
+                    " and a coordinator seat, which an acceptance run cannot"
+                    " guarantee; they are covered by"
                     " tests/unit/handlers/post_tool_use/test_ci_state_reading.py and"
                     " tests/unit/utils/test_ci_state.py."
                 ),
                 expected_decision=Decision.ALLOW,
                 # Deliberately empty: this test asserts that NOTHING is injected.
                 expected_message_patterns=[],
-                safety_notes=(
-                    "Read-only gh command; advisory handler, never blocks. Needs gh"
-                    " authenticated for this repository."
-                ),
+                safety_notes="Harmless echo; advisory handler, never blocks.",
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=True,

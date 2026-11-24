@@ -9,10 +9,13 @@ makes no network call: the reading is only as fresh as that output.
 
 Readable shapes (``gh`` 2.105, non-TTY):
 
-- ``gh run list``: nine tab-separated columns, status first and the run's
-  creation time (ISO 8601, UTC) last.
+- ``gh run list``: nine tab-separated columns, status first and the current
+  attempt's start time (``startedAt``, ISO 8601, UTC) last.
 - ``--json`` output of ``gh run list`` / ``gh run view``: objects carrying
-  ``status`` and ``createdAt``.
+  ``status`` and ``startedAt`` or ``createdAt``. A re-run keeps the first
+  attempt's ``createdAt`` and moves ``startedAt`` (checked on real runs), so
+  the age is taken from ``startedAt`` and falls back to ``createdAt`` only
+  when ``startedAt`` is missing or unreadable.
 - ``gh pr checks`` (rows or ``--json``): its ``pending`` bucket folds queued and
   running checks together, so it can never say which; the reading points at the
   ``gh run list --json`` command that can.
@@ -63,7 +66,7 @@ _NOT_STARTED_WORD: Final[re.Pattern[str]] = re.compile(
 _SECONDS_PER_MINUTE: Final[int] = 60
 _RESHAPED_LABEL: Final[str] = "reshaped output"
 _SPLIT_COMMAND: Final[str] = (
-    "gh run list --branch <branch> --json databaseId,workflowName,status,createdAt"
+    "gh run list --branch <branch> --json databaseId,workflowName,status,startedAt,createdAt"
 )
 
 
@@ -174,7 +177,9 @@ def _json_readings(data: object, now: datetime, threshold: int) -> list[CiReadin
         run_id = str(item.get("databaseId", "") or "")
         name = str(item.get("workflowName") or item.get("name") or "run")
         label = f"{name} #{run_id}" if run_id else name
-        reading = _run_reading(status.lower(), label, run_id, item.get("createdAt"), now, threshold)
+        started = item.get("startedAt")
+        since = started if _parse_created(started, now) is not None else item.get("createdAt")
+        reading = _run_reading(status.lower(), label, run_id, since, now, threshold)
         if reading is not None:
             readings.append(reading)
     return readings
@@ -253,7 +258,8 @@ def _line(reading: CiReading, threshold_minutes: int) -> str:
         return (
             f"- {reading.label}: STUCK, queued {_minutes(reading.age_seconds or 0)} min (threshold "
             f"{threshold_minutes} min). Check why no runner took it before saying so: "
-            f"`gh run view {reading.run_id} --json status,createdAt,jobs` (runner labels, "
+            f"`gh run view {reading.run_id or '<run-id>'} --json "
+            "databaseId,status,attempt,startedAt,createdAt,jobs` (runner labels, "
             "a concurrency group, an outage)."
         )
     if reading.state is CiState.PENDING_UNSPLIT:

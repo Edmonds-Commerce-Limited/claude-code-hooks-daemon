@@ -142,6 +142,26 @@ class TestJson:
         )
         assert _read(output) == [(CiState.STUCK, "CodeQL #9")]
 
+    def test_a_rerun_is_aged_from_its_attempt_start_not_the_first_creation(self) -> None:
+        """gh keeps createdAt across re-run attempts; startedAt is this attempt's (gh 2.105)."""
+        output = json.dumps(
+            {
+                "databaseId": 9,
+                "workflowName": "QA",
+                "status": "queued",
+                "attempt": 2,
+                "createdAt": "2026-11-23T05:00:00Z",
+                "startedAt": "2026-11-24T05:58:00Z",
+            }
+        )
+        assert _read(output) == [(CiState.QUEUED, "QA #9")]
+
+    def test_an_unreadable_started_at_falls_back_to_created_at(self) -> None:
+        output = json.dumps(
+            {"status": "queued", "createdAt": "2026-11-24T05:58:00Z", "startedAt": ""}
+        )
+        assert _read(output)[0][0] is CiState.QUEUED
+
     def test_queued_json_without_created_at_is_unknown(self) -> None:
         assert _read(json.dumps([{"status": "queued", "databaseId": 3}]))[0][0] is CiState.UNKNOWN
 
@@ -184,6 +204,17 @@ class TestRender:
         assert "STUCK" in text
         assert "60 min" in text
         assert "gh run view 45334494394" in text
+        assert "startedAt" in text
+
+    def test_stuck_without_a_run_id_names_a_placeholder_not_a_blank(self) -> None:
+        output = json.dumps({"status": "queued", "createdAt": "2026-11-23T05:00:00Z"})
+        text = self._render(output)
+        assert "gh run view <run-id>" in text
+        assert "gh run view  " not in text
+
+    def test_the_split_command_asks_for_the_attempt_start(self) -> None:
+        text = self._render("\t".join(["tests", "pending", "0", "u", ""]))
+        assert "startedAt" in text
 
     def test_unknown_never_claims_either_state(self) -> None:
         text = self._render(_row("queued", "garbage"))
