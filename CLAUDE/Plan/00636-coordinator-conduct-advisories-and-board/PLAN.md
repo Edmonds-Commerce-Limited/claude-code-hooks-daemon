@@ -235,7 +235,12 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   is Plan 00633's (Non-Goals). Resume or compact: the return note (B4 return, s11): re-read
   the questions room, the seat's threads, `work-queue list` and the directives
   register before acting. Fixed text, no new store, no Stop advisory.
-  **Open, not built**: Q3 (skill home, so no skill); a bus post at pause entry
+  While a usage pause is live, a resume or compact gets a command-free return
+  line instead (Bash is denied then, and the full note names `work-queue list`).
+  **Open, not built**: B6 ships as always-on text in the conduct note, not the
+  keyed form DESIGN.md (line ~190) describes ("advisory keyed on the usage-pause
+  signal"), because the pause record is cleared on lift, so the length of the
+  absence is lost; the keyed form is deferred. Q3 (skill home, so no skill); a bus post at pause entry
   (the pause tool gate denies it; loosening that is an owner call, with Q16 and
   Plan 00523); what coordinator state s11 carries beyond the existing stores,
   and who may write it (an agent-written store is the Task 2.2 forgery path);

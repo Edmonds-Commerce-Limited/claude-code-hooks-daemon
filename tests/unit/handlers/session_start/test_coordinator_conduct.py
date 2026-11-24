@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import builtins
 import logging
+import time
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from tests.support import teamchat as fx
@@ -27,6 +30,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 from claude_code_hooks_daemon.handlers.session_start.coordinator_conduct import (
@@ -44,6 +48,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     TeamSeat,
     whoami_argv,
 )
+from claude_code_hooks_daemon.utils.usage_pause import UsagePause, write_usage_pause
 
 RUNTIME = "/tmp/teamchat/run-a"
 KIT = "/opt/teamchat-kit"
@@ -187,6 +192,54 @@ class TestReturnNote:
         text = _text(_handler(), _input(source="compact"))
         assert "a lead, not a fact" in text
         assert "is unknown" in text
+
+
+class TestReturnNoteWhilePaused:
+    """A live usage pause denies Bash, so the return note must name no command then."""
+
+    @staticmethod
+    def _pause(tmp_path: Path, session_id: str = "s1") -> None:
+        now = time.time()
+        write_usage_pause(
+            tmp_path,
+            UsagePause(session_id, now - 60, now + 3600, "five_hour", 96.0, 95.0, "ceiling"),
+        )
+
+    def test_live_pause_replaces_the_return_note_with_a_commandless_line(
+        self, tmp_path: Path
+    ) -> None:
+        self._pause(tmp_path)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            text = _text(_handler(), _input(source="resume"))
+        assert CONDUCT in text
+        assert "work-queue" not in text
+        assert "owner_directives_register" not in text
+        lines = text.split("\n")
+        assert "paused on its usage ceiling" in lines[-1]
+        assert "questions room" in lines[-1]
+        assert "pause lifts" in lines[-1]
+        assert "`" not in lines[-1]
+
+    def test_another_sessions_pause_leaves_the_return_note(self, tmp_path: Path) -> None:
+        self._pause(tmp_path, "other")
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert RETURN in _text(_handler(), _input(source="compact"))
+
+    def test_no_pause_keeps_the_return_note_unchanged(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            text = _text(_handler(), _input(source="resume"))
+        assert RETURN in text
+        assert "work-queue list" in text
+
+    def test_pause_does_not_touch_a_startup_session(self, tmp_path: Path) -> None:
+        self._pause(tmp_path)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            text = _text(_handler(), _input(source="startup"))
+        assert text.count("COORDINATOR") == 1
+
+    def test_unreadable_pause_state_counts_as_no_pause(self) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", side_effect=RuntimeError("x")):
+            assert RETURN in _text(_handler(), _input(source="resume"))
 
 
 class TestGate:

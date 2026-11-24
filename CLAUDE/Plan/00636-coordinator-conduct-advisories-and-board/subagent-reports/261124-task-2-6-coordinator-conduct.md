@@ -14,6 +14,7 @@ Built:
 Open, not built (owner):
 
 - Q3: where the skills live, so no skill was built.
+- B6 is always-on text in the conduct note, not the keyed form DESIGN.md describes ("advisory keyed on the usage-pause signal"): the pause record is cleared on lift, so the length of the absence is lost. The keyed form is deferred. One keyed piece exists: on `resume`/`compact` while a pause is live (read via `hook_is_usage_paused`, fail-safe to no pause), the return note is replaced by a command-free line, because Bash is denied during a pause and the full note names `work-queue list`.
 - B6 at pause entry: a "tell the team" step is not possible. The usage-pause tool gate allows only the cron tools, ToolSearch, SendMessage and TaskStop, and denies Bash, so the step could not be carried out and would contradict the directive. Allowing a post means loosening that guard, which is an owner decision (Q16, Plan 00523).
 - s11: what coordinator state to carry beyond the existing stores (work queue, directives register, bus), and who may write it. An agent-written store is the forgery path Task 2.2 declined.
 - The directives register replays up to `prompt_interval - 1` human prompts late after a compaction. Its counter is per session and held in memory, and a compaction keeps the session id. This was read from the code, not tested.

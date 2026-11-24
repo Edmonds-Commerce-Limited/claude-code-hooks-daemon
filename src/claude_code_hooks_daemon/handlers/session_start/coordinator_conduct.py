@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContextResolver,
     SessionSignals,
 )
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
@@ -74,6 +75,16 @@ def return_note() -> str:
         "config) before asking the owner anything again. What you remember from before is "
         "a lead, not a fact: a seat or thread you have not re-read is unknown. If this "
         "seat was away, say on the bus that it is back."
+    )
+
+
+def paused_return_note() -> str:
+    """The return note while a usage pause is live: no command, since Bash is denied."""
+    return (
+        "COORDINATOR RETURN (B4, s11): this session was resumed or compacted while paused on "
+        "its usage ceiling, so its context no longer holds what this seat knew. Once the "
+        "pause lifts, re-read the team's questions room and every thread this seat asked or "
+        "owns before you dispatch, reassign or answer."
     )
 
 
@@ -124,7 +135,12 @@ class CoordinatorConductHandler(SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
         context = [conduct_note()]
         if hook_input.get(_SOURCE_FIELD) in _RETURN_SOURCES:
-            context.append(return_note())
+            # A live pause denies Bash, so the full note's commands cannot run yet.
+            # ``hook_is_usage_paused`` is the very predicate the tool gate denies on,
+            # and is total: an unreadable record reads as no pause (logged there).
+            context.append(
+                paused_return_note() if hook_is_usage_paused(hook_input) else return_note()
+            )
         return AdvisoryResult(decision=Decision.ALLOW, context=context)
 
     def get_claude_md(self) -> str | None:
