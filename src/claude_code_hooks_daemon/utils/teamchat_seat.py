@@ -63,6 +63,7 @@ from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.core.relevance import Relevance
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.safe_signal import (
@@ -880,3 +881,23 @@ def reset_shared_resolvers() -> None:
     """Forget every shared resolver (tests, and a daemon config reload)."""
     with _SHARED_LOCK:
         _SHARED.clear()
+
+
+def teams_declared(config: TeamSeatConfig | None) -> bool:
+    """Whether the project declares teamchat seats (Plan 00474, ruling D4).
+
+    True only for ``team_seat.teams_in_use: true`` with detection on: with
+    detection off no team handler can ever fire, so its guidance would state a
+    policy the project does not have. Guidance is generated at daemon start
+    with no session, so this is a static, declared fact, never a probe.
+    """
+    return config is not None and config.teams_in_use and config.detection_enabled
+
+
+def team_seat_relevance(declared: bool) -> Relevance:
+    """The relevance verdict shared by every team-only handler."""
+    return Relevance.when(
+        declared,
+        present="the project declares teamchat seats (team_seat.teams_in_use)",
+        absent="no teamchat seats declared (team_seat.teams_in_use is false or detection is off)",
+    )

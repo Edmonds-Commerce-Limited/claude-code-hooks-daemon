@@ -23,6 +23,14 @@ class TestDefaults:
     def test_root_config_carries_the_block(self) -> None:
         assert Config().team_seat == TeamSeatConfig()
 
+    def test_teams_are_not_declared_by_default(self) -> None:
+        """D4: a project has no team until it says so; team guidance stays out."""
+        assert TeamSeatConfig().teams_in_use is False
+
+    def test_teams_in_use_can_be_declared(self) -> None:
+        config = Config.model_validate({"team_seat": {"teams_in_use": True}})
+        assert config.team_seat.teams_in_use is True
+
     def test_detection_enabled_follows_the_mode(self) -> None:
         assert TeamSeatConfig().detection_enabled is True
         assert TeamSeatConfig(detection="off").detection_enabled is False

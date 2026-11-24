@@ -220,3 +220,26 @@ class TestSharedResolver:
         before = shared_resolver(None)
         reset_shared_resolvers()
         assert shared_resolver(None) is not before
+
+
+class TestTeamsDeclared:
+    """D4: team guidance is written only where the project declares a team."""
+
+    def test_no_block_declares_no_team(self) -> None:
+        assert teamchat_seat.teams_declared(None) is False
+
+    def test_the_default_block_declares_no_team(self) -> None:
+        assert teamchat_seat.teams_declared(TeamSeatConfig()) is False
+
+    def test_a_declared_team_with_detection_on(self) -> None:
+        assert teamchat_seat.teams_declared(TeamSeatConfig(teams_in_use=True)) is True
+
+    def test_detection_off_never_fires_so_declares_nothing(self) -> None:
+        config = TeamSeatConfig(teams_in_use=True, detection="off")
+        assert teamchat_seat.teams_declared(config) is False
+
+    def test_relevance_names_the_key_either_way(self) -> None:
+        assert teamchat_seat.team_seat_relevance(True).applicable is True
+        absent = teamchat_seat.team_seat_relevance(False)
+        assert absent.applicable is False
+        assert "teams_in_use" in absent.reason

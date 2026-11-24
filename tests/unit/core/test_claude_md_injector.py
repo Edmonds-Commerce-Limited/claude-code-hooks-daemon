@@ -1925,6 +1925,71 @@ class TestADormantHandlerIsNotAnnouncedAsEnforced:
         assert "This project requires a human to close a plan" not in block
 
 
+class _ScopedStub(_StubHandler):
+    """A stub whose guidance applies only where the project declares a capability."""
+
+    def __init__(
+        self,
+        name: str,
+        claude_md: "str | None",
+        rules: "list[Any] | None" = None,
+        *,
+        relevant: bool,
+    ) -> None:
+        super().__init__(name, claude_md, rules)
+        self._relevant = relevant
+
+    def guidance_relevant(self) -> bool:
+        return self._relevant
+
+
+class TestGuidanceIsLeftOutWhereItDoesNotApply:
+    """Plan 00474 decoupling, owner ruling D4.
+
+    A team-only handler stays enabled (it costs nothing off a team seat), but
+    its guidance speaks of seats, questions rooms and buses a project with no
+    team has never heard of. ``guidance_relevant()`` is the narrow, opt-in
+    gate: unlike dormancy it does not switch the handler off, it only keeps
+    its prose and rule rows out of the generated block.
+    """
+
+    @staticmethod
+    def _block(tmp_path: Path, handlers: "list[Any]") -> str:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# P\n")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+        return claude_md.read_text(encoding="utf-8")
+
+    def test_an_irrelevant_handlers_rule_row_is_absent(self, tmp_path: Path) -> None:
+        block = self._block(tmp_path, [_ScopedStub("team", None, [_a_rule()], relevant=False)])
+        assert "This project requires a human to close a plan" not in block
+
+    def test_an_irrelevant_handlers_prose_is_absent(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
+        block = self._block(
+            tmp_path,
+            [
+                _ScopedStub("team", "## team\n\nSeat guidance.", relevant=False),
+                _StubHandler("loud", "## loud\n\nNeighbour guidance."),
+            ],
+        )
+        assert handler_names_in_guidance(block) == ["loud"]
+
+    def test_a_relevant_handler_is_announced(self, tmp_path: Path) -> None:
+        """The control: the gate must not simply drop every scoped handler."""
+        block = self._block(tmp_path, [_ScopedStub("team", None, [_a_rule()], relevant=True)])
+        assert "This project requires a human to close a plan" in block
+
+    def test_the_protocol_is_recognised_structurally(self) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import HasGuidanceRelevance
+
+        assert isinstance(_ScopedStub("team", None, relevant=True), HasGuidanceRelevance)
+        assert not isinstance(_StubHandler("plain", None), HasGuidanceRelevance)
+
+
 class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
     """Ledger 00466 N7: the generated block is a pure function of the
     handler SET, never of caller iteration order.
