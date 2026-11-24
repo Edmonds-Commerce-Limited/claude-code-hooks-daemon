@@ -15,5 +15,10 @@ Open, not built (owner or fedora-desktop):
 - The `teamchat status` output contract, and whether it covers other seats or only this session's teams. Until it is on disk, a reader would invent its format.
 - What fedora-desktop Plan 00251 supplies.
 - Q6: advisory only, or a supervisor action for a down seat.
+- Startup timing: DESIGN section 3 says `whoami` exits 69 "before the seat link". If the link is not there at a `startup` SessionStart, the note is silent on startup and appears only on resume and compact. This is unverified here: there is no binary.
 
-Tests: `tests/unit/handlers/session_start/test_coordinator_board.py`, red first (import error), then green. Covered: coordinator, coordinator duty, unknown role and unresolved probe all armed; declared worker, no team and sub-agent untouched; RuntimeError, RecursionError and ValueError from the resolver; a real resolver with no runtime stays silent and opens no teamchat file.
+Tests: `tests/unit/handlers/session_start/test_coordinator_board.py`, red first (import error), then green. Covered: coordinator, coordinator duty, unknown role and unresolved probe are all armed; declared worker, no team and sub-agent are untouched; RuntimeError, RecursionError and ValueError from the resolver.
+
+A second, real-dispatch class covers the handler as `register_all` builds it (`_team_seat` injected), with the real `SeatContextResolver` and `whoami` parser on a payload carrying the stamped `teamchat_runtime`/`teamchat_kit` fields. Only the subprocess is faked, with `tests/support/teamchat.py` outputs. Results: a coordinator gets the note; a worker or exit 69 gets nothing; with no signals nothing runs. Only `whoami` is ever run, and no file at all is opened (invariant 5, asserted as zero `open` calls, not a filename check). A sub-agent never runs the probe: the main-thread check comes before it (added after review, red first). The server stamps the seat fields on every event, SessionStart included (`server._stamp_teamchat_signals`).
+
+Review fix commit: the sub-agent probe ordering, the real-dispatch tests, and this open item.

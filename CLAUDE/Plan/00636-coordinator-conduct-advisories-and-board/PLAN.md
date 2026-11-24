@@ -218,7 +218,10 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   disk and no binary is here, so nothing reads or summarises the board (a
   parser would be invented); whether it covers other seats or only this
   session's teams; what fedora-desktop Plan 00251 supplies; Q6 (advisory only,
-  or a supervisor action on a down seat; owner decision).
+  or a supervisor action on a down seat; owner decision); and whether the seat
+  link exists at a `startup` SessionStart (if `whoami` still exits 69 then, the
+  note is silent on startup and appears only on resume and compact; unverified
+  here, no binary).
 - [ ] ⬜ **Task 2.6**: s11 carry-over; B1, B4, B6 guidance.
 
 ### Phase 3: Plan tooling (retrospective s13)

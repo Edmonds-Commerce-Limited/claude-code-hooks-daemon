@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
@@ -86,6 +87,8 @@ class CoordinatorBoardHandler(SessionStartHandlerBase):
         return self._resolver
 
     def _armed(self, hook_input: dict[str, Any]) -> bool:
+        if not acts_as_main_thread(hook_input):
+            return False  # a sub-agent is never a coordinator; no whoami probe for it
         try:
             context = self._seat_resolver().resolve(SessionSignals.from_hook_input(hook_input))
             return coordinator_advisory_armed(hook_input, context)

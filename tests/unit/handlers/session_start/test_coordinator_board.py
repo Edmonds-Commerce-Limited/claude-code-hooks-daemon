@@ -12,24 +12,38 @@ from __future__ import annotations
 
 import builtins
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
+from tests.support import teamchat as fx
 
+from claude_code_hooks_daemon.config.models import TeamSeatConfig
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 from claude_code_hooks_daemon.handlers.session_start.coordinator_board import (
     CoordinatorBoardHandler,
 )
 from claude_code_hooks_daemon.utils.teamchat_seat import (
+    CommandOutcome,
+    CommandStatus,
     ProbeReason,
     RoleKind,
     SeatContext,
+    SeatContextResolver,
     SeatState,
     SessionSignals,
     TeamSeat,
+    whoami_argv,
 )
+
+RUNTIME = "/tmp/teamchat/run-a"
+KIT = "/opt/teamchat-kit"
 
 
 def _seats(role: str | None = "coordinator", duty: str = "coordinator") -> SeatContext:
@@ -117,8 +131,11 @@ class TestGate:
         absent = SeatContext.absent(ProbeReason.NO_RUNTIME_SIGNAL)
         assert _text(_handler(absent), _input()) == ""
 
-    def test_subagent_is_untouched(self) -> None:
-        assert _text(_handler(), _input(agent_id="a1b2c3d4e5f6a7b8c")) == ""
+    def test_subagent_is_untouched_and_never_probes(self) -> None:
+        handler = _handler()
+        assert _text(handler, _input(agent_id="a1b2c3d4e5f6a7b8c")) == ""
+        assert isinstance(handler._resolver, _Resolver)
+        assert handler._resolver.calls == 0
 
     def test_unknown_role_stays_armed(self) -> None:
         assert "teamchat status" in _text(_handler(_seats(None)), _input())
@@ -141,22 +158,92 @@ class TestGate:
         assert handler._resolver.calls == 1
 
 
-class TestAbsentDefault:
-    def test_real_resolver_without_runtime_is_silent_and_opens_no_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+class _FakeRunner:
+    """Answers the whoami probe with a fixed outcome and records each argv."""
+
+    def __init__(self, outcome: CommandOutcome) -> None:
+        self.outcome = outcome
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(
+        self, args: Sequence[str], env_overlay: Mapping[str, str], timeout: float
+    ) -> CommandOutcome:
+        self.calls.append(tuple(args))
+        return self.outcome
+
+
+def _registered() -> CoordinatorBoardHandler:
+    """The handler as the daemon builds it: discovered and registered with a team_seat block."""
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    team_seat = TeamSeatConfig()
+    registry.register_all(router, config={}, team_seat=team_seat)
+    for handler in router.get_chain(EventType.SESSION_START).handlers:
+        if isinstance(handler, CoordinatorBoardHandler):
+            assert handler._team_seat is team_seat
+            return handler
+    raise AssertionError("coordinator_board was not registered on SessionStart")
+
+
+def _stamped(**extra: Any) -> dict[str, Any]:
+    """A SessionStart payload carrying the seat signals the server stamps on every event."""
+    return _input(
+        **{HookInputField.TEAMCHAT_RUNTIME: RUNTIME, HookInputField.TEAMCHAT_KIT: KIT}, **extra
+    )
+
+
+def _with_runner(handler: CoordinatorBoardHandler, runner: _FakeRunner) -> CoordinatorBoardHandler:
+    assert handler._team_seat is not None
+    handler._resolver = SeatContextResolver.from_config(handler._team_seat, runner=runner)
+    return handler
+
+
+def _record_opens(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    opened: list[str] = []
+    real_open = builtins.open
+
+    def spy(file: Any, *args: Any, **kwargs: Any) -> Any:
+        opened.append(str(file))
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", spy)
+    return opened
+
+
+class TestRealDispatch:
+    """Registered handler, real resolver and whoami parser; only the subprocess is faked."""
+
+    def test_a_coordinator_seat_gets_the_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runner = _FakeRunner(CommandOutcome(CommandStatus.OK, fx.COORDINATOR_ONLY, 0))
+        handler = _with_runner(_registered(), runner)
+        opened = _record_opens(monkeypatch)
+        assert "teamchat status" in _text(handler, _stamped())
+        # Only `whoami` runs (never `status`), and nothing is opened: no file at all,
+        # so nothing under the seat store, state root or run directory (invariant 5).
+        assert runner.calls == [whoami_argv(KIT)]
+        assert opened == []
+
+    def test_a_worker_seat_gets_nothing(self) -> None:
+        runner = _FakeRunner(CommandOutcome(CommandStatus.OK, fx.WORKER_ONLY, 0))
+        assert _text(_with_runner(_registered(), runner), _stamped()) == ""
+
+    def test_whoami_exit_69_is_no_team_and_silent(self) -> None:
+        runner = _FakeRunner(CommandOutcome(CommandStatus.EXITED, "", fx.EXIT_NO_SESSION))
+        assert _text(_with_runner(_registered(), runner), _stamped()) == ""
+
+    def test_no_seat_signals_is_silent_and_runs_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No TEAMCHAT_RUNTIME on the payload: silent, no file opened, no command run."""
-        monkeypatch.delenv("TEAMCHAT_RUNTIME", raising=False)
-        monkeypatch.delenv("TEAMCHAT_KIT", raising=False)
-        handler = CoordinatorBoardHandler()
-        handler._workspace_root = tmp_path
-        opened: list[str] = []
-        real_open = builtins.open
-
-        def spy(file: Any, *args: Any, **kwargs: Any) -> Any:
-            opened.append(str(file))
-            return real_open(file, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "open", spy)
+        runner = _FakeRunner(CommandOutcome(CommandStatus.OK, fx.COORDINATOR_ONLY, 0))
+        handler = _with_runner(_registered(), runner)
+        opened = _record_opens(monkeypatch)
         assert _text(handler, _input()) == ""
-        assert not [p for p in opened if "teamchat" in p or "status.json" in p]
+        assert runner.calls == []
+        assert opened == []
+
+    def test_a_subagent_never_probes(self) -> None:
+        runner = _FakeRunner(CommandOutcome(CommandStatus.OK, fx.COORDINATOR_ONLY, 0))
+        handler = _with_runner(_registered(), runner)
+        assert _text(handler, _stamped(agent_id="a1b2c3d4e5f6a7b8c")) == ""
+        assert runner.calls == []
