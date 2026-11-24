@@ -167,6 +167,7 @@ def _lane_policy(extra_patterns: tuple[str, ...]) -> LongRunningPolicy:
     return LongRunningPolicy(
         threshold_seconds=_LANE_THRESHOLD_SECONDS,
         slow_patterns=tuple(re.compile(p) for p in (*LANE_PATTERNS, *extra_patterns)),
+        deep_peel=True,
     )
 
 

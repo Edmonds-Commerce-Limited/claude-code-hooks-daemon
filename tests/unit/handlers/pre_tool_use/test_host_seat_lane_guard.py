@@ -228,6 +228,72 @@ class TestLaneCommands:
         assert is_lane_command("deno test") is False
 
 
+class TestWrapperSpellings:
+    """Review finding 2, table 1: wrappers and wrapper value options hid the lane command."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "xargs pytest < f",
+            "find tests -name '*.py' | xargs pytest",
+            "xargs -n 1 -P 4 pytest",
+            "xargs -I{} pytest {}",
+            "xargs -a files.txt pytest",
+            "eval pytest",
+            "eval 'pytest tests'",
+            "eval 'cd x && pytest'",
+            "taskset -c 0 pytest",
+            "taskset 0x1 pytest",
+            "flock /tmp/l pytest",
+            "flock -w 5 /tmp/l pytest",
+            "flock /tmp/l -c 'pytest -x'",
+            "chronic pytest",
+            "unbuffer pytest",
+            "script -qc pytest /dev/null",
+            "script -q -c 'pytest -x' /dev/null",
+            "stdbuf -o L pytest",
+            "exec -a x pytest",
+            "env -C /x pytest",
+            "env -S 'pytest -x'",
+            "sudo -h h pytest",
+            "sudo -T 5 pytest",
+            "sudo -iu ci pytest",
+            "watch -n 5 pytest",
+            "nice -n 19 xargs -n 1 pytest",
+        ],
+    )
+    def test_wrapped_lane_command_is_refused(self, command: str) -> None:
+        assert is_lane_command(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "xargs grep pytest",
+            "xargs rm < f",
+            "find . -name '*.pyc' | xargs rm",
+            "xargs",
+            'eval "$(ssh-agent -s)"',
+            "eval echo pytest",
+            "taskset -c 0 ./deploy.sh",
+            "flock /tmp/l ./deploy.sh",
+            "flock -x 9",
+            "chronic ./deploy.sh",
+            "script -qc ./deploy.sh /dev/null",
+            "script session.log",
+            "stdbuf -o L journalctl -f",
+            "env -C /srv ./deploy.sh",
+            "sudo -h h systemctl restart app",
+            "watch -n 5 kubectl get pods",
+        ],
+    )
+    def test_wrapped_triage_command_is_untouched(self, command: str) -> None:
+        assert is_lane_command(command) is False
+
+    def test_nesting_too_deep_to_read_fails_closed(self) -> None:
+        command = "eval " + "eval " * 12 + "ls"
+        assert is_lane_command(command) is True
+
+
 # --- arming --------------------------------------------------------------------------
 
 
