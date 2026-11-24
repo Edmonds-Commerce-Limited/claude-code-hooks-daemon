@@ -35,7 +35,10 @@ The review's link form needs one correction. Under `nocaseglob`, bash compares a
 - **Item 2.** `_class_aware_literal_residue` and `_bracket_end` scan a bracket as bash does: a class counts as one member, a `]` placed first is a member, and a backslash escapes the next character. The new residue is a SECOND candidate at the stem deny gate. The skip gates and the overlap check still use the old residue, so neither can skip something it did not skip before.
   - `_globs_can_intersect` also tries a reading in which each bash-closed bracket stands for one `?`. That reading is used only when at least two literal characters remain. Without that limit, `ls dir/[[:alnum:]_]*` would be denied by text alone.
   - The old reader `_BRACKET_EXPRESSION_RE` is intentionally still used at its other sites. Swapping it out could flip a deny to an allow, which this change must never do.
-- **Item 3a.** In `shell_snapshot._SWITCHES_OPTIONS`, a new alternative matches a cluster containing `O` that follows a shell command word (`bash`, `sh`, `dash`, `ksh`, `zsh`, with any earlier flags in between). The old `[-+]O\b` stays in place. `ls -lO` is still not treated as a switch.
+- **Item 3a.** In `shell_snapshot._SWITCHES_OPTIONS`, a new alternative matches a cluster containing `O` anywhere after a shell command word (`bash`, `sh`, `dash`, `ksh`, `zsh`) in the same statement. Bash 5.2 confirms that `bash --norc -xO` and `bash -o pipefail -xO` both switch dotglob. The old `[-+]O\b` stays in place. `ls -lO` is still not treated as a switch.
+- **Bounds.** The bash-aware bracket scan and the index letter folding are quadratic in a token's `[` count: 100k-character tokens took seconds. A token over 1024 characters or 64 `[` therefore keeps the old reading only; a file name cannot be that long. Both bounds are pinned by tests, one of them a `perf_sweep` test.
+- **`_segments_match(..., ignore_case=)` is now a required keyword.** The link probes in `_wildcard_links` and `_matching_symlinked_directories` do not know the shell's case option, so they pass `False`, which is main's behaviour.
+- **Callers of `iter_protected_mentions` after the reorder.** Most callers either collect every mention with `list()`/`any()`, or take `next()` only to test whether there is any mention. `find_protected_mention` takes the first mention, and only its reported token changes. An `IncompleteScanError` raised earlier now propagates to the guard, which denies.
 - **Item 4.**
   - `_holds_search_or_glob` now counts an extglob opener, which fixes the Bash route.
   - `_strict_link_mention` treats an extglob word as globbed.
@@ -51,7 +54,12 @@ The review's link form needs one correction. Under `nocaseglob`, bash compares a
 - the review's false-positive table;
 - the item-3a and item-4 shapes.
 
-Each command was run through `_every_route` in both modes: 700 command/mode rows, three routes each. It was run once with `PYTHONPATH=/workspace/src` (main) and once with the branch. The result was **252 allow→deny changes and 0 deny→allow changes**. Every tightening either names the protected file or comes from the `-O` cluster. `tests/unit/handlers/pre_tool_use/test_secret_file_guard_n720_plain_defects.py::TestEverythingDeniedBeforeStaysDenied` pins a sample of existing denies, and a test pins class brackets that name no protected file as allowed.
+The fixture indexes the protected file after writing it, so the index route (route 0) is exercised as well, N719 included. Each command was run through `_every_route` in both modes: 720 command/mode rows, three routes each. The run was on head `c20eb4f04`, once with `PYTHONPATH=/workspace/src` (main) and once with the branch. The result was **245 allow→deny changes and 0 deny→allow changes**.
+
+- Every tightening either names the protected file or comes from the `-O` cluster.
+- With nocaseglob possible, `ls kit/lib/[I]*` and `ls kit/lib/[A-Z]*` are now denied on the index route, in conservative mode only. That is correct: under `nocaseglob`, bash lists the protected file for both.
+- These stay allowed on both trees: `ls -lO kit/lib`, `ls kit/[[:upper:]]*/` (with and without nocaseglob), and `grep -r x kit/[L]IB`.
+- An earlier run, made before the index and `-O` rework and without index coverage, gave 252/0. That figure is superseded. `tests/unit/handlers/pre_tool_use/test_secret_file_guard_n720_plain_defects.py::TestEverythingDeniedBeforeStaysDenied` pins a sample of existing denies, and a test pins class brackets that name no protected file as allowed.
 
 ## Tests run
 
