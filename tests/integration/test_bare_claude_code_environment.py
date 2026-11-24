@@ -134,6 +134,11 @@ PAYLOADS: Final[Mapping[str, tuple[PayloadFactory, ...]]] = {
 }
 #: owner_directives_register replays only a configured register.
 DIRECTIVES: Final[list[dict[str, str]]] = [{"id": "no-squash", "text": "Never squash-merge."}]
+#: Attributes injected by name, as the registry injects ``_team_seat``: the
+#: base ``Handler`` type declares none of them.
+TEAM_SEAT_ATTR: Final[str] = "_team_seat"
+DIRECTIVES_ATTR: Final[str] = "_directives"
+RESOLVER_ATTR: Final[str] = "_resolver"
 
 
 def _event_dir(handler: Handler) -> str:
@@ -150,10 +155,10 @@ def _team_handlers() -> list[Handler]:
         if "_team_seat" not in handler_cls.__init__.__code__.co_names:
             continue
         handler = handler_cls()
-        if hasattr(handler, "_team_seat"):
-            handler._team_seat = TeamSeatConfig()
-            if hasattr(handler, "_directives"):
-                handler._directives = DIRECTIVES
+        if hasattr(handler, TEAM_SEAT_ATTR):
+            setattr(handler, TEAM_SEAT_ATTR, TeamSeatConfig())
+            if hasattr(handler, DIRECTIVES_ATTR):
+                setattr(handler, DIRECTIVES_ATTR, DIRECTIVES)
             found.append(handler)
     return found
 
@@ -264,7 +269,7 @@ def _approval_check() -> Handler:
 
 
 def _resolved(handler: Handler, runner: Callable[..., CommandOutcome]) -> Handler:
-    handler._resolver = SeatContextResolver(runner=runner)
+    setattr(handler, RESOLVER_ATTR, SeatContextResolver(runner=runner))
     return handler
 
 
@@ -364,7 +369,7 @@ def _run_every_team_payload(tmp_path: Path, *, fresh_resolver_each: bool) -> Non
     handlers = _team_handlers()
     assert {type(h).__name__ for h in handlers} == TEAM_HANDLER_CLASSES
     for handler in handlers:
-        assert handler._resolver is None, type(handler).__name__
+        assert getattr(handler, RESOLVER_ATTR) is None, type(handler).__name__
         if fresh_resolver_each:
             reset_shared_resolvers()
         for build in PAYLOADS[_event_dir(handler)]:
