@@ -346,7 +346,9 @@ config_changes:
         once per act class, recorded (ids and act classes only, never text) in
         human-approval-used-cites.json under the daemon's untracked directory.
         An unreadable or unwritable ledger refuses; deleting it re-allows
-        every recorded cite.
+        every recorded cite. The file is bounded at 256 KiB: past that the
+        oldest entries are evicted and those cites become usable again, so
+        pair it with max_line_age_seconds for a hard bound.
       example_yaml: |
         handlers:
           pre_tool_use:

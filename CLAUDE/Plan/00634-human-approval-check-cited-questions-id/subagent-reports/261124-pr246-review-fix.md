@@ -82,6 +82,20 @@ PR branch instead.
   interpreter-resolution and plugin-coverage tests. None touch the changed files.
 - **bandit** (`-s B101`, as CI runs it) is clean on the changed files; **deptry** is clean.
 
+## Follow-up commit (after b07200442)
+
+- Docs updated for the eviction semantics, so the "once per act class" statements stay
+  true: `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml` (`single_use_cites`
+  description) and `docs/guides/HANDLER_REFERENCE.md` (the `human_approval_check` options
+  line; `check_handler_reference.py` is clean). Neither release note gave a ledger size
+  figure, so neither was changed.
+- Added a test for the refusal branch: a single use too large to fit gives `UNAVAILABLE`
+  and writes no file.
+- Added a discriminating test for the decode path: a real-runner answer that is otherwise
+  valid but has `\377` inside `id` gives `ANSWER_MISMATCH`. This sharpens the finding
+  above: an invalid byte is let through only when it sits in a field the decision never
+  reads, such as `text` or `headline`.
+
 ## CI "QA static" failure (3.11/3.12/3.13), found at 7bf7e1415
 
 - Cause: bandit B404 (Low) on the bare `import subprocess` in `utils/human_approval.py`

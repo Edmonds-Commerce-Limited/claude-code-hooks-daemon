@@ -437,6 +437,14 @@ class TestTeamchatVerifyCli:
         answer = TeamchatVerifyCli()(signals, CITE)
         assert answer == VerifyFailure(Refusal.ANSWER_UNREADABLE)
 
+    def test_the_real_runner_refuses_an_invalid_byte_in_the_event_id(self, tmp_path: Path) -> None:
+        """An otherwise valid record whose id carries a non-UTF-8 byte names another line."""
+        bad_id = fx.HUMAN_ID[:-1] + "XBADX"
+        answer_line = fx.verify_answer(id=bad_id).rstrip("\n").replace("XBADX", "\\377")
+        signals = self.fake_kit(tmp_path, f"printf '{answer_line}\\n'")
+        answer = TeamchatVerifyCli()(signals, CITE)
+        assert answer == VerifyFailure(Refusal.ANSWER_MISMATCH)
+
     def test_the_real_runner_passes_a_valid_answer(self, tmp_path: Path) -> None:
         """Control: the fake kit is trusted and its answer is read, so the refusals above
         come from the output, not from the kit being refused."""
@@ -821,6 +829,12 @@ class TestSingleUse:
         newest_seeded = ApprovalCite("alpha", rows[-1][1])
         assert ledger.used(oldest, PUSH) is LedgerOutcome.UNUSED
         assert ledger.used(newest_seeded, PUSH) is LedgerOutcome.ALREADY_USED
+
+    def test_a_use_that_alone_cannot_fit_refuses_and_writes_nothing(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.json"
+        huge = ApprovalCite("a" * human_approval.MAX_LEDGER_BYTES, fx.HUMAN_ID)
+        assert CiteLedger(lambda: path).consume(huge, PUSH) is LedgerOutcome.UNAVAILABLE
+        assert not path.exists()
 
     def test_new_entries_are_appended_in_use_order(self, tmp_path: Path) -> None:
         path = tmp_path / "ledger.json"
