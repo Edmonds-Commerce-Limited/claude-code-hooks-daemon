@@ -78,6 +78,11 @@ Results:
 - **utils, config, `tests/unit/qa`, handler instantiation and session-mode readers:** 13665 passed, 28 failed.
   - One failure was the branch's own: `test_shell_snapshot` pins `ls -lO` as not a switch. It was fixed by matching `-O` inside a cluster only after a shell command word. Rerun: 277 passed across the snapshot, n720, bash-options and default-globs files.
   - The other 27 are `tests/unit/qa` tests of `llm_qa.py` itself (`main_moved`, `venv_resolution`, `run_test_matrix`). Each one raises `VenvResolutionError`, because this worktree has no venv of its own. That comes from the environment, not from this change.
+- **Final head `c20eb4f04`:** 4808 passed, 14 skipped. This run covers:
+  - every `test_secret_file_guard*` file;
+  - `test_secret_file_matching`, `test_shell_snapshot` and `test_secret_file_matching_default_globs`;
+  - `test_claude_md_guidance_coverage`;
+  - `test_audit_error_hiding` and `test_check_generated_doc_drift`.
 - **Release-note and holding-area tests:** 127 passed.
 - **`check_declared_invariant_pairs.py`:** passes.
 
