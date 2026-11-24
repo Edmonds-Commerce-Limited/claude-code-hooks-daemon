@@ -1989,6 +1989,33 @@ class TestGuidanceIsLeftOutWhereItDoesNotApply:
         assert isinstance(_ScopedStub("team", None, relevant=True), HasGuidanceRelevance)
         assert not isinstance(_StubHandler("plain", None), HasGuidanceRelevance)
 
+    def test_get_relevance_alone_does_not_drop_guidance(self, tmp_path: Path) -> None:
+        """Only the opt-in gate drops guidance, never ``get_relevance``.
+
+        ``model_downgrade_recorder`` is not applicable without an armed ccy
+        supervisor, yet it declares no ``guidance_relevant``, so its guidance
+        is still written. Were the injector to honour every handler's
+        relevance, npm, LSP and supervisor guidance would silently vanish.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            HasClaudeMd,
+            HasGuidanceRelevance,
+        )
+        from claude_code_hooks_daemon.core.relevance import RelevanceContext
+        from claude_code_hooks_daemon.handlers.post_tool_use.model_downgrade_recorder import (
+            ModelDowngradeRecorderHandler,
+        )
+
+        handler = ModelDowngradeRecorderHandler()
+        context = RelevanceContext(project_root=tmp_path, languages=frozenset())
+        assert handler.get_relevance(context).applicable is False
+        assert not isinstance(handler, HasGuidanceRelevance)
+        assert isinstance(handler, HasClaudeMd)
+        assert "model_downgrade_recorder" in self._block(tmp_path, [handler])
+        # Control: the name is not boilerplate every block carries.
+        neighbour = _StubHandler("loud", "## loud\n\nNeighbour guidance.")
+        assert "model_downgrade_recorder" not in self._block(tmp_path, [neighbour])
+
 
 class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
     """Ledger 00466 N7: the generated block is a pure function of the
