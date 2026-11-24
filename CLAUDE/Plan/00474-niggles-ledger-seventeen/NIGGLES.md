@@ -8438,7 +8438,7 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Source**: relayed by lts-infra.1 (peer, authority none) from fedora-desktop.1's dogfood run; not yet reproduced from this seat.
 
-**Evidence**: the guard refuses to remove a detached throwaway worktree whose only change is a tracked file byte-identical to that file in a commit a remote ref already holds (pushed c46c73154). Example left in the fedora-desktop checkout: `untracked/worktrees/ledger-red`, detached at b04f60855, one deleted test file. The refusal's own advice, "deliberately delete each listed path", cannot clear a tracked file, because a deleted tracked file is still a dirty path.
+**Evidence**: the guard refuses to remove a detached throwaway worktree whose only change is a tracked file byte-identical to that file in a commit a remote ref already holds (pushed c46c73154). Example left in the fedora-desktop checkout: `untracked/worktrees/ledger-red`, detached at b04f60855, one deleted test file. The refusal's advice (`destructive_git.py:1090`) reads "Commit, push or deliberately delete each listed path"; committing clears a tracked path, but the delete option cannot, because a deleted tracked file is still a dirty path. Dirty tracked paths come only from `git status --porcelain` (`branch_cleanup.py:462-465`) with no remote-ref check; remote containment is applied to the worktree HEAD only (fact-check `subagent-reports/261124-fact-check-n721.md`).
 
 **Severity**: LOW (usability): a safe removal is refused and the stated remedy cannot work. Not a safety hole (the guard errs towards keeping work).
 
