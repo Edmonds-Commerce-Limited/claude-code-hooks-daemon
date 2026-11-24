@@ -56,3 +56,43 @@ Targeted runs on this branch:
 - 1212 tests in `tests/unit/core -k scratch` passed (5 skipped).
 - 1285 passed across the session_start handlers, worktree evacuation and idle-housekeeping tests.
 - `mypy` and `ruff` are clean on the changed modules.
+
+## Continuation (second agent): step 3 done, stopped at the context budget
+
+### 3. Finding 3: xattrs and sparse files (commit a295d2a99)
+
+**Change:** the step takes the fail-closed route.
+
+- `walk_tree` (`scratch_archive_claim.py`) records two things on every `Node`:
+  - `user_xattrs`: the `user.*` names, read through the procfs link of the verified directory descriptor (`PROC_FD_PARTS`, now shared with pack).
+  - `sparse`: `st_blocks*512 < st_size` is only a pre-filter. The file is then opened `O_NOFOLLOW`, its inode is checked, and `SEEK_HOLE` decides, so a compressing filesystem does not refuse everything. ENOTSUP counts as no xattrs. Any other failure gives `None`, meaning unknown.
+- The new `refuse_unrestorable` (pack) runs the owner check and refuses an entry if any node has a user xattr, a hole, or an unknown value. It replaces `refuse_foreign_owner` in pack, apply (the pre-claim check), adopt and remove (the check before removal). Batch `_loose_node` now calls it too; until now batch had no owner check either.
+- Evacuation still calls only `refuse_foreign_owner`. Evacuation moves the entry, and the pack that follows refuses it.
+
+**Tests:**
+
+- `TestWalkProbesWhatTarCannotCarry` (claim): 9 tests. The xattr test uses a real `setxattr` on this host.
+- A parametrised refusal test, plus `test_a_real_sparse_file_is_refused` (pack).
+- `test_a_sparse_loose_file_is_refused` (batch).
+- **RED first:** all 15 new tests failed on the old code before the fix. The real sparse pack and batch tests failed with DID NOT RAISE, which confirms the finding.
+- **GREEN:** the 271 tests across the claim, pack and batch tests and `tests/unit/qa/test_audit_error_hiding.py` pass. A run of `tests/unit/core -k 'scratch or evacuation or worktree'` gave 1579 passed and 1 failed. The failure is in `test_branch_inventory`, which is unrelated: a different test of it fails on each run.
+
+**Checks:**
+
+- `black`, `ruff`, `mypy` and `bandit` are clean.
+- A cold import of `scratch_archive_batch` works.
+
+**Other files:**
+
+- Two function-keyed exclusions in `scripts/qa/error_hiding_exclusions.json`: `_user_xattrs` and `_sparse`, both returning None on error, which fails closed.
+- Release note 106 is extended to cover this.
+
+**Not done:** POSIX ACLs (`system.posix_acl_*`) and `security.capability` are lost the same way. They are not refused and need a NIGGLES.md entry. This agent did not write it.
+
+### Left for the next agent
+
+Steps 4, 5 and 6, then the PR #251 body, as listed above.
+
+- **Step 4:** advisor guidance is to put the re-check inside `worktree_reaping.py`, directly before the remove call, so every caller gets it. First confirm that `worktree_blockers` sees a new *ignored* file under `untracked/`. Then state in DESIGN.md and the release note that the re-check narrows the window but does not close it.
+- **Step 6:** add the note that step 2's resume test was never seen failing against the old code.
+- **Trailer:** the task asked for `Claude Sonnet 5.5`, but the harness attribution reminder says `Claude Opus 5.5` and yields only to the user's own instructions. Commit a295d2a99 uses Opus.
