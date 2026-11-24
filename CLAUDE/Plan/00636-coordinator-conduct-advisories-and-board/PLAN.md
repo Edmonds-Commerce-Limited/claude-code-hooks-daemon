@@ -152,7 +152,10 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
     deny after it (auto_continue_stop) keeps the pass; the review's stricter
     "latest block must be ours" made the two handlers refuse each other in
     turn (found by `test_no_third_refusal_in_the_chain`) (PR 234 review,
-    `subagent-reports/261124-pr234-review-n4-n5-n6.md`). Feedback entries and
+    `subagent-reports/261124-pr234-review-n4-n5-n6.md`). Known residual
+    (ledger N722, strict xfail test): the pass is kept even when the model
+    worked after that daemon deny, so a new unposted wait is allowed; the
+    chain closes only on a user prompt, a queued prompt or a non-daemon block. Feedback entries and
     tool results are not prompts; a mid-continuation `queued_command` prompt
     is. Review Suggestion 1 partly taken: a compaction summary is not a prompt;
     task notifications, bus deliveries and other `isMeta` entries still count

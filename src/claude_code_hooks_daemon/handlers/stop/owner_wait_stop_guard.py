@@ -515,8 +515,10 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         if not own:
             return False
         # A daemon deny after our refusal (auto_continue_stop judging the re-stop) keeps the
-        # pass, or the two handlers would refuse each other in turn; a block that is no daemon
+        # pass, so the two handlers do not refuse each other in turn; a block that is no daemon
         # deny (a goal continuation) means the model worked on, so a new wait is a fresh stop.
+        # Known residual (ledger N722): a daemon deny followed by real work also keeps the
+        # pass; the chain closes only on a prompt or a non-daemon block.
         return all(_DAEMON_DENY_MARKER in text for text in texts[own[-1] + 1 :])
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

@@ -18,6 +18,7 @@ from tests.support.autonomy import pin_session_modes
 from tests.unit.handlers.stop.test_owner_wait_stand_in_cooperation import (
     AWAITING,
     ENABLED,
+    RHETORICAL,
     STAND_IN_HEADLINE,
     _assistant,
     _Bus,
@@ -254,6 +255,34 @@ class TestN5OnlyTheGuardsOwnLatestBlockEarnsThePass:
         }
         path = _write(tmp_path / "t.jsonl", [_feedback(OWN_BLOCK), summary, _assistant("x")])
         assert len(recent_stop_hook_block_texts_this_chain(path, lookback=200)) == 1
+
+
+class TestKnownResidualDaemonDenyThenWork:
+    """Review of PR 234 delta: a daemon deny followed by real work keeps the one-shot pass."""
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="known residual: daemon deny followed by work keeps the one-shot pass; "
+        "see ledger N722",
+    )
+    def test_a_new_wait_after_a_daemon_deny_and_work_is_refused(self, tmp_path: Path) -> None:
+        chain = _chain(_Bus(_stale()))
+        first = _run(chain, tmp_path, [_assistant(AWAITING)])
+        entries = [
+            _assistant(AWAITING),
+            _feedback(first.reason),
+            _tool_use(0),
+            _tool_result(),
+            _assistant(RHETORICAL),
+        ]
+        second = _run(chain, tmp_path, entries, active=True)
+        assert second.decision is Decision.DENY
+        entries.append(_feedback(second.reason))
+        for i in range(1, 39):
+            entries += [_tool_use(i), _tool_result()]
+        entries.append(_assistant("STOPPING BECAUSE: [awaiting-human] the owner must pick X or Y (Q62)."))
+        third = _run(chain, tmp_path, entries, active=True)
+        assert third.decision is Decision.DENY
 
 
 class TestN6AllowPolicyOnAnUnreadableStopMessage:
