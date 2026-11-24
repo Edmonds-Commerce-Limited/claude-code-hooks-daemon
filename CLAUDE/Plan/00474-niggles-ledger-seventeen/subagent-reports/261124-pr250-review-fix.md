@@ -1,6 +1,8 @@
 # PR 250 review fixes (decoupling build)
 
-Branch `plan-00635-host-seat-lane-guard`. Each fix was written test-first, then committed and pushed on its own. Not merged.
+Branch `plan-00635-host-seat-lane-guard`. Each finding was committed and pushed on its own. Not merged.
+
+Only finding 2 had a test that failed before the code change. The new tests for findings 1, 3 and 6 passed on their first run with no production change, so they pin behaviour that already worked. In particular, the shared resolver already made one probe across all eight handlers.
 
 | #   | Commit      | What changed                                                                                                                                                                                                                                                                                                                                                                                          |
 | --- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -11,7 +13,9 @@ Branch `plan-00635-host-seat-lane-guard`. Each fix was written test-first, then 
 | 5   | `f734cd209` | Note 105 wording softened (and the `shared_resolver` docstring in `8a504df7e`). Two cache misses at the same moment may each probe. I did not make the probe single-flight: that would hold the lock across a subprocess timeout.                                                                                                                                                                     |
 | 6   | `c2128fc07` | `owner_wait_stop_guard` module docstring no longer names pingbus v1. Case B now runs all eight team handlers on their own payloads and asserts no bus spawn.                                                                                                                                                                                                                                          |
 
-Not changed: `pingbus v1` still appears in `utils/owner_wait_bus.py:72` (the adapter, which may name its bus) and in `docs/guides/HANDLER_REFERENCE.md:4990`. Both are outside finding 6's scope.
+Not changed: `pingbus v1` still appears in `utils/owner_wait_bus.py:72` (the adapter, which may name its bus) and in `docs/guides/HANDLER_REFERENCE.md:4990`. Both are outside finding 6's scope. The docs one is recorded as N731.
+
+Lint: `ruff check` and `mypy` are clean on the two changed src files. `llm_qa.py changed` cannot run in this worktree because it has no venv. In the test file, `ruff check` reports the B009/B010 `getattr`/`setattr` pattern; four hits predate this work, and one is new (`_run_every_team_payload`), copying the file's own pattern.
 
 `generate-docs` produced no change to `.claude/HOOKS-DAEMON.md`. Black was run on every changed `.py` file.
 

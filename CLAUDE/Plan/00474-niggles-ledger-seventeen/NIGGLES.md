@@ -8542,3 +8542,13 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW (contract strictness only).
 
 **Status**: ⬜ Open. Either decode strictly and refuse the record, or document that the two fields are ignored. Owner call; no behaviour change is needed for safety.
+
+### N731 — `HANDLER_REFERENCE.md` still names pingbus v1 for `owner_wait_stop_guard`
+
+**Source**: PR 250 review-fix, finding 6.
+
+**Evidence**: the handler's module docstring no longer names a bus program. `docs/guides/HANDLER_REFERENCE.md` (the `owner_wait_stop_guard` "Unreadable bus" paragraph) still describes the `auto` behaviour "on pingbus v1". The adapter (`utils/owner_wait_bus.py`) may name its bus, so it is not in scope.
+
+**Severity**: LOW (human doc wording only).
+
+**Status**: ⬜ Open. Reword the paragraph so it says "a bus whose notify flag cannot be read", as the docstring now does.
