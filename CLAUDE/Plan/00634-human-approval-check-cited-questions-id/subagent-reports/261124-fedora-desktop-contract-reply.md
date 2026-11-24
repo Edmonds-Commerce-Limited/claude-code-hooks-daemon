@@ -50,3 +50,26 @@ questions in the bundle sent the same day.
 - **00635 finding 10**: `duty: null` is possible on a current seat, which strengthens owner
   question O2.
 - **Live checks** (00630 Task 1.3, the lane guard) still need a v2 seat and a host-duty seat.
+
+## Follow-up reply (event `$trz3rXWa7Em619_dZW9Dp2NQKYgIzbQ_NjRs3ZB75VI`, same day, same caveat)
+
+Answers to the two questions sent after the coupling audit:
+
+1. **`TEAMCHAT_RUNTIME`** is set in one place only: the teamchat keeper (`teamchat run`) puts it
+   into the environment of the agent command it starts (peer cites
+   `src-go/internal/teamchat/member/keeper/loop.go:469`). The keeper runs only for a v2 member.
+   So it is not set in a plain ccy session (v1 or no team) or a container shell; it is set in
+   every sub-process of a v2 seat by inheritance (Bash shells, hooks, sub-agents). Edge case: a
+   v2 session whose membership has no seats, or loses them all, keeps the variable and `whoami`
+   prints `{"v":1,"teams":[]}` with exit 0. The variable alone does not prove a seat; an entry
+   in `teams` does.
+2. **duty**: a host member defaults to duty `host` but an override can make it `worker`. Null is
+   not normal for a current agent seat (every seat a host at CCY 3.122.52 or later wrote has a
+   duty, `worker` by default). Null means the probe, or "the writer did not know" (an older
+   host's `desired.json`). The peer's advice: read null as unknown, never as worker, and arm
+   nothing on it.
+
+Consequence for the coupling decisions (audit report
+`00474-niggles-ledger-seventeen/subagent-reports/261124-ccy-teams-coupling-audit-fable.md`): a
+null duty arms nothing (D1); positive team evidence means an entry in `whoami`'s `teams`, not the
+environment variable alone (D3, R3).
