@@ -38,7 +38,7 @@ from claude_code_hooks_daemon.utils.command_position import (
     command_position_code_segments_with_separators,
     command_position_view,
 )
-from claude_code_hooks_daemon.utils.shell_segmentation import iter_shell_words, resolve_shell_word
+from claude_code_hooks_daemon.utils.shell_segmentation import iter_shell_words
 
 #: The length, in seconds, at which a command counts as long ("about 30 seconds").
 DEFAULT_THRESHOLD_SECONDS: Final[float] = 30.0
@@ -120,70 +120,6 @@ _WRAPPER_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
 
 #: ``<runner> run <command>`` launchers.
 _RUN_LAUNCHERS: Final[frozenset[str]] = frozenset({"uv", "poetry", "pipenv"})
-
-# --- deep peel (LongRunningPolicy.deep_peel; host_seat_lane_guard only) -------------
-# Plan 00635 review finding 6: these are NOT in the shared tables above, because
-# long_running_command_guard denies a slow command in the foreground and reading
-# through one more wrapper there would turn its advisory into a deny everywhere.
-
-#: More wrappers that start their operand as the command: option words with a
-#: value, and how many positional words (a cpu mask, a lock file) come first.
-_DEEP_WRAPPERS: Final[dict[str, tuple[frozenset[str], int]]] = {
-    "xargs": (
-        frozenset(
-            {"-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s", "--arg-file", "--delimiter"}
-            | {"--max-args", "--max-procs", "--max-chars", "--process-slot-var"}
-        ),
-        0,
-    ),
-    "taskset": (frozenset(), 1),
-    "flock": (frozenset({"-w", "-E", "--timeout", "--wait", "--conflict-exit-code"}), 1),
-    "chronic": (frozenset(), 0),
-    "unbuffer": (frozenset(), 0),
-    "watch": (frozenset({"-n", "--interval"}), 0),
-    "script": (frozenset({"-E", "-I", "-O", "-B", "-T", "-m", "--log-io", "--log-in"}), 0),
-}
-#: Value options of the shared wrappers that the shared table does not list.
-_DEEP_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
-    "stdbuf": frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
-    "exec": frozenset({"-a"}),
-    "env": frozenset({"-u", "-C", "--unset", "--chdir"}),
-    "sudo": frozenset({"-h", "-T", "-r", "-t", "-R", "--host", "--command-timeout"})
-    | frozenset({"--role", "--type", "--chroot"}),
-}
-#: Options whose value is a whole command line the wrapper runs.
-_DEEP_COMMAND_OPTIONS: Final[dict[str, frozenset[str]]] = {
-    "script": frozenset({"-c", "--command"}),
-    "flock": frozenset({"-c", "--command"}),
-    "env": frozenset({"-S", "--split-string"}),
-}
-#: Interpreter options with a value, before the ``-m`` module or the script.
-_DEEP_PYTHON_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-X", "-W"})
-_PYTHON_MODULE: Final = "-m"
-_PYTHON_CODE: Final = "-c"
-_LAUNCH_MODULE_OPTIONS: Final[frozenset[str]] = frozenset({"-m", "--module"})
-_UV_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
-    {"-p", "--python", "--with", "--with-editable", "--with-requirements", "--from"}
-    | {"--directory", "--project", "--extra", "--group", "--only-group", "--package"}
-    | {"--env-file", "--index", "--default-index", "--index-url", "--extra-index-url"}
-)
-#: ``<launcher> run [options] <command>``: each launcher's value options.
-_DEEP_RUN_LAUNCHERS: Final[dict[str, frozenset[str]]] = {
-    "uv": _UV_VALUE_OPTIONS,
-    "poetry": frozenset({"-C", "-P", "--directory", "--project"}),
-    "pipenv": frozenset(),
-    "coverage": frozenset({"--rcfile", "--source", "--omit", "--include", "--context"})
-    | frozenset({"--data-file", "--concurrency", "--debug"}),
-}
-#: ``<launcher> [options] <command>`` with no ``run`` verb.
-_DEEP_DIRECT_LAUNCHERS: Final[dict[str, frozenset[str]]] = {"uvx": _UV_VALUE_OPTIONS}
-_RUN: Final = "run"
-#: Builtins that run their arguments as a command line.
-_EVAL: Final = "eval"
-#: How deep command text nested in command text (``eval``, ``-c``) is read; past
-#: it the command counts as slow, because what it runs was not seen.
-_MAX_NESTED_DEPTH: Final[int] = 8
-_TOO_DEEP: Final = "command text nested too deep to read"
 
 #: Programs that answer at once and never draw the no-timeout advisory. Matched
 #: by program basename; a project adds its own through ``extra_fast_programs``.
@@ -298,10 +234,6 @@ class LongRunningPolicy:
     )
     fast_programs: frozenset[str] = DEFAULT_FAST_PROGRAMS
     exempt_patterns: tuple[re.Pattern[str], ...] = ()
-    #: Also read through the ``_DEEP_*`` wrappers and launchers, and judge command
-    #: text a segment runs (``eval``, ``script -c``). For a guard that asks WHAT
-    #: runs; off for long_running_command_guard (Plan 00635 review finding 6).
-    deep_peel: bool = False
 
     @classmethod
     def build(
@@ -342,8 +274,6 @@ class _Peeled:
     words: list[str]
     timeouts: list[float | None] = field(default_factory=list)
     loop_head: bool = False
-    #: Command text the segment runs (an ``eval`` or ``script -c`` body), deep peel only.
-    bodies: list[str] = field(default_factory=list)
 
     @property
     def program(self) -> str | None:
@@ -478,127 +408,7 @@ def _dequote_program(word: str) -> str:
     return word.replace("'", "").replace('"', "").replace("\\", "")
 
 
-@dataclass(frozen=True)
-class _Options:
-    """Where a wrapper's options end, and the command-line value one of them gave."""
-
-    index: int
-    flag: str | None = None
-    value: str | None = None
-
-
-def _walk_options(
-    words: Sequence[str], valued: frozenset[str], command: frozenset[str] = frozenset()
-) -> _Options:
-    """Walk the leading options of ``words``, short clusters included (``-qc``).
-
-    Stops at the first operand, after ``--``, or at an option in ``command``,
-    whose value (attached or the next word) is returned with it.
-    """
-    index = 0
-    while index < len(words) and words[index].startswith("-") and words[index] != "-":
-        word = words[index]
-        if word == "--":
-            return _Options(index + 1)
-        if word.startswith("--"):
-            name, equals, attached = word.partition("=")
-            takes = name in valued or name in command
-            value = attached if equals else (words[index + 1] if index + 1 < len(words) else "")
-            step = 2 if takes and not equals else 1
-            if name in command:
-                return _Options(index + step, name, value)
-            index += step
-            continue
-        step = 1
-        for position, letter in enumerate(word[1:], start=1):
-            flag = f"-{letter}"
-            if flag not in valued and flag not in command:
-                continue
-            attached = word[position + 1 :]
-            step = 1 if attached else 2
-            if flag in command:
-                value = attached or (words[index + 1] if index + 1 < len(words) else "")
-                return _Options(index + step, flag, value)
-            break
-        index += step
-    return _Options(index)
-
-
-def _command_text(words: Sequence[str]) -> str | None:
-    """The command line ``words`` make once bash removes their quotes; None if one expands."""
-    resolved = [resolve_shell_word(word) for word in words]
-    if any(word is None for word in resolved):
-        return None
-    return " ".join(word for word in resolved if word is not None)
-
-
-def _deep_launcher(head: str, rest: list[str]) -> list[str] | None:
-    """The command a python, ``<launcher> run`` or ``uvx`` starts; None when ``head`` is none.
-
-    ``python -c`` code is not command text, so it yields no words (unjudged).
-    """
-    if _PYTHON.match(head):
-        options = _walk_options(
-            rest, _DEEP_PYTHON_VALUE_OPTIONS, frozenset({_PYTHON_MODULE, _PYTHON_CODE})
-        )
-        if options.flag == _PYTHON_CODE:
-            return []
-        if options.flag == _PYTHON_MODULE:
-            return [options.value, *rest[options.index :]] if options.value else []
-        return rest[options.index :] or None
-    if head in _DEEP_RUN_LAUNCHERS and rest[:1] == [_RUN]:
-        valued, rest = _DEEP_RUN_LAUNCHERS[head], rest[1:]
-    elif head in _DEEP_DIRECT_LAUNCHERS:
-        valued = _DEEP_DIRECT_LAUNCHERS[head]
-    else:
-        return None
-    options = _walk_options(rest, valued, _LAUNCH_MODULE_OPTIONS)
-    if options.flag is not None:
-        return [options.value, *rest[options.index :]] if options.value else []
-    return rest[options.index :]
-
-
-def _deep_wrapper(words: list[str], peeled: _Peeled) -> list[str] | None:
-    """The words after one deep-peel wrapper, or None when ``words`` starts with none.
-
-    A command line the wrapper runs as text (``eval``, ``script -c``) goes to
-    ``peeled.bodies`` and nothing is left to peel; text that expands is unread.
-    """
-    head = words[0].rsplit("/", 1)[-1]
-    rest = words[1:]
-    if head == _EVAL:
-        body = _command_text(rest)
-        if body is not None:
-            peeled.bodies.append(body)
-        return []
-    launched = _deep_launcher(head, rest)
-    if launched is not None:
-        return launched
-    if head in _DEEP_WRAPPERS:
-        valued, positionals = _DEEP_WRAPPERS[head]
-    elif head in _DEEP_VALUE_OPTIONS:
-        valued = _DEEP_VALUE_OPTIONS[head] | _WRAPPER_VALUE_OPTIONS.get(head, frozenset())
-        positionals = 0
-    else:
-        return None
-    commands = _DEEP_COMMAND_OPTIONS.get(head, frozenset())
-    options = _walk_options(rest, valued, commands)
-    remainder = rest[options.index :]
-    if options.flag is None and positionals:
-        # A lock file or cpu mask first; GNU getopt reads options after it too.
-        options = _walk_options(remainder[positionals:], valued, commands)
-        remainder = remainder[positionals:][options.index :]
-    if options.flag is not None:
-        body = _command_text([options.value or ""])
-        if body is not None:
-            peeled.bodies.append(body)
-        return []
-    if head == "script":
-        return []
-    return remainder
-
-
-def _peel(segment: str, deep: bool = False) -> _Peeled:
+def _peel(segment: str) -> _Peeled:
     words, loop_head = _skip_prefix(_segment_words(segment))
     peeled = _Peeled(words=words, loop_head=loop_head)
     while peeled.words and peeled.words[0] != _UNRESOLVED_WORD:
@@ -609,9 +419,7 @@ def _peel(segment: str, deep: bool = False) -> _Peeled:
             peeled.words, dropped_loop = _skip_prefix(remainder)
             peeled.loop_head = peeled.loop_head or dropped_loop
             continue
-        remainder_or_none = _deep_wrapper(peeled.words, peeled) if deep else None
-        if remainder_or_none is None:
-            remainder_or_none = _peel_wrapper(peeled.words)
+        remainder_or_none = _peel_wrapper(peeled.words)
         if remainder_or_none is None:
             break
         peeled.words, dropped_loop = _skip_prefix(remainder_or_none)
@@ -704,11 +512,7 @@ def _segment_findings(peeled: _Peeled, policy: LongRunningPolicy) -> list[Findin
 
 
 def classify(
-    command: str,
-    policy: LongRunningPolicy | None = None,
-    *,
-    include_background: bool = False,
-    _depth: int = 0,
+    command: str, policy: LongRunningPolicy | None = None, *, include_background: bool = False
 ) -> tuple[Finding, ...]:
     """The reasons ``command`` looks long or unbounded; empty when it looks short.
 
@@ -718,14 +522,8 @@ def classify(
     (the ``&&``/``||``/``|`` list it ends), so ``sleep 300; echo x &`` still
     blocks on the sleep. ``include_background`` judges backgrounded statements
     like any other, for a guard that cares WHAT runs rather than how long.
-
-    Under ``policy.deep_peel`` the command text a segment runs (an ``eval``
-    or ``script -c`` body) is judged too, up to :data:`_MAX_NESTED_DEPTH`
-    levels; past that the command is a slow-command finding (fail closed).
     """
     policy = policy or LongRunningPolicy()
-    if _depth > _MAX_NESTED_DEPTH:
-        return (Finding(FindingKind.SLOW_COMMAND, _TOO_DEEP),)
     if not command.strip() or any(pattern.search(command) for pattern in policy.exempt_patterns):
         return ()
     segments = command_position_code_segments_with_separators(command)
@@ -752,11 +550,7 @@ def classify(
         if backgrounded or index >= background_from or is_delimiter:
             background_seen = background_seen or not is_delimiter
             continue
-        peeled = _peel(segment, policy.deep_peel)
-        for body in peeled.bodies:
-            findings.extend(
-                classify(body, policy, include_background=include_background, _depth=_depth + 1)
-            )
+        peeled = _peel(segment)
         loop_seen = loop_seen or peeled.loop_head
         sleep_seen = sleep_seen or peeled.program == _SLEEP
         if peeled.program == _WAIT and background_seen:

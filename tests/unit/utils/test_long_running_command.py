@@ -365,44 +365,6 @@ def test_command_lookup_is_not_a_run(command: str) -> None:
     assert FindingKind.SLOW_COMMAND not in kinds
 
 
-#: Spellings only a deep-peel policy (host_seat_lane_guard) reads through.
-DEEP_ONLY = [
-    "xargs pytest < f",
-    "eval 'pytest tests'",
-    "taskset -c 0 pytest",
-    "flock /tmp/l pytest",
-    "script -qc pytest /dev/null",
-    "stdbuf -o L pytest",
-    "exec -a x pytest",
-    "env -C /x pytest",
-    "sudo -T 5 pytest",
-]
-
-
-class TestDeepPeel:
-    """Plan 00635 review finding 6: the shared default must not peel further.
-
-    long_running_command_guard denies a SLOW_COMMAND in the foreground, so
-    reading through one more wrapper in the default policy turns its advisory
-    into a deny for every session. Only a policy built with ``deep_peel`` does.
-    """
-
-    def test_default_policy_does_not_deep_peel(self) -> None:
-        assert LongRunningPolicy().deep_peel is False
-        assert LongRunningPolicy.build().deep_peel is False
-
-    @pytest.mark.parametrize("command", DEEP_ONLY)
-    def test_default_policy_leaves_the_spelling_unread(self, command: str) -> None:
-        kinds = {finding.kind for finding in classify(command, POLICY)}
-        assert FindingKind.SLOW_COMMAND not in kinds
-
-    @pytest.mark.parametrize("command", DEEP_ONLY)
-    def test_deep_policy_reads_through_it(self, command: str) -> None:
-        policy = LongRunningPolicy(deep_peel=True)
-        kinds = {finding.kind for finding in classify(command, policy)}
-        assert FindingKind.SLOW_COMMAND in kinds
-
-
 class TestIncludeBackground:
     """Plan 00635: a lane guard judges backgrounded work too."""
 
