@@ -396,6 +396,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "know before acting that exporting a patch protects the worktree and branch "
         "from removal until its next prompt"
     ),
+    "CiStateReadingHandler": (
+        "T3 the ask-the-seat rule governs what a coordinator says about another "
+        "seat's code at any time, not only after a gh CI command; and the agent "
+        "needs to know before reporting a run stuck that queued under the "
+        "threshold is normal waiting"
+    ),
     "CleanupAfterMergeHandler": (
         "T3 the deletion happens after the merge the agent already ran, so the "
         "fire-time report cannot change the merge: the agent needs to know BEFORE "

@@ -350,6 +350,26 @@ config_changes:
                 directives:
                   - id: no-squash
                     text: Never squash-merge; use a merge commit.
+    - key: handlers.post_tool_use.ci_state_reading
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00636 Task 2.3). After gh run list, gh run view --json or gh
+        pr checks on a team coordinator seat, reads the output already printed
+        and labels each run that has not started: QUEUED under
+        options.stuck_after_minutes (default 30, 1..1440), STUCK at or past it,
+        PENDING where gh pr checks folds queued and running, UNKNOWN where the
+        status or age cannot be read. Adds the rule to ask a seat before
+        asserting its code. Advisory, never denies, runs no command of its own.
+        A declared worker, no team and a sub-agent are untouched.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            ci_state_reading:
+              enabled: true
+              priority: 44
+              options:
+                stuck_after_minutes: 30
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

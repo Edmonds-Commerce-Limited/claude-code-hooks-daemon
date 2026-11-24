@@ -4015,6 +4015,33 @@ branches:
     mode: act
 ```
 
+#### ci_state_reading
+
+| Property       | Value              |
+| -------------- | ------------------ |
+| **Config key** | `ci_state_reading` |
+| **Priority**   | 44                 |
+| **Type**       | Advisory           |
+| **Event**      | PostToolUse        |
+
+**Description:** Tells a GitHub run that is queued from one that is stuck, on a team coordinator seat (Plan 00636 Task 2.3, s5). After `gh run list`, `gh run view --json` or `gh pr checks`, it reads the output already printed (no command or network call of its own) and labels each run that has not started: QUEUED under `stuck_after_minutes`, STUCK at or past it (with the `gh run view` check to make), PENDING where `gh pr checks` folds queued and running together (naming the `gh run list --json` command that can tell), UNKNOWN where the status or creation time cannot be read, or the output was reshaped by `--jq`/`--template`. The block ends with the rule never to assert another seat's code without asking that seat. Silent when nothing is waiting to start. Same seat gate as `owner_directives_register`: a declared worker, no team and a sub-agent are untouched. Never denies, never terminal. The text form of `gh run view` is not read.
+
+| Option                | Default | Description                                             |
+| --------------------- | ------- | ------------------------------------------------------- |
+| `stuck_after_minutes` | `30`    | A run queued this long reads as STUCK (integer 1..1440) |
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    ci_state_reading:
+      enabled: true   # default
+      priority: 44
+      options:
+        stuck_after_minutes: 30
+```
+
 #### branch_touch_recorder
 
 | Property       | Value                   |

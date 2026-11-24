@@ -44,12 +44,10 @@ from claude_code_hooks_daemon.utils.owner_directives import (
     parse_directives,
     render_directives,
 )
-from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, duty_gate, role_gate
+from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
-    ROLE_COORDINATOR,
     SeatContext,
     SeatContextResolver,
-    SeatState,
     SessionSignals,
 )
 
@@ -59,7 +57,6 @@ DEFAULT_PROMPT_INTERVAL: Final[int] = 10
 MAX_PROMPT_INTERVAL: Final[int] = 1000
 _MAX_TRACKED_SESSIONS: Final[int] = 512
 _UNKNOWN_SESSION: Final[str] = "unknown"
-_ARMED_VERDICTS: Final[tuple[GateVerdict, ...]] = (GateVerdict.APPLIES, GateVerdict.ROLE_UNKNOWN)
 
 
 class _SeatResolver(Protocol):
@@ -148,17 +145,7 @@ class OwnerDirectivesRegisterHandler(UserPromptSubmitHandlerBase):
         sub-agent are untouched. A fault reading the seat counts as armed.
         """
         try:
-            context = self._context(hook_input)
-            if context.state is SeatState.UNRESOLVED:
-                gate = role_gate(hook_input, context, team="", role=ROLE_COORDINATOR)
-                return gate.verdict in _ARMED_VERDICTS
-            for team in context.teams_held():
-                gate = role_gate(hook_input, context, team=team, role=ROLE_COORDINATOR)
-                if gate.verdict in _ARMED_VERDICTS:
-                    return True
-            return duty_gate(hook_input, context, duty=ROLE_COORDINATOR).verdict is (
-                GateVerdict.APPLIES
-            )
+            return coordinator_advisory_armed(hook_input, self._context(hook_input))
         except Exception as exc:  # the seat probe is a boundary; an advisory only adds text
             log_and_continue(
                 logger,

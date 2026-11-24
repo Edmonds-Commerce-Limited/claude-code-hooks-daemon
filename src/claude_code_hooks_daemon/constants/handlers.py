@@ -802,6 +802,13 @@ class HandlerID:
         config_key="cleanup_after_merge",
         display_name="cleanup-after-merge",
     )
+    # Plan 00636 Task 2.3 (s5): a coordinator seat's gh CI output is read as
+    # queued, stuck, pending or unknown, with the ask-the-seat rule.
+    CI_STATE_READING = HandlerIDMeta(
+        class_name="CiStateReadingHandler",
+        config_key="ci_state_reading",
+        display_name="ci-state-reading",
+    )
     # Scratch inventory refresher (PostToolUse) -- Plan 00627 Task 5.1: refreshes
     # the cached scratch inventory after a directory-creating command into scratch.
     SCRATCH_INVENTORY_REFRESHER = HandlerIDMeta(

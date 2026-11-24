@@ -7,7 +7,12 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, duty_gate, role_gate
+from claude_code_hooks_daemon.utils.team_role_gate import (
+    GateVerdict,
+    coordinator_advisory_armed,
+    duty_gate,
+    role_gate,
+)
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     ProbeReason,
     SeatContext,
@@ -142,6 +147,37 @@ def test_duty_gate_unknown_duty_switches_nothing_on() -> None:
     context = parse_whoami(fx.UNKNOWN_DUTY)
     for duty in ("coordinator", "host"):
         assert duty_gate(MAIN, context, duty=duty).verdict is GateVerdict.NOT_APPLICABLE
+
+
+# --- coordinator advisory arming (Plan 00636 Tasks 2.2 and 2.3) ---------------------
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        parse_whoami(fx.COORDINATOR_ONLY),
+        parse_whoami(fx.MULTI_TEAM),
+        parse_whoami(fx.ROLE_NULL),
+        parse_whoami(fx.HOST_AS_COORDINATOR),
+        UNRESOLVED,
+    ],
+)
+def test_coordinator_advisory_arms_a_coordinator_or_an_unreadable_seat(
+    context: SeatContext,
+) -> None:
+    assert coordinator_advisory_armed(MAIN, context) is True
+
+
+@pytest.mark.parametrize(
+    "context",
+    [ABSENT, parse_whoami(fx.WORKER_ONLY), parse_whoami(fx.HOST_DUTY), parse_whoami(fx.NO_TEAMS)],
+)
+def test_coordinator_advisory_leaves_a_worker_or_no_team_untouched(context: SeatContext) -> None:
+    assert coordinator_advisory_armed(MAIN, context) is False
+
+
+def test_coordinator_advisory_never_arms_a_subagent() -> None:
+    assert coordinator_advisory_armed(SUBAGENT, parse_whoami(fx.COORDINATOR_ONLY)) is False
 
 
 def test_gate_can_never_express_an_approval() -> None:

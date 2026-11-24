@@ -33,6 +33,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
 from claude_code_hooks_daemon.utils.teamchat_seat import (
+    ROLE_COORDINATOR,
     RoleKind,
     SeatContext,
     SeatState,
@@ -101,3 +102,26 @@ def duty_gate(
     if context.duty_unknown():
         return RoleGateDecision(GateVerdict.ROLE_UNKNOWN, "", "a held team's duty is unreadable")
     return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", f"no held team has duty {duty}")
+
+
+_ADVISORY_ARMED: tuple[GateVerdict, ...] = (GateVerdict.APPLIES, GateVerdict.ROLE_UNKNOWN)
+
+
+def coordinator_advisory_armed(hook_input: Mapping[str, Any], context: SeatContext) -> bool:
+    """Whether a coordinator ADVISORY speaks on this event (Plan 00636 Tasks 2.2, 2.3).
+
+    Armed: a declared coordinator in any held team, a coordinator duty, an
+    unreadable role, or a probe that resolved nothing (as
+    ``owner_wait_stop_guard`` arms; an advisory only adds text, so an
+    unreadable state keeps it on). Untouched: a declared other role, no team
+    and a sub-agent. Never raises.
+    """
+    if context.state is SeatState.UNRESOLVED:
+        gate = role_gate(hook_input, context, team="", role=ROLE_COORDINATOR)
+        return gate.verdict in _ADVISORY_ARMED
+    for team in context.teams_held():
+        if role_gate(hook_input, context, team=team, role=ROLE_COORDINATOR).verdict in (
+            _ADVISORY_ARMED
+        ):
+            return True
+    return duty_gate(hook_input, context, duty=ROLE_COORDINATOR).verdict is GateVerdict.APPLIES
