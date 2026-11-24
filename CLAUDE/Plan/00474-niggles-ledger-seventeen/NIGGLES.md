@@ -8571,3 +8571,43 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW (human doc wording only).
 
 **Status**: ⬜ Open. Reword the paragraph so it says "a bus whose notify flag cannot be read", as the docstring now does.
+
+### N732 — scratch archive: POSIX ACLs and `security.capability` are lost on restore and are not refused
+
+**Source**: Plan 00627, Task 3.9 finding 3 fix (PR 251).
+
+**Evidence**: `walk_tree` (`core/scratch_archive_claim.py`) records only `user.*` xattr names, and `refuse_unrestorable` refuses an entry holding one. The archive format keeps no xattrs at all, so `system.posix_acl_access`, `system.posix_acl_default` and `security.capability` are dropped the same way by a pack and restore, and no check sees the loss.
+
+**Severity**: MEDIUM (silent permission loss on restore; rare in scratch).
+
+**Status**: ⬜ Open. Extend the probe to every xattr namespace the archive cannot carry and refuse the entry, test-first.
+
+### N733 — scratch resume-after-restore test was never seen failing against the old code
+
+**Source**: Plan 00627, Task 3.9 finding 2 fix (commit d91e326b3, PR 251).
+
+**Evidence**: `TestResumeAfterARestore` (`tests/unit/core/test_scratch_archive_remove.py`) was written with the fix, but the conftest source-tree guard refuses to import another checkout's `src`, so the run against main's code that would have shown it RED never happened. The test may pass on the old code too.
+
+**Severity**: LOW (test strength unproven; the fix itself is reviewed).
+
+**Status**: ⬜ Open. Revert `resume_claimed`'s `packed_at` check in a throwaway branch, confirm the test fails, record the result.
+
+### N734 — other `worktree_blockers` callers keep the check-to-removal gap finding 4 narrowed in `reap_worktree`
+
+**Source**: Plan 00627, Task 3.9 finding 4 fix (commit 24399b596, PR 251).
+
+**Evidence**: `reap_worktree` now reads the blockers again as its last step before `git worktree remove`. The other callers, `branch_cleanup.py` (around lines 1007 and 1195) and the WorktreeRemove handler, still check once and remove later, so a scratch note written in between is deleted unarchived.
+
+**Severity**: MEDIUM (data loss window, narrow).
+
+**Status**: ⬜ Open. Move the re-read into the shared removal path so every caller gets it, test-first.
+
+### N735 — a main-checkout `scratch-sweep --apply` judges worktree-packed archives by the main checkout's claims
+
+**Source**: Plan 00627, DESIGN.md Task 6.2 row (commit 444c9a265, PR 251).
+
+**Evidence**: a linked-worktree run now expires nothing. A main-checkout run still expires an archive packed from a worktree (same `untracked/scratch` prefix; its `checkout` field names the worktree) judged by the main checkout's claims and references, so a live worktree's referenced archive can expire.
+
+**Severity**: MEDIUM (owner decision needed).
+
+**Status**: ⬜ Open, owner question: what may expire the archives of a live worktree, and of a removed one?
