@@ -373,20 +373,16 @@ class TestRolesAndDuties:
         [
             # Review F2: a host row merged with a null-duty row.
             [("alpha", "host"), ("alpha", None)],
-            # Review F2: a duty that fails the grammar might be host.
-            [("alpha", "Host!")],
+            # Another spelling of host normalises to host.
             [("alpha", " HOST ")],
             [("alpha", "Host")],
             [("alpha", "coordinator"), ("alpha", "host")],
-            [("alpha", ["host"])],
             # A host row under another spelling of the same team name.
             [("Alpha", "host"), ("alpha", "coordinator")],
             [(" alpha", "host"), ("alpha", "coordinator")],
         ],
     )
-    def test_coordinator_is_unknown_beside_a_host_or_malformed_duty(
-        self, rows: list[tuple[str, Any]]
-    ) -> None:
+    def test_coordinator_is_unknown_beside_a_host_duty(self, rows: list[tuple[str, Any]]) -> None:
         seats = [fx.seat(team, "coordinator", duty=duty) for team, duty in rows]
         context = probe(fx.whoami(*seats))
         answer = context.role_for_team("alpha")
@@ -401,6 +397,11 @@ class TestRolesAndDuties:
             [("alpha", None)],
             # Disagreeing non-host duties can never be host.
             [("alpha", "coordinator"), ("alpha", "worker")],
+            # Owner ruling D2: only a declared host stops a coordinator; a
+            # duty that fails the name check arms nothing extra.
+            [("alpha", "Host!")],
+            [("alpha", ["host"])],
+            [("alpha", "Host!"), ("alpha", None)],
         ],
     )
     def test_coordinator_stands_without_a_declared_duty(self, rows: list[tuple[str, Any]]) -> None:

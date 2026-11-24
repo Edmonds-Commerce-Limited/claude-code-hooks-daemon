@@ -348,8 +348,6 @@ class _Row:
     role: str  # "" == unknown
     handle: str
     duty: str  # "" == undeclared or unreadable
-    #: A non-null duty that fails the grammar: it might be a garbled ``host``.
-    duty_malformed: bool = False
 
 
 def _rows(document: object) -> list[object] | ProbeReason:
@@ -374,14 +372,11 @@ def _row(raw: object) -> _Row | ProbeReason:
         # A row we cannot attribute to a team could be any team's: the whole
         # answer becomes unknown rather than silently dropping it.
         return ProbeReason.SHAPE_MISMATCH
-    raw_duty = raw.get("duty")
-    duty = normalise_name(raw_duty)
     return _Row(
         team,
         normalise_name(raw.get("role")),
         _handle(raw.get("handle")),
-        duty,
-        duty_malformed=raw_duty is not None and not duty,
+        normalise_name(raw.get("duty")),
     )
 
 
@@ -402,10 +397,9 @@ def _merge(team: str, rows: list[_Row]) -> TeamSeat:
     - Role: an unreadable role on any row, or rows that disagree, is unknown.
       A conflict is itself an unknown reading, and unknown outranks both
       worker and coordinator, so coordinator-plus-worker rows are unknown.
-    - A coordinator stands unless a row declares duty host, or carries a
-      malformed duty that might be a garbled host (review F2). Duty is
-      optional (owner ruling D2), so a null or absent duty does not unmake a
-      coordinator; a host seat is never one here.
+    - A coordinator stands unless a row declares duty host (owner ruling D2).
+      Duty is optional, so a null, absent or unreadable duty does not unmake
+      a coordinator; a host seat is never one here.
     """
     roles = {row.role for row in rows}
     duties = {row.duty for row in rows}
@@ -413,9 +407,8 @@ def _merge(team: str, rows: list[_Row]) -> TeamSeat:
     duty = _merged_duty(duties)
     handle = handles.pop() if len(handles) == 1 else ""
     role = roles.pop() if len(roles) == 1 else ""
-    maybe_host = duty == DUTY_HOST or any(row.duty_malformed for row in rows)
-    coordinator_unproven = role == ROLE_COORDINATOR and maybe_host
-    if not role or coordinator_unproven:
+    host_coordinator = role == ROLE_COORDINATOR and duty == DUTY_HOST
+    if not role or host_coordinator:
         return TeamSeat(team, RoleKind.UNKNOWN, "", handle, duty)
     return TeamSeat(team, RoleKind.DECLARED, role, handle, duty)
 

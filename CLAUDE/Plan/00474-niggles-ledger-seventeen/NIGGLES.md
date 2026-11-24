@@ -8496,7 +8496,7 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 
 **Severity**: LOW (only a malformed teamchat reply reaches it).
 
-**Status**: ⬜ Open. Owner to confirm the asymmetry, or rule that a malformed duty is treated the same way by both gates.
+**Status**: ✅ Fixed on the PR 250 branch (review finding 2, audit ruling D2 applied as written). `_merge` stops a coordinator only beside a declared `host` duty; `duty_malformed` is gone, so a garbled duty is undeclared for both gates. A role null in a resolved seat still reads unknown (D5).
 
 ### N727 — `reset_shared_resolvers()` is not called on a daemon config reload
 
