@@ -99,7 +99,7 @@
 | 60 | subagent_tier_advisor | ADVISORY | Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it |
 | 60 | workflow_fanout_advisor | ADVISORY | Advise on a Workflow script's agent count, inherited sites and per-family ceiling |
 
-### PostToolUse (21 handlers)
+### PostToolUse (22 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -124,6 +124,7 @@
 | 40 | branch_touch_recorder | ADVISORY | Write the creator and touch records of the branches a call created or changed |
 | 41 | evacuation_recorder | ADVISORY | Keep the evacuations of this turn for destructive_git's same-turn check |
 | 42 | scratch_inventory_refresher | ADVISORY | Start an inventory refresh after a directory-creating command into scratch |
+| 44 | ci_state_reading | ADVISORY | Read a `gh` CI output as queued, stuck, pending or unknown. Advisory, never denies |
 
 ### SessionStart (37 handlers)
 

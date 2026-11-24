@@ -615,6 +615,12 @@ handlers:
       enabled: true
       priority: 39
 
+    ci_state_reading:  # Read a coordinator seat's gh CI output as queued, stuck, pending or unknown (Plan 00636 Task 2.3)
+      enabled: true
+      priority: 44
+      # options:
+      #   stuck_after_minutes: 30  # a run queued this long (1..1440) reads as STUCK
+
     lint_on_edit:            # Language-aware lint validation after Write/Edit
       enabled: false           # Enable for automatic lint validation (Shell, Python, Go, Rust, etc.)
       priority: 25

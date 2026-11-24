@@ -722,6 +722,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
+<!-- handler: ci-state-reading -->
+
+- ci_state_reading — GitHub "queued" is not stuck; ask before asserting
+
 <!-- handler: cleanup-after-merge -->
 
 - cleanup_after_merge — a merged branch is cleaned up after the merge

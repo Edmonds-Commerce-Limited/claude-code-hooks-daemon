@@ -178,7 +178,20 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   (an agent writing its own owner directive is a forgery path), detecting that a
   seat re-asked one (needs bus reads and judgement), and whether the register
   lives in config or in a tracked file (owner decision).
-- [ ] ⬜ **Task 2.3**: s5 ci-state reading.
+- [x] ✅ **Task 2.3** (deterministic part only): s5 ci-state reading. Shipped
+  as `ci_state_reading` (PostToolUse, priority 44, advisory, never denies or
+  terminal). After `gh run list`, `gh run view --json` or `gh pr checks` it
+  reads the output already printed (`utils/ci_state.py`; no command or network
+  call of its own) and labels each run that has not started: QUEUED under
+  `options.stuck_after_minutes` (default 30), STUCK at or past it, PENDING where
+  `gh pr checks` folds queued and running, UNKNOWN where the status or age is
+  unreadable or the output was reshaped. The block ends with the s5 rule (ask a
+  seat before asserting its code), also resident guidance. Gate: the shared
+  `team_role_gate.coordinator_advisory_armed`, now also used by
+  `owner_directives_register`. **Open, not built**: detecting that a seat
+  asserted another seat's code (needs bus reads and judgement); the text form
+  of `gh run view`; a long `in_progress` run (stuck while running) is not
+  read; the default threshold is the builder's choice, not an owner ruling.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.
 - [ ] ⬜ **Task 2.5**: s7 board and B5 liveness.
 - [ ] ⬜ **Task 2.6**: s11 carry-over; B1, B4, B6 guidance.
@@ -210,7 +223,8 @@ land here. Not gated on a seat. Each task starts with a failing test.
 - [ ] Release-bound items recorded in the pending-release holding area
   (Task 2.1a: `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-*.md` and
   `config-changes/v3.77.0.yaml`; Task 2.2: `release-notes/096-*.md` and the
-  `owner_directives_register` entry in the same `config-changes` file).
+  `owner_directives_register` entry in the same `config-changes` file; Task
+  2.3: `release-notes/097-*.md` and the `ci_state_reading` entry there).
 
 ## Delivery & Milestones
 

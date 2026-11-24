@@ -1099,6 +1099,10 @@ handlers:
       enabled: true
       priority: 39
 
+    ci_state_reading:  # Plan 00636 Task 2.3: read a coordinator seat's gh CI output as queued, stuck, pending or unknown.
+      enabled: true
+      priority: 44
+
     cron_record_keeper:  # Dogfood: record each CronCreate/CronDelete so the stop enforcers refresh a job before the 7-day expiry (Plan 00470)
       enabled: true  # On by default; silent bookkeeping, never blocks.
       priority: 36

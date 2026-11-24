@@ -1,6 +1,7 @@
 """PostToolUse event handlers."""
 
 from .branch_touch_recorder import BranchTouchRecorderHandler
+from .ci_state_reading import CiStateReadingHandler
 from .cleanup_after_merge import CleanupAfterMergeHandler
 from .daemon_sync_after_merge import DaemonSyncAfterMergeHandler
 from .evacuation_recorder import EvacuationRecorderHandler
@@ -12,6 +13,7 @@ from .validate_eslint_on_write import ValidateEslintOnWriteHandler
 
 __all__ = [
     "BranchTouchRecorderHandler",
+    "CiStateReadingHandler",
     "CleanupAfterMergeHandler",
     "DaemonSyncAfterMergeHandler",
     "EvacuationRecorderHandler",
