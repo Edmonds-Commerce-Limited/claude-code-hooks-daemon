@@ -321,6 +321,57 @@ def test_control_the_bare_payloads_do_arm_a_resolved_seat(
         assert any(r is not None and _speaks(r) for r in results), results
 
 
+# --- R4: every team handler shares ONE probe per session per TTL ------------------
+
+
+def _count_whoami(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Stub every spawn; count only ``whoami`` probes, answered as a coordinator."""
+    count = [0]
+    stdout = fx.whoami(fx.seat("alpha", "coordinator"))
+
+    def fake(_signals: Any, args: Sequence[str], *, runner: Any, timeout: float) -> CommandOutcome:
+        if tuple(args) == tuple(teamchat_seat.WHOAMI_ARGS):
+            count[0] += 1
+            return CommandOutcome(status=CommandStatus.OK, stdout=stdout, exit_code=0)
+        return CommandOutcome(status=CommandStatus.NOT_FOUND)
+
+    def not_found(*_a: Any, **_k: Any) -> CommandOutcome:
+        return CommandOutcome(status=CommandStatus.NOT_FOUND)
+
+    monkeypatch.setattr(teamchat_seat, "run_kit_command", fake)
+    monkeypatch.setattr(human_approval, "run_kit_command", not_found)
+    monkeypatch.setattr(subprocess, "Popen", not_found)
+    return count
+
+
+def _run_every_team_payload(tmp_path: Path, *, fresh_resolver_each: bool) -> None:
+    handlers = _team_handlers()
+    assert {type(h).__name__ for h in handlers} == TEAM_HANDLER_CLASSES
+    for handler in handlers:
+        assert getattr(handler, "_resolver") is None, type(handler).__name__
+        if fresh_resolver_each:
+            reset_shared_resolvers()
+        for build in PAYLOADS[_event_dir(handler)]:
+            _run(handler, _with_teamchat(build(tmp_path)))
+
+
+def test_all_eight_team_handlers_share_one_whoami(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    count = _count_whoami(monkeypatch)
+    _run_every_team_payload(tmp_path, fresh_resolver_each=False)
+    assert count[0] == 1
+
+
+def test_control_each_team_handler_does_reach_the_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without the shared resolver every handler probes: the one-call pin is not vacuous."""
+    count = _count_whoami(monkeypatch)
+    _run_every_team_payload(tmp_path, fresh_resolver_each=True)
+    assert count[0] == len(TEAM_HANDLER_CLASSES)
+
+
 def test_control_a_resolved_host_seat_speaks(tmp_path: Path) -> None:
     handler = _resolved(
         _lane_guard(),
