@@ -96,3 +96,25 @@ Steps 4, 5 and 6, then the PR #251 body, as listed above.
 - **Step 4:** advisor guidance is to put the re-check inside `worktree_reaping.py`, directly before the remove call, so every caller gets it. First confirm that `worktree_blockers` sees a new *ignored* file under `untracked/`. Then state in DESIGN.md and the release note that the re-check narrows the window but does not close it.
 - **Step 6:** add the note that step 2's resume test was never seen failing against the old code.
 - **Trailer:** the task asked for `Claude Sonnet 5.5`, but the harness attribution reminder says `Claude Opus 5.5` and yields only to the user's own instructions. Commit a295d2a99 uses Opus.
+
+## Continuation (third agent): steps 4 and 5a done, stopped past the context budget
+
+### 4. Finding 4: worktree race (commit 24399b596)
+
+- `reap_worktree` takes a REQUIRED keyword `blockers_fn` and reads it as the last step before `git worktree remove`. A blocker returns `ReapOutcome(blocked=True)`; `cmd_worktree_reap` prints `KEEP` and counts it refused. The cli passes its `blockers_of`.
+- Tests: `TestTheBlockersAreReadAgainJustBeforeTheRemoval` (unit, 5) and `test_a_note_written_after_the_blockers_check_is_not_deleted` (real git). The real-git test was seen RED (note deleted) with the cli call temporarily passing a no-blockers callable, then GREEN.
+- DESIGN.md row and release note 106 say it NARROWS the window, not closes it. Other `worktree_blockers` callers (`branch_cleanup.py` 1007/1195, the WorktreeRemove handler) unchanged: worth one NIGGLES line.
+
+### 5a. Open-descriptor row (this commit)
+
+- `read_process_cwds` now fills `ProcessCwdReading.open_paths` from `/proc/<pid>/fd` links and `/proc/<pid>/maps`; an unreadable table or map makes the pid unreadable (every entry live); a missing one means exited. `entry_in_use` checks open paths under `<name>` and `.sweeping-<name>`.
+- Tests: `TestReadOpenFiles` (8, incl. one on the real `/proc`) and two in `test_scratch_archive_facts.py`; 11 seen RED first. 1523 passed across core/daemon scratch, liveness and evacuation, plus the error-hiding audit. black, ruff, mypy clean.
+- DESIGN.md: a new closed row above the old one; the old row is retitled "Analysis (closed by the row above)". Residual stated: a descriptor opened after the last re-check; the classification pass still reads cwds only.
+
+### Left for the next agent
+
+- **5b.** DESIGN.md row "a worktree root and the main root share the original-path prefix `untracked/scratch`" (~line 440): NOT touched. Either implement (a linked-worktree `--apply` must not run `_expire` against the shared prefix, e.g. set `expire=False` when the root is in a linked worktree, test-first) or write the owner question into the row.
+- **6.** PLAN.md: Task 3.9 done with verdict (Phases 1-3 safe for human-gated `--apply`; findings 1-4 fixed in PR 251); Task 6B.0 Q66 note (peer messages `$gFa8bYNIvOP7QYi8FCHaZ237cIF23szeOw76Xb4nFYo`, `$6jQRF3iNSTobVGmB7hGBzwhnsHBLzlNLyikLn4N5yi4` quoting HUMAN line `$YLOxTjevrU6AsyxwmUx-nw1QZTfuYN28hXv23ViYj9o`; first-hand verification still owed). Do not build 6B.
+- **7.** NIGGLES.md (Plan 00474): ACLs / `security.capability` not refused; step-2 resume test never seen failing on old code; other `worktree_blockers` callers keep a check-to-remove gap.
+- **8.** PR #251 body: findings 1-4 fixed, open-descriptor row closed, open items above. Ends with the Claude Code generated line.
+- Pre-push: `scripts/qa/error_hiding_exclusions.json` was NOT changed for the new `FileNotFoundError` catches (they use `log_and_continue`; the audit test passed). Invariant pairs, bandit and changed_tests_map not re-checked for step 5a.

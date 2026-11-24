@@ -49,6 +49,16 @@ class TestEntryInUse:
         reading = ProcessCwdReading({7: ROOT / "ee"}, ())
         assert live(reading=reading) is False
 
+    @pytest.mark.parametrize("held", ["e/log", ".sweeping-e/log", "e/deep/lib.so"])
+    def test_a_file_held_open_under_either_name_is_live(self, held: str) -> None:
+        """DESIGN.md open-descriptor row: a cwd elsewhere does not hide an open file."""
+        reading = ProcessCwdReading({7: Path("/elsewhere")}, (), {7: (ROOT / held,)})
+        assert live(reading=reading) is True
+
+    def test_a_file_open_in_a_sibling_sharing_the_prefix_is_not_the_entry(self) -> None:
+        reading = ProcessCwdReading({7: Path("/elsewhere")}, (), {7: (ROOT / "ee" / "log",)})
+        assert live(reading=reading) is False
+
     def test_an_unreadable_pid_is_live(self) -> None:
         assert live(reading=ProcessCwdReading({1: Path("/elsewhere")}, (9,))) is True
 
