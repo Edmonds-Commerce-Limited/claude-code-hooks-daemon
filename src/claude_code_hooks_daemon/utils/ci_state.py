@@ -20,8 +20,10 @@ Readable shapes (``gh`` 2.105, non-TTY):
   running checks together, so it can never say which; the reading points at the
   ``gh run list --json`` command that can.
 
-Unknown stays unknown: a queued run whose creation time is missing,
-unparseable, zone-less or in the future, a not-started status other than
+Unknown stays unknown: a queued run whose start time is missing,
+unparseable, zone-less, before 2000 (a Go zero time) or in the future (a
+readable future ``startedAt`` is never replaced by ``createdAt``), a
+not-started status other than
 ``queued``, and output reshaped by ``--jq`` / ``--template`` are UNKNOWN, never
 "queued, fine" and never "stuck".
 """
@@ -39,7 +41,15 @@ from claude_code_hooks_daemon.utils.simple_commands import simple_commands
 
 _GH: Final[str] = "gh"
 _RESHAPE_OPTIONS: Final[frozenset[str]] = frozenset({"--jq", "-q", "--template", "-t"})
+_RESHAPE_SHORT_OPTIONS: Final[tuple[str, ...]] = ("-q", "-t")
 _JSON_OPTION: Final[str] = "--json"
+_REPO_SHORT: Final[str] = "-R"
+_REPO_LONG: Final[str] = "--repo"
+_REPO_FLAGS: Final[frozenset[str]] = frozenset({_REPO_SHORT, _REPO_LONG})
+#: gh marshals an unset Go time.Time as 0001-01-01; no real run predates this year.
+_EARLIEST_YEAR: Final[int] = 2000
+_LABEL_MAX_CHARS: Final[int] = 120
+_ELLIPSIS: Final[str] = "..."
 
 #: Statuses GitHub gives a run that no runner has started.
 _QUEUED: Final[str] = "queued"
@@ -99,22 +109,55 @@ class CiReading:
     detail: str = ""
 
 
+def _skip_repo_flags(operands: tuple[str, ...]) -> tuple[str, ...] | None:
+    """``operands`` past any leading ``-R``/``--repo`` flag; None for another leading flag.
+
+    Only the repo flag is skipped because its value arity is known. Any other
+    leading flag (``--hostname h``) might or might not take a value, so the noun
+    cannot be located without guessing; that command is left unrecognised
+    (the advisory is silent, never wrong).
+    """
+    index = 0
+    while index < len(operands) and operands[index].startswith("-"):
+        word = operands[index]
+        if word in _REPO_FLAGS:
+            index += 2
+        elif word.startswith(f"{_REPO_LONG}=") or (
+            word.startswith(_REPO_SHORT) and len(word) > len(_REPO_SHORT)
+        ):
+            index += 1
+        else:
+            return None
+    return operands[index:]
+
+
+def _is_reshape_option(word: str) -> bool:
+    """``--jq x``, ``--jq=x``, ``-q x`` or an attached ``-q.`` / ``-t{{.}}``."""
+    if word in _RESHAPE_OPTIONS or word.split("=", 1)[0] in _RESHAPE_OPTIONS:
+        return True
+    return any(
+        word.startswith(short) and len(word) > len(short) for short in _RESHAPE_SHORT_OPTIONS
+    )
+
+
 def ci_commands(command: str) -> list[CiCommandKind]:
     """The CI-reading ``gh`` commands ``command`` runs, in order.
 
     ``gh`` must be in command position (``echo "gh run list"`` is no reading).
     The text form of ``gh run view`` has no status column and is not read.
+    A leading ``-R``/``--repo`` is skipped to find the noun (see
+    ``_skip_repo_flags`` for why other leading flags are not).
     """
     kinds: list[CiCommandKind] = []
     for run in simple_commands(command, known_verbs=frozenset({_GH})):
-        if run.verb != _GH or len(run.operands) < 2:
+        if run.verb != _GH:
             continue
-        noun, verb = run.operands[0], run.operands[1]
-        options = set(run.operands[2:])
-        reshaped = any(
-            word in _RESHAPE_OPTIONS or word.split("=", 1)[0] in _RESHAPE_OPTIONS
-            for word in options
-        )
+        operands = _skip_repo_flags(run.operands)
+        if operands is None or len(operands) < 2:
+            continue
+        noun, verb = operands[0], operands[1]
+        options = set(operands[2:])
+        reshaped = any(_is_reshape_option(word) for word in options)
         json_output = any(
             word == _JSON_OPTION or word.startswith(f"{_JSON_OPTION}=") for word in options
         )
@@ -130,18 +173,39 @@ def ci_commands(command: str) -> list[CiCommandKind]:
     return kinds
 
 
-def _parse_created(value: object, now: datetime) -> int | None:
-    """Age in seconds of an ISO 8601 creation time; None when unreadable or in the future."""
+def _parse_time(value: object) -> datetime | None:
+    """A zone-aware ISO 8601 time from year 2000 on; None when unreadable.
+
+    A Go zero time (``0001-01-01T00:00:00Z``, how gh marshals an unset time) or
+    any earlier-than-2000 value is no real run time and is unreadable.
+    """
     if not isinstance(value, str) or not value:
         return None
     try:
-        created = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    if created.tzinfo is None:
+    if parsed.tzinfo is None or parsed.year < _EARLIEST_YEAR:
+        return None
+    return parsed
+
+
+def _parse_created(value: object, now: datetime) -> int | None:
+    """Age in seconds of an ISO 8601 creation time; None when unreadable or in the future."""
+    created = _parse_time(value)
+    if created is None:
         return None
     age = int((now - created).total_seconds())
     return age if age >= 0 else None
+
+
+def _label(value: object, default: str) -> str:
+    """``value`` as a bounded label; ``default`` when it is not a non-empty string."""
+    if not isinstance(value, str) or not value:
+        return default
+    if len(value) <= _LABEL_MAX_CHARS:
+        return value
+    return value[: _LABEL_MAX_CHARS - len(_ELLIPSIS)] + _ELLIPSIS
 
 
 def _run_reading(
@@ -161,6 +225,17 @@ def _run_reading(
     return CiReading(state, label, run_id, age_seconds=age)
 
 
+def _run_id(value: object) -> str:
+    """A run id from an int or digit string; empty for anything else."""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.isdigit():
+        return value[:_LABEL_MAX_CHARS]
+    return ""
+
+
 def _json_readings(data: object, now: datetime, threshold: int) -> list[CiReading]:
     items = data if isinstance(data, list) else [data]
     readings: list[CiReading] = []
@@ -169,16 +244,19 @@ def _json_readings(data: object, now: datetime, threshold: int) -> list[CiReadin
             continue
         bucket = item.get("bucket")
         if bucket == _PENDING_BUCKET:
-            readings.append(CiReading(CiState.PENDING_UNSPLIT, str(item.get("name", "check"))))
+            readings.append(CiReading(CiState.PENDING_UNSPLIT, _label(item.get("name"), "check")))
             continue
         status = item.get("status")
         if not isinstance(status, str):
             continue
-        run_id = str(item.get("databaseId", "") or "")
-        name = str(item.get("workflowName") or item.get("name") or "run")
+        run_id = _run_id(item.get("databaseId"))
+        name = _label(item.get("workflowName"), "") or _label(item.get("name"), "run")
         label = f"{name} #{run_id}" if run_id else name
         started = item.get("startedAt")
-        since = started if _parse_created(started, now) is not None else item.get("createdAt")
+        # A readable startedAt is this attempt's, even when it is ahead of the clock
+        # (skew): it is aged as such (a future time reads UNKNOWN), never replaced by
+        # the first attempt's createdAt, which would read a fresh re-run as STUCK.
+        since = started if _parse_time(started) is not None else item.get("createdAt")
         reading = _run_reading(status.lower(), label, run_id, since, now, threshold)
         if reading is not None:
             readings.append(reading)
@@ -190,8 +268,9 @@ def _row_readings(output: str, now: datetime, threshold: int) -> list[CiReading]
     for line in output.splitlines():
         columns = line.split("\t")
         if len(columns) == _RUN_LIST_COLUMNS and columns[_RUN_STATUS_COLUMN] in _KNOWN_RUN_STATUSES:
-            run_id = columns[_RUN_ID_COLUMN]
-            label = f"{columns[_RUN_WORKFLOW_COLUMN]} #{run_id}"
+            run_id = _run_id(columns[_RUN_ID_COLUMN])
+            name = _label(columns[_RUN_WORKFLOW_COLUMN], "run")
+            label = f"{name} #{run_id}" if run_id else name
             reading = _run_reading(
                 columns[_RUN_STATUS_COLUMN],
                 label,
@@ -205,7 +284,9 @@ def _row_readings(output: str, now: datetime, threshold: int) -> list[CiReading]
         elif (
             len(columns) >= _CHECK_MIN_COLUMNS and columns[_CHECK_BUCKET_COLUMN] == _PENDING_BUCKET
         ):
-            readings.append(CiReading(CiState.PENDING_UNSPLIT, columns[_CHECK_NAME_COLUMN]))
+            readings.append(
+                CiReading(CiState.PENDING_UNSPLIT, _label(columns[_CHECK_NAME_COLUMN], "check"))
+            )
     return readings
 
 
@@ -237,9 +318,11 @@ def read_ci_output(
     stripped = output.strip()
     if stripped[:1] in ("[", "{"):
         try:
-            return _json_readings(json.loads(stripped), now, stuck_after_seconds)
-        except ValueError:
+            data = json.loads(stripped)
+        except (ValueError, RecursionError):
+            # Not JSON (or nested past the parser's depth): read it as rows instead.
             return _row_readings(output, now, stuck_after_seconds)
+        return _json_readings(data, now, stuck_after_seconds)
     return _row_readings(output, now, stuck_after_seconds)
 
 

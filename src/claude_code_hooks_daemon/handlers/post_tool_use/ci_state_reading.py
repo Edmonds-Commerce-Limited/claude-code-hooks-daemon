@@ -65,7 +65,7 @@ class _SeatResolver(Protocol):
 
 
 class CiStateReadingHandler(PostToolUseHandlerBase):
-    """Read a ``gh`` CI output as queued, stuck, pending or unknown. Advisory, never denies."""
+    """Read a `gh` CI output as queued, stuck, pending or unknown. Advisory, never denies."""
 
     def __init__(self) -> None:
         """Initialise as a non-terminal advisory handler (see the module docstring)."""

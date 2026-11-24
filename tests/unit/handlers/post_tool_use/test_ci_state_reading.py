@@ -104,6 +104,11 @@ class TestIdentity:
         assert "without asking that seat" in guidance
         assert handler.get_acceptance_tests()
 
+    def test_class_docstring_summary_has_no_rst_double_backticks(self) -> None:
+        """The summary line is the HOOKS-DAEMON.md row, which renders markdown, not RST."""
+        summary = (CiStateReadingHandler.__doc__ or "").strip().splitlines()[0]
+        assert "``" not in summary
+
 
 class TestMatches:
     def test_a_gh_ci_command_matches(self) -> None:

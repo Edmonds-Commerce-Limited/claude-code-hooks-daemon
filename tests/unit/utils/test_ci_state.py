@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.utils.ci_state import (
 
 NOW = datetime(2026, 11, 24, 6, 0, 0, tzinfo=UTC)
 THRESHOLD = 30 * 60
+LABEL_MAX = 120 + len(" #45334494394")
 
 
 def _row(status: str, created: str, conclusion: str = "", run_id: str = "45334494394") -> str:
@@ -59,6 +60,14 @@ class TestCommands:
             ("cd repo && gh run list", CiCommandKind.RUN_LIST),
             ("gh run list --json status,createdAt --jq '.[].status'", CiCommandKind.RESHAPED),
             ("gh pr checks 237 --json bucket -t '{{.}}'", CiCommandKind.RESHAPED),
+            ("gh run list --json status -q.", CiCommandKind.RESHAPED),
+            ("gh run list --json status -q.[].status", CiCommandKind.RESHAPED),
+            ("gh pr checks 237 --json bucket -t{{.}}", CiCommandKind.RESHAPED),
+            ("gh -R o/r run list", CiCommandKind.RUN_LIST),
+            ("gh --repo o/r run list", CiCommandKind.RUN_LIST),
+            ("gh --repo=o/r pr checks 237", CiCommandKind.PR_CHECKS),
+            ("gh -Ro/r run view 1 --json status", CiCommandKind.RUN_VIEW_JSON),
+            ("gh -R o/r run list --json status -q.", CiCommandKind.RESHAPED),
         ],
     )
     def test_a_ci_reading_command_is_recognised(self, command: str, kind: CiCommandKind) -> None:
@@ -72,6 +81,10 @@ class TestCommands:
             "gh pr view 237 --json body,comments",
             "gh run rerun 123",
             "git log --oneline",
+            "gh -R o/r",  # a repo flag and nothing after it
+            "gh -R o/r run rerun 1",
+            # An unknown leading flag might take a value, so the noun is not guessed.
+            "gh --hostname h run list",
         ],
     )
     def test_anything_else_is_not_a_ci_reading(self, command: str) -> None:
@@ -161,6 +174,89 @@ class TestJson:
             {"status": "queued", "createdAt": "2026-11-24T05:58:00Z", "startedAt": ""}
         )
         assert _read(output)[0][0] is CiState.QUEUED
+
+    def test_a_future_started_at_is_unknown_not_aged_from_created_at(self) -> None:
+        """A readable startedAt ahead of the clock is skew, not a reason to age from createdAt."""
+        output = json.dumps(
+            [
+                {
+                    "status": "queued",
+                    "startedAt": "2027-01-01T00:00:00Z",
+                    "createdAt": "2026-11-24T04:00:00Z",
+                }
+            ]
+        )
+        readings = read_ci_output(output, now=NOW, stuck_after_seconds=THRESHOLD)
+        assert [(r.state, r.age_seconds) for r in readings] == [(CiState.UNKNOWN, None)]
+
+    def test_a_started_at_seconds_ahead_of_the_clock_is_unknown(self) -> None:
+        output = json.dumps(
+            {
+                "status": "queued",
+                "startedAt": "2026-11-24T06:00:05Z",
+                "createdAt": "2026-11-23T05:00:00Z",
+            }
+        )
+        assert _read(output)[0][0] is CiState.UNKNOWN
+
+    def test_a_zone_less_started_at_falls_back_to_created_at(self) -> None:
+        output = json.dumps(
+            {
+                "status": "queued",
+                "startedAt": "2026-11-24T05:59:00",
+                "createdAt": "2026-11-24T05:58:00Z",
+            }
+        )
+        assert _read(output)[0][0] is CiState.QUEUED
+
+    def test_an_absent_started_at_falls_back_to_created_at(self) -> None:
+        output = json.dumps({"status": "queued", "createdAt": "2026-11-24T05:00:00Z"})
+        assert _read(output)[0][0] is CiState.STUCK
+
+    @pytest.mark.parametrize("zero", ["0001-01-01T00:00:00Z", "1999-12-31T23:59:59Z"])
+    def test_a_go_zero_or_pre_2000_time_is_unknown(self, zero: str) -> None:
+        """gh marshals an unset time.Time as 0001-01-01; it is no run time at all."""
+        output = json.dumps({"status": "queued", "startedAt": zero, "createdAt": zero})
+        readings = read_ci_output(output, now=NOW, stuck_after_seconds=THRESHOLD)
+        assert [(r.state, r.age_seconds) for r in readings] == [(CiState.UNKNOWN, None)]
+
+    @pytest.mark.parametrize("zero", ["0001-01-01T00:00:00Z", "1999-12-31T23:59:59Z"])
+    def test_a_go_zero_started_at_counts_as_absent(self, zero: str) -> None:
+        """An unset startedAt is absent, so createdAt is used; never aged from year 1."""
+        output = json.dumps(
+            {"status": "queued", "startedAt": zero, "createdAt": "2026-11-24T05:58:00Z"}
+        )
+        readings = read_ci_output(output, now=NOW, stuck_after_seconds=THRESHOLD)
+        assert [(r.state, r.age_seconds) for r in readings] == [(CiState.QUEUED, 120)]
+
+    def test_a_go_zero_created_time_in_a_row_is_unknown(self) -> None:
+        assert _read(_row("queued", "0001-01-01T00:00:00Z"))[0][0] is CiState.UNKNOWN
+
+    def test_deeply_nested_json_never_raises(self) -> None:
+        assert _read("[" * 100000) == []
+
+    @pytest.mark.parametrize("name", [{"a": 1}, ["QA"], 7])
+    def test_a_non_string_name_is_not_echoed(self, name: object) -> None:
+        output = json.dumps(
+            {"status": "queued", "workflowName": name, "createdAt": "2026-11-24T05:58:00Z"}
+        )
+        assert _read(output) == [(CiState.QUEUED, "run")]
+
+    def test_a_long_name_is_truncated(self) -> None:
+        output = json.dumps(
+            {"status": "queued", "workflowName": "W" * 1800, "createdAt": "2026-11-24T05:58:00Z"}
+        )
+        label = _read(output)[0][1]
+        assert len(label) <= LABEL_MAX
+        assert label.startswith("WWW")
+
+    def test_a_long_pending_check_name_is_truncated(self) -> None:
+        output = json.dumps([{"name": "C" * 1800, "bucket": "pending"}])
+        assert len(_read(output)[0][1]) <= LABEL_MAX
+
+    def test_a_long_row_workflow_is_truncated(self) -> None:
+        row = _row("queued", "2026-11-24T05:58:00Z").replace("\tQA\t", "\t" + "Q" * 1800 + "\t")
+        assert len(_read(row)[0][1]) <= LABEL_MAX
 
     def test_queued_json_without_created_at_is_unknown(self) -> None:
         assert _read(json.dumps([{"status": "queued", "databaseId": 3}]))[0][0] is CiState.UNKNOWN
