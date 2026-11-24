@@ -44,7 +44,8 @@ armed (a declared worker) is allowed. Faults in ``matches()`` are passed to
 ``handle()`` for that decision; only the re-entry check stands down on a fault.
 
 **Never a trap.** A stop that re-enters after THIS guard's deny (its rule id in
-a recent Stop-hook block) is allowed: one refusal per stop chain. Another
+a Stop-hook block since the last real user prompt) is allowed: one refusal per
+stop chain; an earlier chain's refusal does not count (N5). Another
 handler's deny, or a spurious ``stop_hook_active`` with no block marker, is
 evaluated like a fresh stop, as auto_continue_stop does; a re-entry whose
 transcript cannot be read stands down (N411), and a re-entered stop never
@@ -88,6 +89,7 @@ from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.daemon.synthetic_traffic import event_synthetic_source
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+    AutoContinueStopHandler,
     _declares_human_blocked,
     _declaring_lines,
     _quoted_spans,
@@ -115,7 +117,7 @@ from claude_code_hooks_daemon.utils.stand_in_cron import (
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     is_stop_hook_active,
-    recent_stop_hook_block_texts,
+    recent_stop_hook_block_texts_this_chain,
     transcript_is_readable,
 )
 from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, role_gate
@@ -145,6 +147,8 @@ _STOP_PREFIX: Final[str] = "STOPPING BECAUSE:"
 #: How far back a re-entered stop looks for this guard's own refusal: wide enough
 #: for the bump turn between the deny and the re-stop (the helper's own default is 20).
 _REENTRY_LOOKBACK_LINES: Final[int] = 200
+# Every daemon deny leads with "BLOCKED [R-<ID>]" (core.rule); a goal continuation does not.
+_DAEMON_DENY_MARKER: Final[str] = "BLOCKED [R-"
 #: Who a wait can be ON (N2): a human role noun. A bare capitalised word is NOT a
 #: person (``Docker``, ``Renovate``, ``Tests``); a name counts only as an ``@handle``
 #: or when ``options.owner_names`` lists it.
@@ -388,13 +392,21 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         The chain shows only the first restrictive reason and the re-stop is a
         confirmed re-entry, so unless this deny carries it the stand-in cron is
         never asked for (Plan 00636 F1). Same gate as auto_continue_stop: the
-        current message declares ``[awaiting-human]`` and the event is real.
+        current message declares ``[awaiting-human]`` on a ``STOPPING BECAUSE:``
+        line, the event is real and has a session id (N4: auto_continue_stop
+        records the awaiting-human marker, and so asks for a stand-in, only then).
         """
         if event_synthetic_source(hook_input) is not None:
             return None
+        session_id = hook_input.get(HookInputField.SESSION_ID)
+        if not isinstance(session_id, str) or not session_id:
+            return None
         reader = get_transcript_reader(hook_input)
-        text = reader.get_last_assistant_text() if reader is not None else ""
-        if not text or not _declares_human_blocked(text):
+        message = reader.get_last_assistant_message() if reader is not None else None
+        if not message or not AutoContinueStopHandler._message_has_stop_explanation(message):
+            return None
+        text = AutoContinueStopHandler._message_text(message)
+        if not _declares_human_blocked(text):
             return None
         config = self._config_loader()
         requirement = stand_in_requirement(
@@ -478,9 +490,12 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
 
         Mirrors auto_continue_stop's discrimination (Plan 00636 F3): another
         handler's deny, or Claude Code's spurious flag with no marker at all, is
-        evaluated like a fresh stop. Only this guard's rule id in a recent block
-        earns the pass, anywhere in the window, so a later deny by another
-        handler or a long bump turn does not cost a second refusal. A transcript
+        evaluated like a fresh stop. The pass is earned by this guard's rule id in
+        the current chain (since the last real prompt), provided every block
+        after it is a daemon deny (another handler judging the re-stop). A
+        block that is no daemon deny, such as a goal continuation, closes the
+        chain, so a new unposted wait is refused once more; that refusal is then
+        the latest, so the next re-stop passes. A transcript
         that cannot be read, or a raising read, stands down (N411): a
         re-entry nothing can verify must never be refused again.
         """
@@ -488,7 +503,7 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
         if not transcript_is_readable(path):
             return True
         try:
-            texts = recent_stop_hook_block_texts(path, lookback=_REENTRY_LOOKBACK_LINES)
+            texts = recent_stop_hook_block_texts_this_chain(path, lookback=_REENTRY_LOOKBACK_LINES)
         except Exception as exc:  # an unverifiable re-entry stands down, whatever the fault
             log_and_continue(
                 logger,
@@ -496,7 +511,15 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
                 reason="a re-entry this guard cannot verify stands down rather than refuse again (N411)",
             )
             return True
-        return any(RuleID.STOP_OWNER_WAIT_UNBUMPED in text for text in texts)
+        own = [i for i, text in enumerate(texts) if RuleID.STOP_OWNER_WAIT_UNBUMPED in text]
+        if not own:
+            return False
+        # A daemon deny after our refusal (auto_continue_stop judging the re-stop) keeps the
+        # pass, so the two handlers do not refuse each other in turn; a block that is no daemon
+        # deny (a goal continuation) means the model worked on, so a new wait is a fresh stop.
+        # Known residual (ledger N722): a daemon deny followed by real work also keeps the
+        # pass; the chain closes only on a prompt or a non-daemon block.
+        return all(_DAEMON_DENY_MARKER in text for text in texts[own[-1] + 1 :])
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """A waiting, unpaused stop in a team session that is not the re-stop after our deny."""
@@ -649,10 +672,12 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             if ids:
                 stale.append(_Stale(team, ids))
         # A re-entered stop never repeats the advisory: an ALLOW with context
-        # continues the session one turn, and re-emitting it would loop.
+        # continues the session one turn, and re-emitting it would loop. An
+        # unreadable stop message carries none either (N6): the advisory says the
+        # stop waits on a human, which nothing has shown.
         advisory = (
             []
-            if is_stop_hook_active(hook_input)
+            if is_stop_hook_active(hook_input) or waiting is _Waiting.UNREADABLE
             else [self._render_unchecked(gap) for gap in unchecked]
         )
         if not stale and not unconfirmed:
@@ -727,7 +752,8 @@ class OwnerWaitStopGuardHandler(StopHandlerBase):
             "**Unreadable bus**: `options.on_unreadable_bus` is `auto` by default. Where the bus "
             "adapter can read notify flags, a wait the guard cannot confirm is refused once; on "
             "pingbus v1 (no notify flag) it is allowed with an ADVISORY naming the team and the "
-            "thread classes it could not check. Either way: post a notifying reply in each "
+            "thread classes it could not check (no advisory when the stop message itself "
+            "cannot be read: nothing shows it is a wait). Either way: post a notifying reply in each "
             "thread (`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
             "owner-started message). `refuse` always refuses it once; `allow` lets it through "
             "with a log line only. An invalid value fails closed to `refuse`.\n\n"

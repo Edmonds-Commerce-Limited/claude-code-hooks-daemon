@@ -376,7 +376,7 @@ class TestReentry:
         def _boom(*_args: object, **_kwargs: object) -> tuple[str, ...]:
             raise OSError("disk")
 
-        monkeypatch.setattr(guard_module, "recent_stop_hook_block_texts", _boom)
+        monkeypatch.setattr(guard_module, "recent_stop_hook_block_texts_this_chain", _boom)
         handler = _Handler(None, _FakeBus(_snapshot(_question())))
         assert _run(handler, _stop(tmp_path, stop_hook_active=True)) is None
 
@@ -830,13 +830,16 @@ class TestWaitingDetection:
         assert "could not be read" in result.reason
         assert bus.reads == []
 
-    def test_unreadable_transcript_on_v1_auto_allows_with_an_advisory(self, tmp_path: Path) -> None:
+    def test_unreadable_transcript_on_v1_auto_allows_without_an_advisory(
+        self, tmp_path: Path
+    ) -> None:
+        # N6: the advisory says the stop waits on a human; an unreadable message shows no wait.
         bus = _FakeBus(_snapshot(_question()), flags=False)
         hook_input = _stop(tmp_path)
         hook_input["transcript_path"] = str(tmp_path / "missing.jsonl")
         result = _run(_Handler(_seats(), bus, on_unreadable_bus="auto"), hook_input)
         assert result.decision is Decision.ALLOW
-        assert "team alpha" in _advisory(result)
+        assert _advisory(result) == ""
 
     def test_unreadable_transcript_for_a_worker_is_untouched(self, tmp_path: Path) -> None:
         bus = _FakeBus(_snapshot(_question()))
