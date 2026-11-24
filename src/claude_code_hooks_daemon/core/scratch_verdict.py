@@ -30,7 +30,10 @@ from a walk that did not finish:
    files. P7 covers a standalone repository's work tree and git directory: the
    coordinator's ruling applying the owner's "scratch repo ... no value"
    (DESIGN.md section 0). It stops at the deepest other repository root, and
-   files beside the repository are judged on their own.
+   files beside the repository are judged on their own. Neither P4 nor P7
+   covers a non-empty node in a git directory's ``objects`` store: a clone
+   anywhere on disk may borrow it through ``alternates``, so an entry holding
+   a repository with objects is UNCERTAIN (the long hold), never DISPOSABLE.
 
 Coverage is judged over every non-directory node and every empty directory.
 P1 trusts a regular file's own basename only; P2 covers anything, links and
@@ -278,16 +281,48 @@ def _p7(path: str, repos: RepoFindings | None) -> bool:
     return bool(holders) and max(holders)[1]
 
 
+#: The name of a git directory's object store, beside its ``HEAD``.
+_OBJECTS = "objects"
+
+
+def object_stores(nodes: Sequence[Node]) -> tuple[str, ...]:
+    """Every ``objects`` directory beside a ``HEAD`` (of any kind): a git directory's store.
+
+    Git accepts a symbolic-link ``HEAD``, so the kind is not checked: a false
+    match only over-protects.
+    """
+    suffix = "/HEAD"
+    return tuple(
+        f"{node.path[: -len(suffix)]}/{_OBJECTS}" for node in nodes if node.path.endswith(suffix)
+    )
+
+
+def in_object_store(node: Node, stores: Sequence[str]) -> bool:
+    """True for a non-empty node in an object store, which only P5 may cover (finding 1).
+
+    A clone made with ``git clone --shared`` anywhere on disk borrows these
+    objects through its ``alternates`` file, and no walk of the project can find
+    it, so P4 and P7 must not give the store the short hold.
+    """
+    return any(_under(node.path, store) for store in stores) and not (
+        node.empty or (node.kind is NodeKind.FILE and node.size == 0)
+    )
+
+
 def _coverage(
     nodes: Sequence[Node],
     repos: RepoFindings | None = None,
     p3: frozenset[str] = frozenset(),
 ) -> tuple[tuple[Proof, ...], list[str]]:
     venvs = _venv_directories(nodes)
+    stores = object_stores(nodes)
     used: set[Proof] = set()
     uncovered: list[str] = []
     for node in nodes:
         if node.kind is NodeKind.DIRECTORY and not node.empty:
+            continue
+        if in_object_store(node, stores):
+            uncovered.append(node.path)
             continue
         if _p4(node.path, repos):
             proof: Proof | None = Proof.P4
@@ -304,11 +339,19 @@ def _coverage(
     return tuple(proof for proof in Proof if proof in used), uncovered
 
 
-def uncovered_nodes(nodes: Sequence[Node], repos: RepoFindings | None) -> list[Node]:
-    """Every node no proof but P3 could still cover (the whole list, never capped)."""
+def uncovered_nodes(nodes: Sequence[Node], repos: RepoFindings | None) -> list[Node] | None:
+    """Every node no proof but P3 could still cover (the whole list, never capped).
+
+    None when an uncovered node is in an object store: P3 can never cover one,
+    so hashing the rest would only spend the shared budget.
+    """
     _proofs, uncovered = _coverage(nodes, repos)
     wanted = set(uncovered)
-    return [node for node in nodes if node.path in wanted]
+    found = [node for node in nodes if node.path in wanted]
+    stores = object_stores(nodes)
+    if any(in_object_store(node, stores) for node in found):
+        return None
+    return found
 
 
 #: Said when an entry holds a repository and no classification was run.

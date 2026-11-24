@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core.scratch_verdict import (
     Proof,
     RepositoryMarker,
     Verdict,
+    uncovered_nodes,
 )
 from claude_code_hooks_daemon.core.scratch_verdict import judge as real_judge
 from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
@@ -187,7 +188,7 @@ class TestOrdering:
                 Node("e", D, 0),
                 Node("e/.git", D, 0),
                 Node("e/.git/HEAD", F, 21),
-                Node("e/.git/objects/ab/cdef", F, 90),
+                Node("e/.git/objects", D, 0, empty=True),
                 Node("e/probe.py", F, 40),
                 git_markers=("e/.git",),
             )
@@ -196,6 +197,86 @@ class TestOrdering:
         judgement = judge(walk, age=_DUE, liveness=(), repos=repos)
         assert judgement.verdict is Verdict.DISPOSABLE
         assert judgement.proofs == (Proof.P7,)
+
+
+class TestObjectStoreNeverShortHeld:
+    """Task 3.9 finding 1: a borrower anywhere on disk may lean on a repository's objects.
+
+    ``git clone --shared`` outside the project cannot be enumerated, so no proof
+    may cover an object store: the entry is UNCERTAIN and gets the long hold.
+    """
+
+    def _walk(self, *extra: Node) -> Bounded[EntryStats]:
+        return finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/.git", D, 0),
+                Node("e/.git/HEAD", F, 21),
+                Node("e/.git/objects/ab/cdef", F, 90),
+                *extra,
+                git_markers=("e/.git",),
+            )
+        )
+
+    def test_p7_does_not_cover_loose_objects(self) -> None:
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        judgement = judge(self._walk(), age=_DUE, liveness=(), repos=repos)
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert judgement.uncovered == ("e/.git/objects/ab/cdef",)
+
+    def test_p4_does_not_cover_a_pack(self) -> None:
+        repos = RepoFindings(
+            kinds={"e/.git": RepoKind.RELATED},
+            p4_covered=("e/.git",),
+            p4_git_dirs=("e/.git",),
+            other_roots=("e",),
+        )
+        pack = Node("e/.git/objects/pack/pack-1.pack", F, 900)
+        judgement = judge(self._walk(pack), age=_DUE, liveness=(), repos=repos)
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert "e/.git/objects/pack/pack-1.pack" in judgement.uncovered
+
+    def test_a_bare_repository_object_store_is_uncovered(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/b.git/HEAD", F, 21),
+                Node("e/b.git/objects/ab/cdef", F, 90),
+            )
+        )
+        repos = RepoFindings(kinds={"e/b.git": RepoKind.STANDALONE}, standalone_roots=("e/b.git",))
+        assert judge(walk, age=_DUE, liveness=(), repos=repos).verdict is Verdict.UNCERTAIN
+
+    def test_a_log_shaped_name_in_an_object_store_is_not_p1(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/.git/HEAD", F, 21),
+                Node("e/.git/objects/qa-x.log", F, 90),
+            )
+        )
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        assert judge(walk, age=_DUE, liveness=(), repos=repos).verdict is Verdict.UNCERTAIN
+
+    def test_a_symlink_head_still_marks_the_store(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/.git/HEAD", L, 10),
+                Node("e/.git/objects/ab/cdef", F, 90),
+            )
+        )
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        assert judge(walk, age=_DUE, liveness=(), repos=repos).verdict is Verdict.UNCERTAIN
+
+    def test_p3_is_not_offered_an_object_store(self) -> None:
+        """P3 can never cover an object; hashing one would only spend the shared budget."""
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        assert uncovered_nodes(self._walk().value.nodes, repos) is None
+
+    def test_an_objects_folder_with_no_head_beside_it_is_ordinary(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/objects/run.log", F, 5)))
+        assert judge(walk, age=_DUE, liveness=()).verdict is Verdict.DISPOSABLE
 
     def test_p7_covers_only_the_repository_subtree_not_its_neighbours(self) -> None:
         walk = finished(

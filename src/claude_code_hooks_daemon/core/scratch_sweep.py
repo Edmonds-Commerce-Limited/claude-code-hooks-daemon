@@ -554,7 +554,9 @@ def _with_dependencies(
                 Verdict.PROTECTED,
                 f"another entry's repository depends on this one: {pointing[0]}{more}",
             )
-        elif reason and pending_verdict(row) is Verdict.DISPOSABLE:
+        elif reason and pending_verdict(row) in _ACTIONABLE:
+            # UNCERTAIN too: a repository's object store is never proved, so a
+            # possible lender is UNCERTAIN, and an unread pointer may name it.
             row = _overruled(row, Verdict.STUCK, f"not judged: {reason}")
         rows.append(row)
     return rows, reason, frozenset(dependents)
@@ -665,7 +667,7 @@ def _carried_down(row: EntryRow, container: _Container) -> EntryRow:
     if container.holds:
         verdict, reason = container.holds[0]
         return _overruled(row, verdict, reason)
-    if container.unproved and pending_verdict(row) is Verdict.DISPOSABLE:
+    if container.unproved:
         return _overruled(row, Verdict.STUCK, f"not judged: {container.unproved}")
     return row
 
@@ -913,7 +915,7 @@ def _with_p3(
     if blobs is None or length is None:
         return judgement
     nodes = uncovered_nodes(walk.value.nodes, repos)
-    if any(node.kind is not NodeKind.FILE for node in nodes):
+    if nodes is None or any(node.kind is not NodeKind.FILE for node in nodes):
         return judgement
     held: set[str] = set()
     for node in nodes:

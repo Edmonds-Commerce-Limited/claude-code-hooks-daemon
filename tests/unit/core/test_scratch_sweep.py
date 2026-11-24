@@ -672,7 +672,12 @@ class TestCrossEntryDependencies:
         git(parent, "worktree", "add", "-q", "-b", "side", str(gp.tree.root / "e" / "side"))
         now = _now()
         _old(gp.tree, now)
-        assert _verdicts(_git_sweep(gp, now)) == {"e": "DISPOSABLE"}
+        # Not PROTECTED; UNCERTAIN only because an object store is never proved (finding 1).
+        report = _git_sweep(gp, now)
+        assert _verdicts(report) == {"e": "UNCERTAIN"}
+        row = next(row for row in report.rows if row.name == "e")
+        assert row.uncovered
+        assert all("/objects/" in path for path in row.uncovered)
 
     def test_n2_a_separate_git_dir_whose_work_tree_is_outside_is_protected(
         self, tmp_path: Path
@@ -688,7 +693,7 @@ class TestCrossEntryDependencies:
         row = next(row for row in report.rows if row.name == "gd")
         assert "separate-git-dir" in " ".join(row.reasons)
 
-    def test_n2_a_separate_git_dir_with_its_work_tree_in_the_entry_is_disposable(
+    def test_n2_a_separate_git_dir_with_its_work_tree_in_the_entry_is_not_protected(
         self, tmp_path: Path
     ) -> None:
         gp = build_git_project(tmp_path)
@@ -698,9 +703,13 @@ class TestCrossEntryDependencies:
         commit_file(entry / "wt", "work.txt", "throwaway\n")
         now = _now()
         _old(gp.tree, now)
-        assert _verdicts(_git_sweep(gp, now)) == {"e": "DISPOSABLE"}
+        report = _git_sweep(gp, now)
+        assert _verdicts(report) == {"e": "UNCERTAIN"}
+        row = next(row for row in report.rows if row.name == "e")
+        assert any(path.startswith("e/gd/objects/") for path in row.uncovered)
 
-    def test_an_unreadable_pointer_makes_disposable_rows_stuck(self, tmp_path: Path) -> None:
+    def test_an_unreadable_pointer_makes_a_possible_lender_stuck(self, tmp_path: Path) -> None:
+        """A standalone repository is UNCERTAIN (finding 1) and still never acted on."""
         gp = build_git_project(tmp_path)
         gp.standalone("a")
         gp.tree.directory("b")
@@ -709,6 +718,17 @@ class TestCrossEntryDependencies:
         _old(gp.tree, now)
         report = _git_sweep(gp, now)
         assert _verdicts(report)["a"] == "STUCK"
+        assert not report.complete
+
+    def test_an_unreadable_pointer_makes_disposable_rows_stuck(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.tree.file("a.log")
+        gp.tree.directory("b")
+        os.mkfifo(gp.tree.root / "b" / ".git")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        assert _verdicts(report)["a.log"] == "STUCK"
         assert not report.complete
         assert any("b/.git" in reason for reason in report.incomplete_reasons)
 

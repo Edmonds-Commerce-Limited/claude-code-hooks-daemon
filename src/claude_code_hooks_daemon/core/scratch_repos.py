@@ -21,6 +21,8 @@ repository (a directory holding ``HEAD``, ``objects/`` and ``refs/``), is one of
 - STANDALONE: none of the above. Disposable (proof P7 covers its work tree and
   git directory), the coordinator's ruling applying the owner's "scratch repo
   ... no value" (DESIGN.md section 0). Files beside it are judged on their own.
+  Its ``objects`` store is never covered (by P7 or P4), since an unseen clone
+  may borrow it, so a repository holding objects leaves the entry UNCERTAIN.
 - BROKEN: anything that could not be judged. The entry is STUCK.
 
 A repository's linked worktrees (``<common>/worktrees/<id>``) are judged with
