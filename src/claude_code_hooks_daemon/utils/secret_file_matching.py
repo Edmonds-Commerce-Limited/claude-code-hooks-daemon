@@ -1400,8 +1400,11 @@ def _globs_can_intersect(a: str, b: str) -> bool:
     its first ``]``, so ``id[x[:punct:]]rsa`` left a stray ``]`` and never met
     ``id_rsa``. Each bracket bash would close (:func:`_bracket_end`) is also
     read as one ``?``; that reading is added, never put in place of the old.
+    Like the old reading's own gate, it is only trusted when the token keeps
+    :data:`_MIN_GLOB_OVERLAP_CHARS` literal characters once its brackets are
+    gone: ``[[:alnum:]_]*`` asserts no name, and text alone cannot judge it.
     """
-    if "[" in a or "[" in b:
+    if ("[" in a or "[" in b) and len(_class_aware_literal_residue(a)) >= _MIN_GLOB_OVERLAP_CHARS:
         bash_a, bash_b = _brackets_as_one_character(a), _brackets_as_one_character(b)
         if (bash_a, bash_b) != (a, b) and _globs_can_intersect_read(bash_a, bash_b):
             return True

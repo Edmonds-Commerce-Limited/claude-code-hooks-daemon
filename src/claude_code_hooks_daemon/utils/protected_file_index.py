@@ -39,7 +39,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils import secret_file_matching
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
@@ -610,15 +609,27 @@ def _segments_match(path: Sequence[str], glob: Sequence[str], *, ignore_case: bo
 
 
 def _component_matches(glob: str, name: str, ignore_case: bool) -> bool:
-    """Does one glob component match ``name``, read by this index OR the shared reader?
+    """Does one glob component match ``name``: case-exactly, or case-blind when allowed?
 
-    Ledger 00474 N719: the shared reader (:func:`secret_file_matching._component_spells`)
-    is bracket-aware and case-blind unless bash's defaults are certain. Its answer is
-    added to this index's own, never put in its place, so nothing matched before is lost.
+    Ledger 00474 N719: with ``nocaseglob`` possible (``ignore_case``), bash matches
+    a PATTERN component case-blind; a component with no pattern characters is
+    still compared exactly, as bash compares it. The case-blind reading is added
+    to the exact one, never put in its place, so nothing matched before is lost.
+    This index's own reader stays the translator: it reads a POSIX class as its
+    members, where the shared one widens it to any name, which against the files
+    that really exist would deny every class-bearing glob in their directory.
     """
-    if _component_pattern(glob).fullmatch(name) is not None:
+    pattern = _component_pattern(glob)
+    if pattern.fullmatch(name) is not None:
         return True
-    return secret_file_matching._component_spells(glob, name, ignore_case=ignore_case)
+    return (
+        ignore_case and _has_glob_syntax(glob) and _case_blind(pattern).fullmatch(name) is not None
+    )
+
+
+@lru_cache(maxsize=1024)
+def _case_blind(pattern: re.Pattern[str]) -> re.Pattern[str]:
+    return re.compile(pattern.pattern, pattern.flags | re.IGNORECASE)
 
 
 @lru_cache(maxsize=1024)

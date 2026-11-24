@@ -239,6 +239,21 @@ class TestItem2ClassNotFirstInItsBracket:
     ) -> None:
         assert _every_route(f"cat kit/lib/{word}", project.root) == _DENIED_EVERYWHERE
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ls kit/[[:alnum:]_]*",
+            "ls kit/[[:alpha:]-z]*",
+            "cat kit/lib/[[:lower:]]otes.txt",
+            "cat kit/lib/notes[x[:punct:]]txt",
+        ],
+    )
+    def test_a_class_bracket_naming_no_protected_file_stays_allowed(
+        self, project: Project, command: str
+    ) -> None:
+        """The bash-aware reading needs real name text, so a name-agnostic class adds no deny."""
+        assert _every_route(command, project.root) == _ALLOWED_EVERYWHERE
+
     def test_the_residue_reader_skips_a_whole_class_bracket(self) -> None:
         assert sfm._class_aware_literal_residue(f"[x[:lower:]]{_PROTECTED[1:]}") == (_PROTECTED[1:])
 
