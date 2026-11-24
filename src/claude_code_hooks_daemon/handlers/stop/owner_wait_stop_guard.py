@@ -220,8 +220,8 @@ _RULE: Final[Rule] = Rule(
         "seen, and a post that does not notify lands silently"
     ),
     fix=(
-        "Run the one bump command the deny prints (or post a notifying `pingbus thread ... --ask` "
-        "reply in each thread), then stop again"
+        "Run the one bump command the deny prints (or post the notifying reply it names in "
+        "each thread), then stop again"
     ),
     verbose=(
         "Applies per team where the teamchat probe declares this seat coordinator, on a\n"
@@ -753,11 +753,12 @@ class OwnerWaitStopGuardHandler(TeamOnlyGuidance, StopHandlerBase):
             "run it, then stop again.\n\n"
             "**Unreadable bus**: `options.on_unreadable_bus` is `auto` by default. Where the bus "
             "adapter can read notify flags, a wait the guard cannot confirm is refused once; on "
-            "pingbus v1 (no notify flag) it is allowed with an ADVISORY naming the team and the "
+            "a bus that exposes no notify flag (today's teamchat bus) it is allowed with an "
+            "ADVISORY naming the team and the "
             "thread classes it could not check (no advisory when the stop message itself "
             "cannot be read: nothing shows it is a wait). Either way: post a notifying reply in each "
-            "thread (`pingbus thread --team <t> Q<n> --ask`, or `--re <event id> --ask` for an "
-            "owner-started message). `refuse` always refuses it once; `allow` lets it through "
+            "thread, using the reply commands the advisory or deny prints for this bus (one for "
+            "an open question, one for an owner-started message). `refuse` always refuses it once; `allow` lets it through "
             "with a log line only. An invalid value fails closed to `refuse`.\n\n"
             "An unreadable role or an unresolved seat probe stays armed and is treated like an "
             "unreadable bus.\n\n"

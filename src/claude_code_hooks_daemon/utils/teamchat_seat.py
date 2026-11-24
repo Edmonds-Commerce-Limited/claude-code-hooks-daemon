@@ -79,6 +79,8 @@ _LOGGER = logging.getLogger(__name__)
 
 RUNTIME_ENV_VAR: Final[str] = "TEAMCHAT_RUNTIME"
 KIT_ENV_VAR: Final[str] = "TEAMCHAT_KIT"
+#: The kit command that shows peers' state (the coordinator board, Plan 00636).
+STATUS_COMMAND: Final[str] = "teamchat status"
 WHOAMI_ARGS: Final[tuple[str, ...]] = ("whoami", "--json")
 SUPPORTED_VERSIONS: Final[frozenset[int]] = frozenset({1})
 DEFAULT_TTL_SECONDS: Final[float] = 60.0
