@@ -1133,6 +1133,10 @@ handlers:
       enabled: true   # Advisory only; silent wherever the top-level `autonomy:` block allows autonomy
       priority: 47
 
+    coordinator_board:  # Plan 00636 Task 2.5: tell a coordinator seat that peers' state is `teamchat status`, never teamchat's files.
+      enabled: true
+      priority: 48
+
     work_queue_rebrief:  # On resume/compact, list the agents the durable work queue records as running (Plan 00470 Task 3.3)
       enabled: true      # Advisory only; silent unless a queue exists and something is running
       priority: 48

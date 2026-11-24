@@ -1275,6 +1275,13 @@ class HandlerID:
         config_key="autonomy_notice",
         display_name="autonomy-notice",
     )
+    # Plan 00636 Task 2.5 (s7, B5): a coordinator seat is told where peers'
+    # state comes from (`teamchat status`) and that an unreadable seat is unknown.
+    COORDINATOR_BOARD = HandlerIDMeta(
+        class_name="CoordinatorBoardHandler",
+        config_key="coordinator_board",
+        display_name="coordinator-board",
+    )
     # Plan 00470 Task 3.3: on a resumed or compacted session, list the agents the
     # durable work queue records as still running, with their respawn facts.
     WORK_QUEUE_REBRIEF = HandlerIDMeta(

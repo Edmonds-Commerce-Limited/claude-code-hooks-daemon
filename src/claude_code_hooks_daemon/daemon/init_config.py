@@ -489,6 +489,7 @@ class ConfigTemplate:
             "    session_actions_directive: {enabled: false, priority: 73}  # Write <session>.session-actions so the ccy supervisor types one directive when a SessionStart verifier is failing (opt-in)\n"
             "    autonomy_notice: {enabled: true, priority: 47}  # Say once that autonomy is off in this environment (silent while the top-level autonomy block allows it)\n"
             "    work_queue_rebrief: {enabled: true, priority: 48}  # On resume/compact, list the agents the durable work queue records as running; silent when none\n"
+            "    coordinator_board: {enabled: true, priority: 48}  # On a team coordinator seat, name `teamchat status` as the board for peers' state; silent off one (Plan 00636)\n"
             "    guard_config_drift: {enabled: true, priority: 49}  # Report a working-tree hooks-daemon.yaml that weakens a guard relative to the committed one; silent when they agree\n"
             "    suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup\n"
             "    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions\n"
