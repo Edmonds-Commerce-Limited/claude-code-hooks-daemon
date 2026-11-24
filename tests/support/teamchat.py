@@ -96,38 +96,45 @@ ROLE_NOT_A_STRING: Final[str] = whoami(seat("alpha", ["coordinator"]))
 ROLE_WITH_CONTROL_CHARACTERS: Final[str] = whoami(seat("alpha", "coord\ninator"))
 
 
-# --- ``teamchat verify --team <T> <id>`` (Plan 00634) ---------------------------
+# --- ``teamchat verify <event-id> [--room main|questions]`` (Plan 00634) ----------
 #
-# UNVERIFIED HERE: the questions-room ``verify`` answer is fedora-desktop issue
-# 369, which this repository has not seen. The shape below is PROVISIONAL, built
-# from the vet's reading of today's record (kind, sender, team, room, text; a
-# human line has ``kind == "human"``) plus the ``Q<n>`` the issue promises. The
-# verifier that reads it is not the production default until 369 is confirmed.
+# Shaped on the fedora-desktop issue 369 contract as relayed by its peer seat
+# (plan 00634 subagent-reports/261124-fedora-desktop-contract-reply.md), which
+# this repository has NOT checked against a live teamchat. One JSON record line,
+# kind ``verified``, with exactly the thirteen keys below. The value of ``v``
+# and the types of ``item``, ``from`` and ``body_sha256`` are not stated there;
+# the fixture uses the strictest reading the verifier accepts (``v`` 1, strings).
 
-#: A synthetic questions-room event id (Matrix ids start with ``$``).
-HUMAN_ID: Final[str] = "$synthetic-human-approval-0001"
+#: A synthetic questions-room event id: ``$`` and 43 of ``[A-Za-z0-9_-]``.
+HUMAN_ID: Final[str] = "$" + "synthetic-human-approval-0001".ljust(43, "x")
+#: ``sent_ms`` of the synthetic line (epoch milliseconds).
+SENT_MS: Final[int] = 1_795_000_000_000
 
 
-def verify_answer(
-    *,
-    event_id: str = HUMAN_ID,
-    team: str = "alpha",
-    room: Any = "questions",
-    kind: Any = "human",
-    question: Any = "Q7",
-    version: Any = 1,
-    **extra: Any,
-) -> str:
-    """A provisional ``verify --json`` answer for one line."""
+def verify_document(**overrides: Any) -> dict[str, Any]:
+    """The verify record for one line, as a dict; ``overrides`` replace keys."""
     document: dict[str, Any] = {
-        "v": version,
-        "id": event_id,
-        "team": team,
-        "room": room,
-        "kind": kind,
-        "sender": "@owner.synthetic:example.test",
-        "q": question,
+        "kind": "verified",
+        "v": 1,
+        "team": "alpha",
+        "id": HUMAN_ID,
+        "item": "synthetic-item-0001",
+        "from": "@owner.synthetic:example.test",
+        "room": "questions",
         "text": "yes, go ahead",
-        **extra,
+        "body_sha256": "0" * 64,
+        "sent_ms": SENT_MS,
+        "human": True,
+        "question": "Q7",
+        "headline": None,
     }
-    return _dump(document)
+    document.update(overrides)
+    return document
+
+
+def verify_answer(*, drop: tuple[str, ...] = (), **overrides: Any) -> str:
+    """One verify record line; ``drop`` removes keys, ``overrides`` replace or add them."""
+    document = verify_document(**overrides)
+    for key in drop:
+        del document[key]
+    return _dump(document) + "\n"

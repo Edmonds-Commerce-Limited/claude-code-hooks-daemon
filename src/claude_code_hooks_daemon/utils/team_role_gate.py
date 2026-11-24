@@ -19,9 +19,12 @@ three verdicts:
 A role only ever ADDS conduct. The gate has no allow, approve or bypass
 verdict, so no handler can use a detected role to relax an existing guard.
 
-Main thread only: a coordinator seat's sub-agents are not coordinators. The
-thread test is :func:`handler_scope.acts_as_main_thread`, so a synthetic probe
-event is treated the same way the scope machinery treats it.
+Main thread only by default: for conduct ADVISORIES a coordinator seat's
+sub-agents are not coordinators. A GUARD a sub-agent could otherwise walk
+round passes ``include_subagents=True`` (Plan 00634 P2), and a sub-agent is
+then judged as its seat on a DECLARED role or duty only. The thread test is
+:func:`handler_scope.acts_as_main_thread`, so a synthetic probe event is
+treated the same way the scope machinery treats it.
 """
 
 from __future__ import annotations
@@ -55,7 +58,12 @@ class RoleGateDecision:
 
 
 def role_gate(
-    hook_input: Mapping[str, Any], context: SeatContext, *, team: str, role: str
+    hook_input: Mapping[str, Any],
+    context: SeatContext,
+    *,
+    team: str,
+    role: str,
+    include_subagents: bool = False,
 ) -> RoleGateDecision:
     """Whether ``role`` in ``team`` applies to this event. Never raises.
 
@@ -67,39 +75,52 @@ def role_gate(
             ``Alpha`` finds teamchat's ``alpha``. A name that does not
             normalise (blank, odd characters) is undetermined: ROLE_UNKNOWN.
         role: The role whose conduct the caller would add.
+        include_subagents: For a GUARD a sub-agent could walk round (Plan
+            00634 P2): a sub-agent is judged as its seat, but only on a
+            DECLARED role. An unreadable role or team is NOT_APPLICABLE for
+            a sub-agent, never ROLE_UNKNOWN, so no team, role or duty is
+            assumed off the main thread. Advisories leave it False.
     """
     team = normalise_name(team)
     if context.state is SeatState.ABSENT:
         return RoleGateDecision(GateVerdict.NOT_APPLICABLE, team, "session holds no team seat")
-    if not acts_as_main_thread(hook_input):
+    main_thread = acts_as_main_thread(hook_input)
+    if not main_thread and not include_subagents:
         return RoleGateDecision(GateVerdict.NOT_APPLICABLE, team, "sub-agent: roles are per seat")
+    unknown = GateVerdict.ROLE_UNKNOWN if main_thread else GateVerdict.NOT_APPLICABLE
     if not team:
-        return RoleGateDecision(GateVerdict.ROLE_UNKNOWN, team, "the action's team is undetermined")
+        return RoleGateDecision(unknown, team, "the action's team is undetermined")
     answer = context.role_for_team(team)
     if answer.kind is RoleKind.UNKNOWN:
-        return RoleGateDecision(GateVerdict.ROLE_UNKNOWN, team, "role in this team is unreadable")
+        return RoleGateDecision(unknown, team, "role in this team is unreadable")
     if answer.holds_role(role):
         return RoleGateDecision(GateVerdict.APPLIES, team, f"declared {role} in this team")
     return RoleGateDecision(GateVerdict.NOT_APPLICABLE, team, f"not {role} in this team")
 
 
 def duty_gate(
-    hook_input: Mapping[str, Any], context: SeatContext, *, duty: str
+    hook_input: Mapping[str, Any],
+    context: SeatContext,
+    *,
+    duty: str,
+    include_subagents: bool = False,
 ) -> RoleGateDecision:
     """Whether ``duty`` in ANY held team applies to this event, for acts that name no team.
 
     ``APPLIES`` when some held team declares ``duty``; otherwise
     ``ROLE_UNKNOWN`` when some duty could not be read (it might have been
     this one), else ``NOT_APPLICABLE``. The decision's ``team`` is ``""``.
-    Never raises.
+    ``include_subagents`` is as for :func:`role_gate`: a sub-agent is judged
+    on a DECLARED duty only. Never raises.
     """
     if context.state is SeatState.ABSENT:
         return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", "session holds no team seat")
-    if not acts_as_main_thread(hook_input):
+    main_thread = acts_as_main_thread(hook_input)
+    if not main_thread and not include_subagents:
         return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", "sub-agent: duties are per seat")
     if context.any_duty(duty):
         return RoleGateDecision(GateVerdict.APPLIES, "", f"declared duty {duty} in a held team")
-    if context.duty_unknown():
+    if main_thread and context.duty_unknown():
         return RoleGateDecision(GateVerdict.ROLE_UNKNOWN, "", "a held team's duty is unreadable")
     return RoleGateDecision(GateVerdict.NOT_APPLICABLE, "", f"no held team has duty {duty}")
 
