@@ -30,7 +30,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     SessionSignals,
     TeamSeat,
 )
-from claude_code_hooks_daemon.utils.wind_down import WIND_DOWN_HEADING
+from claude_code_hooks_daemon.utils.wind_down import WIND_DOWN_HEADING, suggested_stop_line
 
 _RUNNING = [
     {"id": "agent-a1", "type": "subagent", "status": "running"},
@@ -180,3 +180,35 @@ class TestUntouched:
         assert not result.context
         assert isinstance(handler._resolver, _Resolver)
         assert handler._resolver.calls == 0
+
+
+class TestSuggestedLineIsAccepted:
+    @pytest.mark.parametrize("count", [1, 2])
+    def test_the_suggested_line_is_allowed_where_the_note_was_shown(
+        self, tmp_path: Path, count: int
+    ) -> None:
+        tasks = [
+            {"id": f"agent-{n}", "type": "subagent", "status": "running"} for n in range(count)
+        ]
+        handler = _handler()
+        refused = handler.handle(_stop(tasks))
+        assert refused.decision == Decision.DENY
+        assert refused.reason is not None
+        assert suggested_stop_line(count) in refused.reason
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": suggested_stop_line(count)}],
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result = handler.handle(_stop(tasks, transcript_path=str(transcript)))
+        assert result.decision == Decision.ALLOW

@@ -11,8 +11,8 @@ from claude_code_hooks_daemon.handlers.stop.owner_wait_stop_guard import _waitin
 from claude_code_hooks_daemon.utils.wind_down import (
     MAX_ID_CHARS,
     MAX_LISTED_IDS,
-    SUGGESTED_STOP_LINE,
     running_background_ids,
+    suggested_stop_line,
     wind_down_note,
 )
 
@@ -101,7 +101,7 @@ class TestWindDownNote:
     @pytest.mark.parametrize("count", [1, 3])
     def test_suggested_line_is_not_a_human_wait(self, count: int) -> None:
         """The suggested stop must not arm awaiting-human nor the owner-wait guard."""
-        line = SUGGESTED_STOP_LINE.format(count=count)
+        line = suggested_stop_line(count)
         assert line.startswith("STOPPING BECAUSE:")
         assert not _declares_human_blocked(line)
         assert _waiting_re(()).search(line) is None
@@ -113,3 +113,41 @@ class TestWindDownNote:
         note = wind_down_note(result)
         assert not _declares_human_blocked(note)
         assert _waiting_re(()).search(note) is None
+
+
+def _note(count: int) -> str:
+    tasks = [_task(f"t{n}") for n in range(count)]
+    result = running_background_ids({"background_tasks": tasks})
+    assert result is not None
+    return wind_down_note(result)
+
+
+class TestWording:
+    def test_note_does_not_promise_the_stop_passes(self) -> None:
+        note = _note(2)
+        assert "the stop passes" not in note
+        assert "this refusal clears" in note
+        assert "branch_stop_guard" in note
+        assert "cron_stop_enforcer" in note
+
+    @pytest.mark.parametrize("count", [1, 2, 5, 9999, 10000])
+    def test_stop_line_number_agrees_with_count(self, count: int) -> None:
+        line = suggested_stop_line(count)
+        if count == 1:
+            assert "1 background task is still running" in line
+            assert "its completion notice resumes" in line
+            assert "tasks" not in line
+        else:
+            assert f"{count} background tasks are still running" in line
+            assert "their completion notices resume" in line
+
+    @pytest.mark.parametrize("count", [1, 2, 5, 9999, 10000])
+    def test_note_agrees_with_count(self, count: int) -> None:
+        note = _note(count)
+        assert suggested_stop_line(count) in note
+        if count == 1:
+            assert "letting it finish" in note
+            assert "letting them finish" not in note
+        else:
+            assert "letting them finish" in note
+            assert "letting it finish" not in note
