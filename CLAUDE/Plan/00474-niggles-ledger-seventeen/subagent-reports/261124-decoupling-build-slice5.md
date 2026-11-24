@@ -14,9 +14,15 @@ merged. Paperwork only; no source change in this slice.
      seat's declared `host` duty and is advised, never denied.
    - 091 carried the same overstatement ("or whose teamchat probe gives no
      answer"). It is now scoped to a session that resolved a seat.
-   - 099 and 103 checked: no overstatement (099 already leaves a worker, no
-     team and a sub-agent untouched; 103 judges a sub-agent only for a
-     declared coordinator seat).
+   - 086 said an unreadable answer "never switches a guard off". Under D3 that
+     holds only once the session has resolved a seat; before that it reads as
+     no team. Scoped, pointing at note 105.
+   - 099, 103 and 087 checked: no overstatement. 099 already leaves a worker,
+     no team and a sub-agent untouched. In 103, a coordinator role with a host
+     (or malformed) duty reads as an UNKNOWN role (`teamchat_seat` seat merge),
+     so its sub-agents are untouched ("unreadable") and its main thread is
+     armed, which matches 087's "or whose role cannot be read" for a resolved
+     seat. Note 105 spells this out.
 2. **CLAUDE.md `<hooksdaemon>` block**: not hand-edited. It is regenerated on
    the daemon restart after merge; noted in the PR body.
    `test_cli_claude_md_block_is_stale` and `test_claude_md_guidance_coverage`
@@ -31,7 +37,8 @@ merged. Paperwork only; no source change in this slice.
    - `scripts/qa/audit_error_hiding.py`: no violations; `test_audit_error_hiding`
      passes; the exclusions file is untouched;
    - `test_session_mode_readers` passes;
-   - `scripts/qa/check_declared_invariant_pairs.py`: all 18 rows hold;
+   - `scripts/qa/check_declared_invariant_pairs.py`: all 18 rows hold; no
+     row was added for this work (not judged whether one is warranted);
    - every touched handler has at least one acceptance test, and no unit test
      asserts an empty acceptance list; the acceptance coverage and the
      touched handlers' unit suites pass;
