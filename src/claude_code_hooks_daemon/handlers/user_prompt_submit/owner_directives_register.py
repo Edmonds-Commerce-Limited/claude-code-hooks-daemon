@@ -195,5 +195,35 @@ class OwnerDirectivesRegisterHandler(UserPromptSubmitHandlerBase):
         return None
 
     def get_acceptance_tests(self) -> list[Any]:
-        """None: it needs a teamchat coordinator seat, which an acceptance run does not hold."""
-        return []
+        """Return acceptance tests for this handler.
+
+        Only the silent default is testable: replay needs a teamchat coordinator
+        seat, which an acceptance run does not hold.
+        """
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+
+        return [
+            AcceptanceTest(
+                title="Owner directives register is silent until a directive is recorded",
+                command='echo "test"',
+                description=(
+                    "Default state check. With no options.directives configured"
+                    " (the shipped default), submitting a prompt must inject NO"
+                    " owner-directive context. Verify by submitting a prompt and"
+                    " confirming no replayed owner directives appear in the"
+                    " system-reminders."
+                ),
+                expected_decision=Decision.ALLOW,
+                # Deliberately empty: this test asserts that NOTHING is injected.
+                expected_message_patterns=[],
+                safety_notes=(
+                    "Advisory only - never blocks. This test asserts ABSENCE, so"
+                    " it fails loudly if the register ever speaks with no"
+                    " directive recorded."
+                ),
+                test_type=TestType.CONTEXT,
+                requires_event="UserPromptSubmit event (cannot be triggered by subagent)",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+        ]

@@ -329,19 +329,6 @@ config_changes:
       migration_note: >-
         Keep mode: advise until the owner rules on promoting it after a live
         check in a host-duty seat.
-  removed:
-    - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
-      description: >-
-        RETIRED (Plan 00627). The idle housekeeping advisory no longer walks
-        untracked/scratch/ for files older than N days and no longer prints a
-        `find ... -delete`: removal on age alone is gone. It now reads the
-        scratch sweep's cached inventory and names the entries due by verdict
-        with the `scratch-sweep` dry run. The option is no longer read or
-        validated.
-      migration_note: >-
-        Delete the key. How long scratch may sit is now scratch.untracked_ttl
-        (scratch: 24h by default); report_stale_scratch still turns the
-        section off.
     - key: handlers.user_prompt_submit.owner_directives_register
       recommended: true
       dormant: false
@@ -363,3 +350,16 @@ config_changes:
                 directives:
                   - id: no-squash
                     text: Never squash-merge; use a merge commit.
+  removed:
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
+      description: >-
+        RETIRED (Plan 00627). The idle housekeeping advisory no longer walks
+        untracked/scratch/ for files older than N days and no longer prints a
+        `find ... -delete`: removal on age alone is gone. It now reads the
+        scratch sweep's cached inventory and names the entries due by verdict
+        with the `scratch-sweep` dry run. The option is no longer read or
+        validated.
+      migration_note: >-
+        Delete the key. How long scratch may sit is now scratch.untracked_ttl
+        (scratch: 24h by default); report_stale_scratch still turns the
+        section off.
