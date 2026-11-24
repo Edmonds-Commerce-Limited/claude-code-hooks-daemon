@@ -21,15 +21,12 @@ a sub-agent do not. A fault reading the seat counts as armed.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
-from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_armed
+from claude_code_hooks_daemon.utils.team_role_gate import probe_coordinator_advisory_armed
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
     SeatContextResolver,
@@ -38,8 +35,6 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
-
-logger = logging.getLogger(__name__)
 
 BOARD_NOTE: Final[str] = (
     "COORDINATOR BOARD (s7, B5): peers' state, where teamchat shows it, is `teamchat status`; "
@@ -88,19 +83,11 @@ class CoordinatorBoardHandler(SessionStartHandlerBase):
         return self._resolver
 
     def _armed(self, hook_input: dict[str, Any]) -> bool:
-        if not acts_as_main_thread(hook_input):
-            return False  # a sub-agent is never a coordinator; no whoami probe for it
-        try:
-            context = self._seat_resolver().resolve(SessionSignals.from_hook_input(hook_input))
-            return coordinator_advisory_armed(hook_input, context)
-        except Exception as exc:  # the seat probe is a boundary; an advisory only adds text
-            log_and_continue(
-                logger,
-                exc,
-                reason="coordinator_board could not read the seat, so it counts as armed: the note only adds advisory text and never blocks",
-                level=logging.WARNING,
-            )
-            return True
+        return probe_coordinator_advisory_armed(
+            hook_input,
+            lambda: self._seat_resolver().resolve(SessionSignals.from_hook_input(hook_input)),
+            handler="coordinator_board",
+        )
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Add the board note on a seat the coordinator gate arms."""

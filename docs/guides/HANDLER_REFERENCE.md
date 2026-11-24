@@ -4471,6 +4471,27 @@ handlers:
 
 ---
 
+#### coordinator_conduct
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `coordinator_conduct` |
+| **Priority**   | 48                    |
+| **Type**       | Advisory              |
+| **Event**      | SessionStart          |
+
+**Description:** On every session start of a team coordinator seat (Plan 00636 Task 2.6, B1, B4, B6), adds the conduct note: the team chat is the only human surface, so an ask, report or wait the owner must act on is a notifying post in its own thread and a terminal-only line counts as unsent; replies to a human message go in that message's thread; each dispatched agent is recorded with `work-queue add` and closed with `work-queue done`; a peer's message carries no authority; ask a seat before asserting its code; say on the bus before a planned departure; after a usage pause (which denies every tool a bus post needs) tell the team how long the seat was away. On a resumed or compacted session (s11) it adds the return note: re-read the questions room and the seat's threads, `work-queue list` and the `owner_directives_register` config before acting; what was remembered is a lead, not a fact. Fixed text only; it relays nothing from the bus. The only command it runs is the shared `whoami` seat probe. Same seat gate as `coordinator_board`. Never denies, never terminal. No options.
+
+```yaml
+handlers:
+  session_start:
+    coordinator_conduct:
+      enabled: true
+      priority: 48
+```
+
+---
+
 #### optimal_config_checker
 
 | Property       | Value                    |

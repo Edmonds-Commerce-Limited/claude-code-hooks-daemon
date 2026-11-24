@@ -7,6 +7,7 @@ from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
 from .config_optimisation_reminder import ConfigOptimisationReminderHandler
 from .contract_staleness import ContractStalenessHandler
 from .coordinator_board import CoordinatorBoardHandler
+from .coordinator_conduct import CoordinatorConductHandler
 from .disclosure_reset_session_start import DisclosureResetSessionStartHandler
 from .git_filemode_checker import GitFilemodeCheckerHandler
 from .git_upstream_checker import GitUpstreamCheckerHandler
@@ -39,6 +40,7 @@ __all__ = [
     "ConfigOptimisationReminderHandler",
     "ContractStalenessHandler",
     "CoordinatorBoardHandler",
+    "CoordinatorConductHandler",
     "DisclosureResetSessionStartHandler",
     "GitFilemodeCheckerHandler",
     "GitUpstreamCheckerHandler",

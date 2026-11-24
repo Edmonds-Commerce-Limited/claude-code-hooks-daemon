@@ -1137,6 +1137,10 @@ handlers:
       enabled: true
       priority: 48
 
+    coordinator_conduct:  # Plan 00636 Task 2.6: a coordinator seat's bus conduct each session; on resume/compact, what to re-read.
+      enabled: true
+      priority: 48
+
     work_queue_rebrief:  # On resume/compact, list the agents the durable work queue records as running (Plan 00470 Task 3.3)
       enabled: true      # Advisory only; silent unless a queue exists and something is running
       priority: 48

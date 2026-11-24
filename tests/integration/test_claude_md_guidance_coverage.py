@@ -697,6 +697,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "or compacted session of a coordinator seat; resident text would reach "
         "every non-team project for nothing"
     ),
+    "CoordinatorConductHandler": (
+        "T4 the session-start conduct and return notes ARE the content, given on "
+        "every new, resumed or compacted session of a coordinator seat; resident "
+        "text would reach every non-team project for nothing"
+    ),
     "RemoteDocsCommitGateHandler": (
         "T4 the deny names every offending staged file, its specific problem "
         "and the capture command. The standing policy — that the tree is "

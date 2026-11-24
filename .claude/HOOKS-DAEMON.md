@@ -126,13 +126,14 @@
 | 42 | scratch_inventory_refresher | ADVISORY | Start an inventory refresh after a directory-creating command into scratch |
 | 44 | ci_state_reading | ADVISORY | Read a `gh` CI output as queued, stuck, pending or unknown. Advisory, never denies |
 
-### SessionStart (38 handlers)
+### SessionStart (39 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 15 | disclosure_reset_session_start | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on SessionStart |
 | 47 | autonomy_notice | ADVISORY | State at session start that autonomy is off here, and why |
 | 48 | coordinator_board | ADVISORY | Tell a coordinator seat where the board is: `teamchat status`. Advisory, never denies |
+| 48 | coordinator_conduct | ADVISORY | Tell a coordinator seat its bus conduct, and what to re-read after a compaction |
 | 48 | work_queue_rebrief | ADVISORY | List the agents the durable work queue records as still running |
 | 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |

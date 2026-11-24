@@ -591,6 +591,9 @@ class Priority:
     # on a new, resumed or compacted session; this one names where peers'
     # state comes from. Cheap, and silent off a coordinator seat.
     COORDINATOR_BOARD = 48
+    # Plan 00636 Task 2.6: same slot and reason; this one carries the conduct
+    # note and, on resume or compact, what to re-read before acting.
+    COORDINATOR_CONDUCT = 48
     # Plan 00498: the first SessionStart advisory. Every cron, goal and recovery
     # advisory below is silent where autonomy is off, so this one line is what
     # tells the session the quiet is deliberate; it must not be read last.
