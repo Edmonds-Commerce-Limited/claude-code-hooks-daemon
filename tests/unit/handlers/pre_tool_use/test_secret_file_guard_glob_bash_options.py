@@ -43,7 +43,9 @@ from claude_code_hooks_daemon.utils.shell_snapshot import reset_snapshot_cache
 _PROTECTED = "id_" + "rsa"
 _SHEBANG = "#!/usr/bin/env bash\n"
 #: A shell snapshot recording every glob option the guard models as off (bash's defaults).
-_SNAPSHOT_ALL_OFF = "shopt -u dotglob\nshopt -u globstar\nshopt -u nocaseglob\n"
+_SNAPSHOT_ALL_OFF = (
+    "shopt -u dotglob\nshopt -u globstar\nshopt -u nocaseglob\nshopt -s globasciiranges\n"
+)
 _DEFAULTS_CERTAIN = "defaults-certain"
 _CONSERVATIVE = "conservative"
 

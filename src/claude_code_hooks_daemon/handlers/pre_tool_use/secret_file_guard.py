@@ -207,7 +207,8 @@ def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
     """Does this call hold a recursive search or a glob? True when that cannot be told.
 
     Asked only after the full scan gave up (review 614c P2). The Grep tool is a
-    recursive search. In a Bash call, a glob character anywhere outside a quoted
+    recursive search. In a Bash call, a glob character or an extglob opener
+    (``@(``, ``+(``, ``!(``: Ledger 00474 N720 item 4) anywhere outside a quoted
     text-fed heredoc counts, and so does any search
     :func:`recursive_search.search_reads` finds, which has no deadline or cap.
     """
@@ -222,8 +223,10 @@ def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
     cwd = raw_cwd if isinstance(raw_cwd, str) and Path(raw_cwd).is_absolute() else _PLACEHOLDER_CWD
     try:
         stripped = strip_quoted_heredoc_bodies(command, text_readers_only=True)
-        return bool(_MAY_GLOB.search(stripped)) or bool(
-            recursive_search.search_reads(stripped, cwd)
+        return (
+            bool(_MAY_GLOB.search(stripped))
+            or sfm.holds_extglob_opener(stripped)
+            or bool(recursive_search.search_reads(stripped, cwd))
         )
     except Exception as exc:
         log_and_continue(

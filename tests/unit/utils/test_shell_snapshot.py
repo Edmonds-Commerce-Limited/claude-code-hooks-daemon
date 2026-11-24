@@ -14,7 +14,7 @@ from claude_code_hooks_daemon.utils.shell_snapshot import (
     reset_snapshot_cache,
 )
 
-OFF = "shopt -u dotglob\nshopt -u globstar\nshopt -u nocaseglob\n"
+OFF = "shopt -u dotglob\nshopt -u globstar\nshopt -u nocaseglob\nshopt -s globasciiranges\n"
 
 
 @pytest.fixture(autouse=True)

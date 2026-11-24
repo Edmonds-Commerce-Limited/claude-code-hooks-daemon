@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils import secret_file_matching
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
@@ -337,7 +338,11 @@ class ProtectedFileIndex:
                 glob_parts, _ = _glob_parts(reading, default_expansion)
                 for entry in self.files:
                     for root in self._roots():
-                        if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
+                        if _segments_match(
+                            _components(f"{root}/{entry.relpath}"),
+                            glob_parts,
+                            ignore_case=not default_expansion,
+                        ):
                             return entry.pattern
         return None
 
@@ -378,10 +383,14 @@ class ProtectedFileIndex:
                     parts = _components(f"{root}/{entry.relpath}")
                     for depth in range(1, len(parts)):
                         directory = "/" + "/".join(parts[:depth])
-                        if _segments_match(parts[:depth], glob_parts):
+                        if _segments_match(
+                            parts[:depth], glob_parts, ignore_case=not default_expansion
+                        ):
                             found[directory] = None
                         for through_parts, real, link in throughs:
-                            if _segments_match(parts[:depth], through_parts):
+                            if _segments_match(
+                                parts[:depth], through_parts, ignore_case=not default_expansion
+                            ):
                                 found[link + directory[len(real) :]] = None
             if literal == len(glob_parts) - 1:
                 for link in self._matching_symlinked_directories(glob_parts):
@@ -576,19 +585,40 @@ def _skipped_below(base: str, absolute: str, skip: SkipHook) -> bool:
     return False
 
 
-def _segments_match(path: Sequence[str], glob: Sequence[str]) -> bool:
-    """Do the components of ``path`` match those of ``glob``, as the shell would?"""
+def _segments_match(path: Sequence[str], glob: Sequence[str], *, ignore_case: bool = True) -> bool:
+    """Do the components of ``path`` match those of ``glob``, as the shell would?
+
+    ``ignore_case`` is for a caller that cannot rule ``nocaseglob`` out
+    (Ledger 00474 N719): a pattern component then also matches case-blind.
+    """
     if not glob:
         return not path
     head, rest = glob[0], glob[1:]
     if head == _RECURSIVE_COMPONENT:
-        return any(_segments_match(path[skip:], rest) for skip in range(len(path) + 1))
+        return any(
+            _segments_match(path[skip:], rest, ignore_case=ignore_case)
+            for skip in range(len(path) + 1)
+        )
     if not path:
         return False
     name = path[0]
     if name.startswith(_HIDDEN_PREFIX) and not head.startswith(_HIDDEN_PREFIX):
         return False
-    return _component_pattern(head).fullmatch(name) is not None and _segments_match(path[1:], rest)
+    return _component_matches(head, name, ignore_case) and _segments_match(
+        path[1:], rest, ignore_case=ignore_case
+    )
+
+
+def _component_matches(glob: str, name: str, ignore_case: bool) -> bool:
+    """Does one glob component match ``name``, read by this index OR the shared reader?
+
+    Ledger 00474 N719: the shared reader (:func:`secret_file_matching._component_spells`)
+    is bracket-aware and case-blind unless bash's defaults are certain. Its answer is
+    added to this index's own, never put in its place, so nothing matched before is lost.
+    """
+    if _component_pattern(glob).fullmatch(name) is not None:
+        return True
+    return secret_file_matching._component_spells(glob, name, ignore_case=ignore_case)
 
 
 @lru_cache(maxsize=1024)
