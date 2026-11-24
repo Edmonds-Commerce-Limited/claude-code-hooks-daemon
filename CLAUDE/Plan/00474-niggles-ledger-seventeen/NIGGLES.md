@@ -8440,6 +8440,16 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Evidence**: the guard refuses to remove a detached throwaway worktree whose only change is a tracked file byte-identical to that file in a commit a remote ref already holds (pushed c46c73154). Example left in the fedora-desktop checkout: `untracked/worktrees/ledger-red`, detached at b04f60855, one deleted test file. The refusal's advice (`destructive_git.py:1090`) reads "Commit, push or deliberately delete each listed path"; committing clears a tracked path, but the delete option cannot, because a deleted tracked file is still a dirty path. Dirty tracked paths come only from `git status --porcelain` (`branch_cleanup.py:462-465`) with no remote-ref check; remote containment is applied to the worktree HEAD only (fact-check `subagent-reports/261124-fact-check-n721.md`).
 
-**Severity**: LOW (usability): a safe removal is refused and the stated remedy cannot work. Not a safety hole (the guard errs towards keeping work).
+**Severity**: LOW (usability): a safe removal is refused and one of the three stated remedies (delete) cannot work for a tracked file. Not a safety hole (the guard errs towards keeping work).
 
 **Status**: ⬜ Open. Expected: content reachable from a remote ref counts as not lost, and the advice names a route that works for tracked files (restore or commit the path, or remove once the content is proven pushed). Reproduce first with a detached worktree and a deleted tracked file whose pre-deletion content a remote ref holds; test-first; the change loosens a deletion guard, so it needs an independent security review before merge.
+
+### N722 — owner-wait Stop guard: a daemon deny followed by real work keeps the one-shot pass (found by the delta review of PR 234; the old code had it too)
+
+**Source**: delta review of PR 234; the reproducing input is the strict xfail test added to `tests/unit/handlers/stop/test_owner_wait_followups_n4_n5_n6.py` by that PR.
+
+**Evidence**: `owner_wait_stop_guard.py` (~line 520) passes a stop whenever every block after the guard's own refusal starts with `BLOCKED [R-`, and never checks whether the model did work after that block. Input: the guard refuses a wait; the model bumps and re-stops with a rhetorical question; R-STOP-TAUTOLOGICAL-QUESTION denies; the model works for 38 tool turns; it then stops on a new unposted Q62 wait: ALLOWED. Every Stop deny that sends the model back to work (QA failure, branch guard, cron) opens the same hole. Related, lower: a `queued_command` entry with no `commandMode` field is not counted as a prompt, so the old refusal stays in the chain (one extra pass, fail open for one stop). Releases: PR 234 closes the goal-continuation and queued-prompt cases; this one stays.
+
+**Severity**: MEDIUM: an unposted owner wait can end a coordinator stop without the bump, once per chain.
+
+**Status**: ⬜ Open. Direction: keep the pass across a daemon deny only when no work turn follows that deny, or when the current wait cites the same threads the guard refused; auto_continue_stop's own chain logic must not start refusing against it (the existing `test_no_third_refusal_in_the_chain` guards that). Test-first from the probe; flip the strict xfail.
