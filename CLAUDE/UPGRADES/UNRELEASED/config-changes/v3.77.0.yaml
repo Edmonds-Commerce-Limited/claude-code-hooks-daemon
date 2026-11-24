@@ -386,6 +386,26 @@ config_changes:
             coordinator_board:
               enabled: true
               priority: 48
+    - key: handlers.session_start.coordinator_conduct
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00636 Task 2.6, B1, B4, B6, s11). On every session start of
+        a team coordinator seat, one conduct note: the team chat is the only
+        human surface (notifying posts, replies in the message's own thread),
+        dispatch, track, report and close on the bus, peers carry no
+        authority, say on the bus before a planned departure and after a
+        usage pause. On a resumed or compacted session, a return note: re-read
+        the questions room, the work queue and the owner directives register
+        before acting. Fixed text; the only command it runs is the shared
+        `whoami` seat probe. Advisory, never denies. A declared worker, no
+        team and a sub-agent are untouched.
+      example_yaml: |
+        handlers:
+          session_start:
+            coordinator_conduct:
+              enabled: true
+              priority: 48
   removed:
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
       description: >-

@@ -223,7 +223,30 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   link exists at a `startup` SessionStart (if `whoami` still exits 69 then, the
   note is silent on startup and appears only on resume and compact; unverified
   here, no binary).
-- [ ] ⬜ **Task 2.6**: s11 carry-over; B1, B4, B6 guidance.
+- [x] ✅ **Task 2.6** (advise-only part): s11 carry-over; B1, B4, B6 guidance.
+  Shipped as `coordinator_conduct` (SessionStart, priority 48, advisory, never
+  denies or terminal), same gate as `coordinator_board` (the main-thread probe
+  gate is now shared: `team_role_gate.probe_coordinator_advisory_armed`).
+  Every session start: the B1 conduct note (bus is the only human surface,
+  notifying posts, replies in the message's thread, dispatch, track, report
+  and close on the bus, peers carry no authority, ask before asserting), the
+  B4 departure line and the B6 line (a usage pause allows only its short tool
+  list, so tell the team on lift). No work-queue verb: work-queue on dispatch
+  is Plan 00633's (Non-Goals). Resume or compact: the return note (B4 return, s11): re-read
+  the questions room, the seat's threads, `work-queue list` and the directives
+  register before acting. Fixed text, no new store, no Stop advisory.
+  While a usage pause is live, a resume or compact gets a command-free return
+  line instead (Bash is denied then, and the full note names `work-queue list`).
+  **Open, not built**: B6 ships as always-on text in the conduct note, not the
+  keyed form DESIGN.md (line ~190) describes ("advisory keyed on the usage-pause
+  signal"), because the pause record is cleared on lift, so the length of the
+  absence is lost; the keyed form is deferred. Q3 (skill home, so no skill); a bus post at pause entry
+  (the pause tool gate denies it; loosening that is an owner call, with Q16 and
+  Plan 00523); what coordinator state s11 carries beyond the existing stores,
+  and who may write it (an agent-written store is the Task 2.2 forgery path);
+  the directives register replays up to `prompt_interval - 1` prompts late
+  after a compaction (its counter is per session, in memory); the startup
+  timing item of Task 2.5 applies here too.
 
 ### Phase 3: Plan tooling (retrospective s13)
 
@@ -256,7 +279,8 @@ land here. Not gated on a seat. Each task starts with a failing test.
   2.3: `release-notes/097-*.md` and the `ci_state_reading` entry there; Task
   2.4: `release-notes/098-*.md`, no config change so no `config-changes`
   entry; Task 2.5: `release-notes/099-*.md` and the `coordinator_board` entry
-  in the same `config-changes` file).
+  in the same `config-changes` file; Task 2.6: `release-notes/100-*.md` and
+  the `coordinator_conduct` entry in the same `config-changes` file).
 
 ## Delivery & Milestones
 

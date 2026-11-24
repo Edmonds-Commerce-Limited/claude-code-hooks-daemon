@@ -26,12 +26,14 @@ event is treated the same way the scope machinery treats it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     ROLE_COORDINATOR,
     RoleKind,
@@ -39,6 +41,8 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatState,
     normalise_name,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GateVerdict(StrEnum):
@@ -125,3 +129,26 @@ def coordinator_advisory_armed(hook_input: Mapping[str, Any], context: SeatConte
         ):
             return True
     return duty_gate(hook_input, context, duty=ROLE_COORDINATOR).verdict is GateVerdict.APPLIES
+
+
+def probe_coordinator_advisory_armed(
+    hook_input: Mapping[str, Any], probe: Callable[[], SeatContext], *, handler: str
+) -> bool:
+    """:func:`coordinator_advisory_armed`, probing the seat only on the main thread.
+
+    A sub-agent is answered before ``probe`` runs (it is never a coordinator, so
+    no ``whoami`` is spent on it). A raising probe counts as armed, logged at
+    WARNING naming ``handler``: an advisory only adds text. Never raises.
+    """
+    if not acts_as_main_thread(hook_input):
+        return False
+    try:
+        return coordinator_advisory_armed(hook_input, probe())
+    except Exception as exc:  # the seat probe is a boundary; an advisory only adds text
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"{handler} could not read the seat, so it counts as armed: the note only adds advisory text and never blocks",
+            level=logging.WARNING,
+        )
+        return True
