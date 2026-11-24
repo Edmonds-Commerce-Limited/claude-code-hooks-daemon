@@ -207,4 +207,6 @@ class TestDefaultSeams:
     def test_guidance_and_acceptance_tests(self) -> None:
         handler = OwnerDirectivesRegisterHandler()
         assert handler.get_claude_md() is None
-        assert handler.get_acceptance_tests() == []
+        tests = handler.get_acceptance_tests()
+        assert len(tests) == 1
+        assert tests[0].expected_message_patterns == []
