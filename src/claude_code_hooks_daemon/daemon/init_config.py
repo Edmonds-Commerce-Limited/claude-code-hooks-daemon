@@ -469,6 +469,7 @@ class ConfigTemplate:
             "    evacuation_turn_marker: {enabled: true, priority: 43}  # Advance the main thread's turn so evacuation records expire (Plan 00558)\n"
             "    focus_mode_trigger: {enabled: true, priority: 41}  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off\n"
             "    idle_housekeeping_advisory: {enabled: false, priority: 56}  # Report-first idle housekeeping (beta, opt-in)\n"
+            "    owner_directives_register: {enabled: true, priority: 54}  # Replay the owner's recorded directives to a coordinator seat. Silent until options.directives lists one\n"
             "\n"
             "  # SessionStart - Initialize environment\n"
             "  session_start:\n"

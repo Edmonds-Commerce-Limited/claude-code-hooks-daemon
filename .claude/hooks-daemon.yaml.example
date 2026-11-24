@@ -970,6 +970,15 @@ handlers:
       enabled: true  # Never denies; never terminal
       priority: 41
 
+    owner_directives_register:  # Replay the owner's recorded directives to a coordinator seat (Plan 00636 Task 2.2)
+      enabled: true  # Silent until options.directives lists one; advisory, never denies, never terminal
+      priority: 54
+      # options:
+      #   prompt_interval: 10  # replay on the first human prompt, then every N human prompts (1..1000)
+      #   directives:          # each directive once; a repeated id or wording is recorded once
+      #     - id: no-squash
+      #       text: Never squash-merge; use a merge commit.
+
     standing_authorisations:  # Replay a standing request THIS project recorded (Plan 00223)
       # The HANDLER ships on so the options are discoverable; every
       # AUTHORISATION below ships off, so this is inert until you opt in.

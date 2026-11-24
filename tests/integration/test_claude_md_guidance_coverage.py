@@ -549,6 +549,10 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "T4: branch_stop_guard's section states the shared guard, its three-block "
         "limit and the sub-agent scope; a second section would bill the same fact twice"
     ),
+    "OwnerDirectivesRegisterHandler": (
+        "T4: the replay IS the whole message, delivered on the first prompt and re-delivered "
+        "on a cadence; it never denies, so a resident section would bill the same fact twice"
+    ),
     "DispatchModelRecorderHandler": "observe-only sensor, no agent-facing action",
     "BranchRejectAgentBinderHandler": "observe-only sensor, no agent-facing action",
     "BranchRejectVerdictRecorderHandler": "observe-only sensor, no agent-facing action",

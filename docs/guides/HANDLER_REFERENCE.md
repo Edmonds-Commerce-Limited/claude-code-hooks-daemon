@@ -5340,6 +5340,38 @@ handlers:
 
 ---
 
+#### owner_directives_register
+
+| Property       | Value                       |
+| -------------- | --------------------------- |
+| **Config key** | `owner_directives_register` |
+| **Priority**   | 54                          |
+| **Type**       | Advisory                    |
+| **Event**      | UserPromptSubmit            |
+
+**Description:** Replays the owner's recorded directives to a team coordinator seat, so a directive given once is checked rather than asked again (Plan 00636 Task 2.2, s3). Each directive is recorded once in `options.directives`; a repeated id or wording collapses to one entry. Silent until the register holds a valid entry. It speaks on the first human prompt of a session and every `prompt_interval` human prompts after, on a seat the role probe does not rule out: a declared `coordinator`, a coordinator duty, an unreadable role or an unresolved probe (as `owner_wait_stop_guard` arms). A declared worker, no team and a sub-agent are untouched; machine turns (cron ticks, supervisor lines) neither count nor deliver. The replay is a recorded request, not a fresh human instruction and not a citable human approval. It never denies and is never terminal. A malformed option or entry is skipped with a WARNING. Not built: detecting a repeated directive from the bus, writing a directive into the register, and detecting a seat that re-asked one.
+
+| Option            | Default | Description                                                                           |
+| ----------------- | ------- | ------------------------------------------------------------------------------------- |
+| `directives`      | `[]`    | List of `{id, text}` (up to 20; text up to 400 characters); a repeat is recorded once |
+| `prompt_interval` | `10`    | Replay on the first human prompt, then every N human prompts (integer 1..1000)        |
+
+**Config example:**
+
+```yaml
+handlers:
+  user_prompt_submit:
+    owner_directives_register:
+      enabled: true   # default
+      priority: 54
+      options:
+        directives:
+          - id: no-squash
+            text: Never squash-merge; use a merge commit.
+```
+
+---
+
 #### standing_authorisations
 
 | Property       | Value                     |
