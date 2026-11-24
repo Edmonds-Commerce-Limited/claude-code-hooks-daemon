@@ -21,11 +21,13 @@ Arming is :func:`team_role_gate.duty_gate` on ``host``:
   unreadable probe never disarms a guard. The first refusal in a session says
   the probe gave no answer.
 
-The command classification is the shared one in
-:mod:`utils.long_running_command`, taking its test, build and QA groups (not
-installs, containers or watches, which are deployment and triage) plus the lint
-and QA-script shapes below, and judging backgrounded or ``timeout``-bounded
-runs too: the lane is about WHAT runs, not how long.
+The lane commands are a SHORT per-language list held by the strategies in
+``strategies/lane_commands/`` (test runners, builds, linters, QA scripts; not
+installs, containers or watches, which are deployment and triage). They are
+judged through the shared peel in :mod:`utils.long_running_command`, which
+reads the common wrappers, ``sh -c`` bodies and backgrounded or
+``timeout``-bounded runs: the lane is about WHAT runs, not how long. The long
+tail of wrapper spellings is deliberately not chased, since this guard advises.
 """
 
 from __future__ import annotations
@@ -33,7 +35,6 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from claude_code_hooks_daemon.constants import (
@@ -48,15 +49,11 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.long_running_command import (
-    BUILD_PATTERNS,
-    QA_PATTERNS,
-    TEST_PATTERNS,
-    FindingKind,
-    LongRunningPolicy,
-    classify,
+from claude_code_hooks_daemon.strategies.lane_commands.common import runs_any
+from claude_code_hooks_daemon.strategies.lane_commands.registry import (
+    LaneCommandStrategyRegistry,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.team_role_gate import GateVerdict, duty_gate
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     DUTY_HOST,
@@ -78,46 +75,9 @@ _MODES: Final[frozenset[str]] = frozenset({MODE_OFF, MODE_ADVISE, MODE_BLOCK})
 _OPTION_MODE: Final[str] = "mode"
 _OPTION_EXTRA: Final[str] = "extra_lane_patterns"
 
-#: Lint and type-check programs, and package-script spellings of lint/QA.
-LINT_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?:ruff|mypy|pyright|pylint|flake8|black|isort|bandit|eslint|prettier|stylelint"
-    r"|shellcheck|golangci-lint|phpstan|psalm|phpcs|rubocop|hadolint|markdownlint|yamllint)\b",
-    r"^(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:llm:)?(?:lint|typecheck|type-check|qa)\S*",
-    r"^npx\s+(?:jest|vitest|playwright|mocha|tsc|eslint|prettier)\b",
-    r"^cargo\s+fmt\b",
-    # `python -m unittest` peels to `unittest`.
-    r"^unittest\b",
-)
-#: ``make`` alone, or a test/build/lint target. ``make deploy`` is untouched.
-LANE_MAKE_PATTERNS: Final[tuple[str, ...]] = (
-    r"^make(?:\s+-\S+)*\s*$",
-    r"^make(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|all|ci)\b",
-)
-#: A script named for tests, QA or lint: ``run_tests.sh``, ``llm_qa.py``, ``test_x.py``.
-#: A deploy, smoke, health, publish or connection check is triage even when its
-#: name carries ``test`` or ``qa`` (``deploy-qa.sh``, ``smoke_test.sh``).
-QA_SCRIPT_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?![\w.-]*(?:deploy|smoke|health|publish|connection))"
-    r"(?:[\w.-]*[_.-])?(?:tests?|qa|lint|typecheck|type_check)(?:[_.-][\w.-]*)?\.(?:sh|bash|py)\b",
-)
-#: The shared build group, except that a JVM build tool is judged by its goal:
-#: ``mvn deploy`` and ``gradle publish`` ship an artefact and are deployment.
-_SHIPPING_GOAL: Final[str] = r"(?!(?:.*\s)?(?:deploy|publish)(?:\s|$))"
-LANE_BUILD_PATTERNS: Final[tuple[str, ...]] = (
-    r"^(?:tsc|webpack|ant|cmake|ninja|bazel)\b",
-    rf"^(?:gradle|gradlew|mvn){_SHIPPING_GOAL}\b",
-    *BUILD_PATTERNS[1:],
-)
-LANE_PATTERNS: Final[tuple[str, ...]] = (
-    *TEST_PATTERNS,
-    *LANE_BUILD_PATTERNS,
-    *QA_PATTERNS,
-    *LINT_PATTERNS,
-    *LANE_MAKE_PATTERNS,
-    *QA_SCRIPT_PATTERNS,
-)
-#: Any ``timeout`` counts as unbounded here, so a bounded test run is still judged.
-_LANE_THRESHOLD_SECONDS: Final[float] = 0.0
+_LANE_REGISTRY: Final[LaneCommandStrategyRegistry] = LaneCommandStrategyRegistry.create_default()
+#: Every language's lane commands: the strategies in ``strategies/lane_commands/``.
+LANE_PATTERNS: Final[tuple[str, ...]] = _LANE_REGISTRY.get_lane_patterns()
 #: Sessions already told the probe gave no answer; cleared when it reaches this size.
 _MAX_NOTED_SESSIONS: Final[int] = 1024
 
@@ -163,14 +123,6 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
-@lru_cache(maxsize=16)
-def _lane_policy(extra_patterns: tuple[str, ...]) -> LongRunningPolicy:
-    return LongRunningPolicy(
-        threshold_seconds=_LANE_THRESHOLD_SECONDS,
-        slow_patterns=tuple(re.compile(p) for p in (*LANE_PATTERNS, *extra_patterns)),
-    )
-
-
 def is_lane_command(command: str, *, extra_patterns: Sequence[str] = ()) -> bool:
     """Whether ``command`` runs a test, build, lint or QA command anywhere in it.
 
@@ -178,8 +130,7 @@ def is_lane_command(command: str, *, extra_patterns: Sequence[str] = ()) -> bool
     never read as a command; ``sh -c`` bodies, wrappers and backgrounded
     statements are.
     """
-    findings = classify(command, _lane_policy(tuple(extra_patterns)), include_background=True)
-    return any(finding.kind is FindingKind.SLOW_COMMAND for finding in findings)
+    return runs_any(command, (*LANE_PATTERNS, *extra_patterns))
 
 
 class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
@@ -335,7 +286,18 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Harness-undrivable: arming needs a live teamchat seat with duty host."""
+        """This handler's own tests plus one lane refusal per language strategy.
+
+        All are harness-undrivable: arming needs a live teamchat seat with duty host.
+        """
+        strategy_tests = [
+            test
+            for strategy in _LANE_REGISTRY.strategies()
+            for test in strategy.get_acceptance_tests()
+        ]
+        return [*self._own_acceptance_tests(), *strategy_tests]
+
+    def _own_acceptance_tests(self) -> list[Any]:
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         unseated = (

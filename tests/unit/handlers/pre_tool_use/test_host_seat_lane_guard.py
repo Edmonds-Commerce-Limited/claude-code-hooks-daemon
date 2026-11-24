@@ -50,7 +50,9 @@ MULTI_TEAM = parse_whoami(fx.MULTI_TEAM)
 NULL_DUTY = parse_whoami(fx.ROLE_NULL)
 WORKER_NULL_DUTY = parse_whoami(fx.whoami(fx.seat("alpha", "worker", duty=None)))
 NO_DUTY_KEY = parse_whoami(
-    fx.whoami({"team": "alpha", "handle": "@example.1+local.container:alpha.test", "role": "worker"})
+    fx.whoami(
+        {"team": "alpha", "handle": "@example.1+local.container:alpha.test", "role": "worker"}
+    )
 )
 GARBAGE_DUTY = parse_whoami(fx.whoami(fx.seat("alpha", "worker", duty="ho st!")))
 HOST_AND_NULL_DUTY = parse_whoami(
