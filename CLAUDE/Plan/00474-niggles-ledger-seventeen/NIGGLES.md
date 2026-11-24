@@ -8437,9 +8437,9 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Severity**: HIGH (security): a protected file's contents can be read through a link.
 
-**Status**: 🔄 Partly fixed on branch `fix-n710-secret-guard-glob-later-parts`, test-first, awaiting independent review. The builder report is `subagent-reports/261124-n720-plain-defects-opus-builder.md`. Fixed items:
+**Status**: 🔄 Partly fixed and merged via PR #249 (two independent security reviews, `D-RULE` and `D-SEC`, found no loosened rule). The builder report is `subagent-reports/261124-n720-plain-defects-opus-builder.md`. Fixed items:
 
-- **Item 1, with N719.** A finite bracket's expansions are compared case-blind whenever bash's defaults are not certain.
+- **Item 1, with N719, for a bracket in the FINAL name only.** A finite bracket's expansions are compared case-blind whenever bash's defaults are not certain. A one-character bracket in a DIRECTORY component (`kit/[L]IB/*`) is still allowed under `nocaseglob`: it is open as N728.
 - **Item 2.** A bash-aware bracket reading is added to the old one, in the stem residue and in the two-glob intersection.
 - **Item 3, `-O` in a flag cluster only.**
 - **Item 4.** An extglob opener counts as a glob after a scan gives up, and extglob words are judged before the brace stream.
