@@ -8590,7 +8590,7 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 
 **Severity**: LOW (test strength unproven; the fix itself is reviewed).
 
-**Status**: ⬜ Open. Revert `resume_claimed`'s `packed_at` check in a throwaway branch, confirm the test fails, record the result.
+**Status**: ✅ Closed. The independent PR 251 security review (`CLAUDE/Plan/00627-scratch-management-ttl-and-filing/subagent-reports/261124-pr251-security-review-opus.md`, finding F4, probe `p3_n733_old_behaviour`) neutralised the `packed_at` check and reran the test's sequence: the outcome was `removed` where the test asserts `renamed-back`, so the test is RED on the old behaviour. The `packed_at` check was later replaced by binding the record to the latest claim's `archive_id` (review F1/F2); the test now guards that binding and stays green under it.
 
 ### N734 — other `worktree_blockers` callers keep the check-to-removal gap finding 4 narrowed in `reap_worktree`
 
@@ -8611,3 +8611,13 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: MEDIUM (owner decision needed).
 
 **Status**: ⬜ Open, owner question: what may expire the archives of a live worktree, and of a removed one?
+
+### N736 — scratch liveness: a file held open from another mount namespace is not seen as in use
+
+**Source**: Plan 00627, independent PR 251 security review finding F3 (PLAUSIBLE; not tested, `unshare` returned EPERM on the review host).
+
+**Evidence**: `_descriptor_paths` and `_mapped_paths` (`core/scratch_liveness.py`) and `entry_in_use` (`core/scratch_archive_facts.py`) compare the TEXT of `/proc/<pid>/fd/<n>` links and `/proc/<pid>/maps` paths with the entry's path. That text is the path in the holder's mount namespace, so a container started with `docker run -v "$PWD":/app` holding `/app/untracked/scratch/x/f` never matches, and the entry can be claimed, packed and removed under it. The cwd check has the same limit, so this is not a regression of PR 251.
+
+**Severity**: LOW (needs a process in another mount namespace holding a scratch file across a sweep).
+
+**Status**: ⬜ Open. Candidate fix from the review: compare identities instead of text, `os.stat(f"/proc/{pid}/fd/{n}")` (follows the magic link to the real inode in any namespace) matched on `(st_dev, st_ino)` against the entry's walked inodes, test-first. The limit is stated in DESIGN.md's open-file row.
