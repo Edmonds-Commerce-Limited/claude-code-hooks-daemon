@@ -86,17 +86,56 @@ LINT_PATTERNS: Final[tuple[str, ...]] = (
     # `python -m unittest` peels to `unittest`.
     r"^unittest\b",
 )
-#: ``make`` alone, or a test/build/lint target. ``make deploy`` is untouched.
-LANE_MAKE_PATTERNS: Final[tuple[str, ...]] = (
-    r"^make(?:\s+-\S+)*\s*$",
-    r"^make(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|all|ci)\b",
+#: ``make`` options whose value is the next word (or attached: ``-Csub``).
+_MAKE_VALUED: Final[str] = "CfIoW"
+_MAKE_LONG_VALUED: Final[str] = (
+    "directory|file|makefile|include-dir|old-file|assume-old|new-file|assume-new|what-if"
 )
-#: A script named for tests, QA or lint: ``run_tests.sh``, ``llm_qa.py``, ``test_x.py``.
-#: A deploy, smoke, health, publish or connection check is triage even when its
-#: name carries ``test`` or ``qa`` (``deploy-qa.sh``, ``smoke_test.sh``).
+#: One ``make`` option, each word read exactly one way (no backtracking blow-up):
+#: a valued option with its value, ``-j``/``-l`` with an optional number, or any
+#: other option.
+_MAKE_OPTION: Final[str] = (
+    rf"\s+(?:-[{_MAKE_VALUED}]\s*\S+"
+    r"|-[jl](?:\s*\d+(?:\.\d+)?)?"
+    rf"|--(?:{_MAKE_LONG_VALUED})\s+\S+"
+    rf"|-(?![{_MAKE_VALUED}jl])(?!-(?:{_MAKE_LONG_VALUED})(?:\s|$))\S+)"
+)
+#: A target or a ``VAR=value`` word (never an option, never a bare number).
+_MAKE_WORD: Final[str] = r"\s+(?![-\d])\S+"
+_LANE_TARGETS: Final[str] = r"(?:test|tests|check|lint|build|qa|all|ci)\b"
+#: ``make`` (or ``gmake``) with only options and assignments, or naming a
+#: test/build/lint target anywhere. ``make deploy`` and ``make -C infra deploy``
+#: are untouched.
+LANE_MAKE_PATTERNS: Final[tuple[str, ...]] = (
+    rf"^g?make(?:{_MAKE_OPTION}|\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s*$",
+    rf"^g?make(?:{_MAKE_OPTION}|{_MAKE_WORD})*?\s+{_LANE_TARGETS}",
+)
+#: Task runners and project managers, by their test/lint/build verbs only:
+#: ``just deploy``, ``hatch publish`` and Taskwarrior's ``task add`` are untouched.
+LANE_RUNNER_PATTERNS: Final[tuple[str, ...]] = (
+    r"^(?:just|task)(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|ci|typecheck|fmt)\b",
+    r"^hatch\s+(?:test|build|fmt)\b",
+    r"^hatch\s+run(?:\s+-\S+)*\s+(?:(?:test|tests|lint|types|typing|qa|cov|style)[\w.-]*:\S+"
+    r"|(?:[\w.-]+:)?(?:test|tests|cov|lint|check|typecheck|type-check|qa|pytest|mypy|ruff|fmt)\b)",
+    r"^pre-commit(?:\s+-\S+)*(?:\s+(?:run|try-repo)\b|\s*$)",
+)
+_JS_RUNNER: Final[str] = r"(?:(?:pnpm|yarn|bun)(?:\s+(?:exec|dlx|x))?|npm\s+exec|npx|bunx|pnpx)"
+#: Package-manager spellings the shared test/build patterns do not list.
+LANE_PACKAGE_PATTERNS: Final[tuple[str, ...]] = (
+    r"^(?:npm|pnpm)\s+(?:t|tst)(?:\s|$)",
+    r"^(?:npm|yarn|pnpm|bun)\s+run-script\s+(?:llm:)?"
+    r"(?:test|build|lint|typecheck|type-check|qa|check)\S*",
+    r"^(?:npm|yarn|pnpm|bun)\s+run\s+check(?::\S*)?(?:\s|$)",
+    rf"^{_JS_RUNNER}(?:\s+-\S+)*\s+(?:jest|vitest|playwright|mocha|tsc|eslint|prettier)\b",
+)
+#: A script named for tests, QA, lint or autofix: ``run_tests.sh``, ``llm_qa.py``,
+#: ``test_x.py``, ``run_autofix.sh``. A deploy, smoke, health, publish or
+#: connection check is triage even when its name carries ``test`` or ``qa``
+#: (``deploy-qa.sh``, ``smoke_test.sh``).
 QA_SCRIPT_PATTERNS: Final[tuple[str, ...]] = (
     r"^(?![\w.-]*(?:deploy|smoke|health|publish|connection))"
-    r"(?:[\w.-]*[_.-])?(?:tests?|qa|lint|typecheck|type_check)(?:[_.-][\w.-]*)?\.(?:sh|bash|py)\b",
+    r"(?:[\w.-]*[_.-])?(?:tests?|qa|lint|typecheck|type_check|autofix)(?:[_.-][\w.-]*)?"
+    r"\.(?:sh|bash|py)\b",
 )
 #: The shared build group, except that a JVM build tool is judged by its goal:
 #: ``mvn deploy`` and ``gradle publish`` ship an artefact and are deployment.
@@ -117,6 +156,8 @@ LANE_PATTERNS: Final[tuple[str, ...]] = (
     *QA_PATTERNS,
     *LINT_PATTERNS,
     *LANE_MAKE_PATTERNS,
+    *LANE_RUNNER_PATTERNS,
+    *LANE_PACKAGE_PATTERNS,
     *QA_SCRIPT_PATTERNS,
 )
 #: Any ``timeout`` counts as unbounded here, so a bounded test run is still judged.

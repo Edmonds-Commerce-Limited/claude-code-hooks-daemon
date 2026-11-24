@@ -330,6 +330,77 @@ class TestWrapperSpellings:
     def test_launched_triage_command_is_untouched(self, command: str) -> None:
         assert is_lane_command(command) is False
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gmake test",
+            "gmake",
+            "make -C sub test",
+            "make -C sub",
+            "make -f Makefile.ci test",
+            "make --directory sub check",
+            "make -Csub lint",
+            "make -j 4 test",
+            "make -j test",
+            "make clean test",
+            "make V=1 test",
+            "just test",
+            "just --verbose lint",
+            "task test",
+            "task test:unit",
+            "hatch test",
+            "hatch run test",
+            "hatch run test:cov",
+            "hatch run lint:all",
+            "hatch fmt --check",
+            "npm t",
+            "pnpm t",
+            "npm run-script test",
+            "npm run-script lint",
+            "npm run check",
+            "pnpm vitest",
+            "pnpm exec vitest",
+            "pnpm dlx vitest run",
+            "yarn jest",
+            "yarn exec jest --ci",
+            "npm exec -- jest",
+            "bunx vitest",
+            "npx --yes jest",
+            "pre-commit run --all-files",
+            "pre-commit",
+            "./scripts/qa/run_autofix.sh",
+            "bash scripts/qa/run_autofix.sh",
+        ],
+    )
+    def test_lane_only_name_is_refused(self, command: str) -> None:
+        assert is_lane_command(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "make -C infra deploy",
+            "make -C test deploy",
+            "make -f deploy.mk deploy",
+            "gmake install",
+            "just deploy",
+            "just",
+            "task add buy milk",
+            "task list",
+            "hatch publish",
+            "hatch run deploy",
+            "hatch env create",
+            "npm run-script deploy",
+            "npm run deploy",
+            "pnpm exec prisma migrate deploy",
+            "bunx cowsay hi",
+            "pre-commit install",
+            "pre-commit autoupdate",
+            "./deploy.sh",
+        ],
+    )
+    def test_triage_command_with_a_lane_runner_is_untouched(self, command: str) -> None:
+        assert is_lane_command(command) is False
+
     def test_nesting_too_deep_to_read_fails_closed(self) -> None:
         command = "eval " + "eval " * 12 + "ls"
         assert is_lane_command(command) is True
