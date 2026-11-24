@@ -8392,7 +8392,7 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 
 **Severity**: HIGH (security): each reads a protected file through a link by a glob the guard reads more narrowly than bash.
 
-**Status**: ⬜ Open. Fix by widening only, test-first: (1) case-insensitive component regexes whenever the command or script can enable `nocaseglob` (any `shopt`, `-O`, `BASHOPTS`) or bash defaults are uncertain; (2) fail closed on any unquoted `[?*+@!](`, take the whole word as the real tokenizer splits it, dequote it and widen every extglob component to any name, never carving the word with a regex; (3) count an assignment to `GLOBIGNORE`, or `BASHOPTS` in the environment, as switching options, the way `shopt` does now.
+**Status**: 🔄 Fixed on branch `fix-n710-secret-guard-glob-later-parts` (round N716, report `subagent-reports/261123-opus-builder-n716.md`), together with the PR 230 delta review's findings 1 and 2 (a POSIX class after the first bracket member; `[^` inside an open bracket). Awaiting review and merge. Original direction: fix by widening only, test-first: (1) case-insensitive component regexes whenever the command or script can enable `nocaseglob` (any `shopt`, `-O`, `BASHOPTS`) or bash defaults are uncertain; (2) fail closed on any unquoted `[?*+@!](`, take the whole word as the real tokenizer splits it, dequote it and widen every extglob component to any name, never carving the word with a regex; (3) count an assignment to `GLOBIGNORE`, or `BASHOPTS` in the environment, as switching options, the way `shopt` does now.
 
 ### N717 — perf sweep `test_a_big_alias_chain_is_judged_quickly` passes its 1.5 s bound by a thin margin on CI
 
@@ -8413,6 +8413,16 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: Medium (usability; fail-closed, so not a leak).
 
 **Status**: ⬜ Open. Decide whether an EACCES on a probe of a spelled path (not a listing) counts as no match, mirroring bash. If yes: test-first, uid-independent (monkeypatch `os.lstat` to raise EACCES), keep a reachable link denied, and get a security delta review because it loosens a fail-closed branch.
+
+### N719 — the protected-file index's glob matcher is a second shell-pattern reader, still case-exact and not bracket-aware
+
+**Source**: builder of N716 (`subagent-reports/261123-opus-builder-n716.md`). N716 put every shell-pattern match in `secret_file_matching.py` through one bracket-aware, case-aware reader. `protected_file_index.glob_matches` and `directories_matching` (`_glob_parts`, `_segments_match`) were out of that scope and were not changed.
+
+**Evidence**: not reproduced as a leak. The index is a cache. The N716 tests show that every N716 reproducer is denied with the index switched off, so the walk and the spelling checks, not the index, carry the verdict. Two shapes are not modelled anywhere: a range read under a non-ASCII collation when `globasciiranges` is off (`[a-c]` can then match `B`), and `${x:-word}` defaults (the N710 review's finding 7).
+
+**Severity**: Low (defence in depth; no reproducer reads a protected file).
+
+**Status**: ⬜ Open. Route the index matcher's component matching through `secret_file_matching._component_regex` (case-blind unless bash's defaults are certain), test-first. Add `globasciiranges` to the snapshot options that must be recorded, or read ranges case-blind.
 
 ### N720 — secret-file guard: residual bypasses found by the independent review of PR 232 (all also allowed on main; PR 232 is a strict improvement)
 

@@ -21,7 +21,7 @@ from claude_code_hooks_daemon.utils.shell_snapshot import reset_snapshot_cache
 KEY = "id_" + "rsa"
 PATTERNS = (KEY,)
 
-SNAPSHOT_OFF = "shopt -u dotglob\nshopt -u globstar\n"
+SNAPSHOT_OFF = "shopt -u dotglob\nshopt -u globstar\nshopt -u nocaseglob\n"
 
 
 def _write_snapshot(config: Path, name: str, body: str) -> None:

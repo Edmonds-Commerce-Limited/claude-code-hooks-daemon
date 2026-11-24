@@ -14,7 +14,7 @@ from claude_code_hooks_daemon.utils.shell_snapshot import (
     reset_snapshot_cache,
 )
 
-OFF = "shopt -u dotglob\nshopt -u globstar\n"
+OFF = "shopt -u dotglob\nshopt -u globstar\nshopt -u nocaseglob\n"
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +56,8 @@ class TestVerdict:
             "shopt -u dotglob\n",
             "echo nothing\n",
             OFF + "shopt -s globstar\n",
+            "shopt -u dotglob\nshopt -u globstar\n",
+            OFF + "shopt -s nocaseglob\n",
         ],
     )
     def test_one_ambiguous_or_on_snapshot_is_conservative(self, tmp_path: Path, body: str) -> None:
@@ -72,7 +74,20 @@ class TestVerdict:
 
     @pytest.mark.parametrize(
         "command",
-        ["shopt -s globstar; ls **", "shopt -s dotglob", "set -O globstar", "bash -O dotglob -c x"],
+        [
+            "shopt -s globstar; ls **",
+            "shopt -s dotglob",
+            "set -O globstar",
+            "bash -O dotglob -c x",
+            # Ledger 00474 N716: dot names and case switched on without shopt.
+            "GLOBIGNORE=zz; ls *",
+            "env BASHOPTS=dotglob bash -c 'ls *'",
+            "BASHOPTS=nocaseglob bash -c 'ls *'",
+            "BASH_ENV=./x.sh bash -c 'ls *'",
+            "source ./opts.sh; ls *",
+            ". ./opts.sh; ls *",
+            'eval "$X"; ls *',
+        ],
     )
     def test_a_command_that_could_switch_the_options_is_conservative(
         self, tmp_path: Path, command: str
