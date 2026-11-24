@@ -20,7 +20,8 @@ _LANE_THRESHOLD_SECONDS: Final[float] = 0.0
 _POLICY_CACHE_SIZE: Final[int] = 32
 
 _WORKER_SEAT_PATTERN: Final[str] = r"worker seat"
-_HARNESS_CANNOT_PRODUCE: Final[str] = (
+#: Why no harness session can drive a lane refusal; shared with the handler's own tests.
+HARNESS_CANNOT_PRODUCE: Final[str] = (
     "Arming needs a live teamchat runtime and a seat with duty host; the harness "
     "session holds no team seat, so the guard stays silent there."
 )
@@ -66,5 +67,5 @@ def lane_acceptance_test(language_name: str, command: str) -> Any:
         safety_notes="Never runs the command: it is denied before it starts.",
         test_type=TestType.BLOCKING,
         recommended_model=RecommendedModel.HAIKU,
-        harness_cannot_produce=_HARNESS_CANNOT_PRODUCE,
+        harness_cannot_produce=HARNESS_CANNOT_PRODUCE,
     )

@@ -49,7 +49,10 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.strategies.lane_commands.common import runs_any
+from claude_code_hooks_daemon.strategies.lane_commands.common import (
+    HARNESS_CANNOT_PRODUCE,
+    runs_any,
+)
 from claude_code_hooks_daemon.strategies.lane_commands.registry import (
     LaneCommandStrategyRegistry,
 )
@@ -89,9 +92,8 @@ _REFUSAL: Final[str] = (
     f"test, build, lint or QA command. {_LANE}"
 )
 _UNKNOWN_REFUSAL: Final[str] = (
-    "Host seat lane: this session holds a teamchat seat whose duty cannot be read, so "
-    "the guard stays armed, and this is a test, build, lint or QA command. If this is a "
-    f"host seat: {_LANE}"
+    "Host seat lane: the teamchat probe gave no answer, so the guard stays armed, and "
+    f"this is a test, build, lint or QA command. If this is a host seat: {_LANE}"
 )
 _NO_ANSWER: Final[str] = "The teamchat whoami probe gave no answer."
 _HANDLER_ERROR: Final[str] = (
@@ -179,8 +181,9 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
         """The duty gate on ``host``.
 
         NOT_APPLICABLE with no teamchat runtime, and no probe run. ROLE_UNKNOWN
-        only when the probe gave no answer at all (UNRESOLVED). A probe that answered but declares no duty (null, absent or unreadable)
-        is NOT_APPLICABLE too: duty is optional, so only a declared ``host``
+        only when the probe gave no answer at all (UNRESOLVED). A probe that
+        answered but declares no duty (null, absent or unreadable) is
+        NOT_APPLICABLE too: duty is optional, so only a declared ``host``
         arms. ``duty_gate`` checks a declared duty first, so a host in one
         team is never disarmed by a null duty in another.
         """
@@ -300,16 +303,13 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
     def _own_acceptance_tests(self) -> list[Any]:
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
-        unseated = (
-            "Arming needs a live teamchat runtime and a seat with duty host; the harness "
-            "session holds no team seat, so the guard stays silent there."
-        )
         return [
             AcceptanceTest(
-                title="host seat lane guard - a test run from a host seat is refused",
-                command="pytest tests/unit",
+                title="host seat lane guard - a wrapped test run from a host seat is refused",
+                command="nice -n 19 pytest tests/unit",
                 description=(
-                    "Under mode: block a host-duty seat's pytest is denied. Unit tests in "
+                    "Under mode: block a host-duty seat's pytest is denied through a "
+                    "wrapper (the bare form is the Python strategy's test). Unit tests in "
                     "tests/unit/handlers/pre_tool_use/test_host_seat_lane_guard.py cover "
                     "the matrix."
                 ),
@@ -318,7 +318,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
                 safety_notes="Never runs the tests: the command is denied before it starts.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
-                harness_cannot_produce=unseated,
+                harness_cannot_produce=HARNESS_CANNOT_PRODUCE,
             ),
             AcceptanceTest(
                 title="host seat lane guard - a triage command is untouched",
@@ -329,7 +329,7 @@ class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
                 safety_notes="Read-only command.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
-                harness_cannot_produce=unseated,
+                harness_cannot_produce=HARNESS_CANNOT_PRODUCE,
             ),
         ]
 

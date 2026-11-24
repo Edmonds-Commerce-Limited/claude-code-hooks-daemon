@@ -21,6 +21,9 @@ def test_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is True
 
 
-@pytest.mark.parametrize("command", ["bundle install", "bundle exec rails s", "rails s"])
+@pytest.mark.parametrize(
+    "command",
+    ["bundle install", "bundle exec rails s", "rails s", "rspec-x", "bundle exec rspec-queue"],
+)
 def test_not_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is False

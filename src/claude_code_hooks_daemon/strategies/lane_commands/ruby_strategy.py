@@ -8,7 +8,7 @@ _LANGUAGE_NAME = "Ruby"
 _LANE_PATTERNS: tuple[str, ...] = (
     r"^rubocop\b",
     # The shared classifier does not peel `bundle exec`, so it is spelled here.
-    r"^(?:bundle\s+exec\s+)?rspec\b",
+    r"^(?:bundle\s+exec\s+)?rspec(?=\s|$)",
 )
 _ACCEPTANCE_COMMAND = "bundle exec rspec"
 

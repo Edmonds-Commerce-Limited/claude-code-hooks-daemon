@@ -31,7 +31,14 @@ def test_lane(command: str) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["composer install", "composer require x", "php artisan serve", "composer test-deploy"],
+    [
+        "composer install",
+        "composer require x",
+        "php artisan serve",
+        "composer test-deploy",
+        "phpunit-x",
+        "phpunit-watcher watch",
+    ],
 )
 def test_not_lane(command: str) -> None:
     assert runs_any(command, STRATEGY.lane_patterns) is False

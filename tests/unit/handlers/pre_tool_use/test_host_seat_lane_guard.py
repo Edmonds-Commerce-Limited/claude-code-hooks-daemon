@@ -63,7 +63,8 @@ NO_TEAMS = parse_whoami(fx.NO_TEAMS)
 UNRESOLVED = SeatContext.unresolved(ProbeReason.COMMAND_TIMEOUT)
 ABSENT = SeatContext.absent(ProbeReason.NO_SESSION)
 
-_NO_ANSWER = "gave no answer"
+#: The once-per-session note; the refusal itself also says the probe gave no answer.
+_NO_ANSWER = "whoami probe gave no answer"
 
 
 def bash(
@@ -276,6 +277,15 @@ class TestArming:
         handler, _ = make(context)
         assert handler.matches(bash(PYTEST)) is True
 
+    def test_a_seat_resolved_earlier_is_armed_when_a_later_probe_gives_no_answer(self) -> None:
+        """No last-good answer is kept: a later no-answer probe arms, whatever came before."""
+        handler, resolver = make(WORKER)
+        assert handler.matches(bash(PYTEST)) is False
+        resolver._context = UNRESOLVED
+        assert handler.matches(bash(PYTEST)) is True
+        assert handler.handle(bash(PYTEST)).decision == Decision.DENY
+        assert len(resolver.calls) == 3
+
     @pytest.mark.parametrize(
         "context",
         [NULL_DUTY, WORKER_NULL_DUTY, NO_DUTY_KEY, GARBAGE_DUTY],
@@ -397,7 +407,10 @@ class TestDecision:
             text = _text(handler.handle(bash(PYTEST)))
             # The rule's own summary names both cases; the situation line must not claim host.
             assert "holds a teamchat seat with duty host" not in text
-            assert "cannot be read" in text
+            # UNRESOLVED proves no seat is held and no duty was read: say only what is known.
+            assert "teamchat probe gave no answer, so the guard stays armed" in text
+            assert "holds a teamchat seat" not in text
+            assert "cannot be read" not in text
             assert "worker seat" in text
 
     def test_a_resolved_unknown_duty_is_never_refused(self) -> None:
@@ -472,6 +485,10 @@ class TestInvariants:
 
     def test_acceptance_tests_are_declared(self) -> None:
         assert HostSeatLaneGuardHandler().get_acceptance_tests()
+
+    def test_no_acceptance_command_is_declared_twice(self) -> None:
+        commands = [test.command for test in HostSeatLaneGuardHandler().get_acceptance_tests()]
+        assert len(commands) == len(set(commands))
 
     def test_claude_md_guidance_names_the_lane(self) -> None:
         guidance = HostSeatLaneGuardHandler().get_claude_md() or ""

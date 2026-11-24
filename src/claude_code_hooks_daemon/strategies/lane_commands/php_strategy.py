@@ -7,7 +7,7 @@ from claude_code_hooks_daemon.strategies.lane_commands.common import lane_accept
 _LANGUAGE_NAME = "PHP"
 _LANE_PATTERNS: tuple[str, ...] = (
     r"^(?:phpstan|psalm|phpcs)\b",
-    r"^phpunit\b",
+    r"^phpunit(?=\s|$)",
     r"^composer\s+(?:test|run(?:-script)?\s+test\S*)(?=\s|$)",
 )
 _ACCEPTANCE_COMMAND = "composer test"

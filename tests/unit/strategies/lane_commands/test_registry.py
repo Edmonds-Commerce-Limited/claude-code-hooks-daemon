@@ -32,6 +32,50 @@ _EXPECTED_LANGUAGES = [
     ".NET",
 ]
 
+# The lane keeps its own per-language copy of the shared classifier's test, build
+# and QA groups (utils/long_running_command.py). These pins hold the two together.
+
+#: The one shared build pattern the lane does not take whole: it mixes languages, so
+#: its names are split across the Universal, JavaScript and Java strategies instead.
+_MIXED_SHARED_BUILD_PATTERN = r"^(?:tsc|webpack|gradle|gradlew|mvn|ant|cmake|ninja|bazel)\b"
+_SHARED_BUILD_IN_LANE = (
+    r"^(?:npm|yarn|pnpm|bun)\s+(?:build|run\s+build\S*)\b",
+    r"^uv\s+build\b",
+    r"^cargo\s+(?:build|check|clippy)\b",
+    r"^go\s+(?:build|vet)\b",
+)
+_SHARED_IN_LANE = (*TEST_PATTERNS, *_SHARED_BUILD_IN_LANE, *QA_PATTERNS)
+
+#: Lane patterns the shared classifier does not hold: the split mixed pattern, the
+#: linters, and the per-language gaps. A new strategy pattern is added here too.
+_LANE_ONLY_PATTERNS = (
+    r"^make(?:\s+-\S+)*\s*$",
+    r"^make(?:\s+-\S+)*\s+(?:test|tests|check|lint|build|qa|all|ci)\b",
+    r"^(?:cmake|ninja|bazel)\b",
+    r"^(?:hadolint|markdownlint|yamllint)\b",
+    r"^pre-commit\s+run(?=\s|$)",
+    r"^(?![\w.-]*(?:deploy|smoke|health|publish|connection))(?:[\w.-]*[_.-])?"
+    r"(?:tests?|qa|lint|typecheck|type_check)(?:[_.-][\w.-]*)?\.(?:sh|bash|py)\b",
+    r"^(?:ruff|mypy|pyright|pylint|flake8|black|isort|bandit)\b",
+    r"^unittest\b",
+    r"^(?:npm|pnpm)\s+t(?=\s|$)",
+    r"^(?:tsc|webpack)\b",
+    r"^(?:eslint|prettier|stylelint)\b",
+    r"^(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:llm:)?(?:lint|typecheck|type-check|qa)\S*",
+    r"^npx\s+(?:jest|vitest|playwright|mocha|tsc|eslint|prettier)\b",
+    r"^shellcheck\b",
+    r"^golangci-lint\b",
+    r"^cargo\s+fmt\b",
+    r"^ant\b",
+    r"^(?:gradle|gradlew|mvn)(?!(?:.*\s)?(?:deploy|publish)(?:\s|$))\b",
+    r"^rubocop\b",
+    r"^(?:bundle\s+exec\s+)?rspec(?=\s|$)",
+    r"^(?:phpstan|psalm|phpcs)\b",
+    r"^phpunit(?=\s|$)",
+    r"^composer\s+(?:test|run(?:-script)?\s+test\S*)(?=\s|$)",
+    r"^dotnet\s+(?:test|build)(?=\s|$)",
+)
+
 
 class _Fake:
     def __init__(self, name: str, patterns: tuple[str, ...]) -> None:
@@ -89,10 +133,19 @@ class TestDefaultRegistry:
         patterns = LaneCommandStrategyRegistry.create_default().get_lane_patterns()
         assert len(patterns) == len(set(patterns))
 
-    @pytest.mark.parametrize("pattern", [*TEST_PATTERNS, *BUILD_PATTERNS[1:], *QA_PATTERNS])
+    def test_the_mixed_build_pattern_is_the_only_shared_one_left_out(self) -> None:
+        """A reorder or an addition to BUILD_PATTERNS cannot slip past the pin unseen."""
+        assert set(BUILD_PATTERNS) == {_MIXED_SHARED_BUILD_PATTERN, *_SHARED_BUILD_IN_LANE}
+
+    @pytest.mark.parametrize("pattern", _SHARED_IN_LANE)
     def test_the_shared_groups_the_guard_took_are_still_in_the_lane(self, pattern: str) -> None:
         """Every single-language shared test/build/QA pattern moved byte-identical."""
         assert pattern in LaneCommandStrategyRegistry.create_default().get_lane_patterns()
+
+    def test_every_lane_pattern_is_shared_or_declared_lane_only(self) -> None:
+        """The other direction: a pattern added to a strategy is listed here on purpose."""
+        patterns = LaneCommandStrategyRegistry.create_default().get_lane_patterns()
+        assert set(patterns) == {*_SHARED_IN_LANE, *_LANE_ONLY_PATTERNS}
 
 
 class TestAcceptanceTests:
