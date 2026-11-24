@@ -70,6 +70,9 @@ MODE_READERS: Final[dict[str, str]] = {
     "post_tool_use/recovery_cron_advisor.py": "driver: no cron advice while usage-paused",
     "pre_tool_use/usage_pause_tool_gate.py": "the usage-paused mode's own tool gate",
     "session_start/autonomy_notice.py": "states the autonomy verdict at session start",
+    "session_start/coordinator_conduct.py": (
+        "advisory: words the return note differently while usage-paused"
+    ),
     "session_start/failsafe_cron_session_advisor.py": "driver: no cron while usage-paused",
     "session_start/persistent_cron_assertor.py": "driver: no cron while usage-paused",
     "status_line/environment_indicator.py": "displays the autonomy verdict",
