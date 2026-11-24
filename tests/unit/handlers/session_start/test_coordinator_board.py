@@ -2,8 +2,9 @@
 
 On SessionStart a coordinator seat is told where peers' state comes from
 (`teamchat status`, never teamchat's files) and that a seat it cannot read is
-unknown, not down. The handler runs no teamchat command, reads no teamchat
-file and relays no status text: the `teamchat status` output contract is not
+unknown, not down. The handler runs no `teamchat status`, opens no teamchat
+file and relays no status text (the only command it runs is the shared
+`whoami` seat probe): the `teamchat status` output contract is not
 on disk, so nothing is parsed. Advisory only. A declared worker, no team and a
 sub-agent are untouched; an unreadable role or probe stays armed.
 """
@@ -109,6 +110,13 @@ class TestNote:
         assert "teamchat status" in text
         assert "unknown, not down" in text
         assert "status.json" in text  # names the files it must not read
+
+    def test_note_hedges_where_the_board_lives_and_keeps_unknown_not_down(self) -> None:
+        """The note does not assert what teamchat shows: the output contract is not on disk."""
+        text = _text(_handler(), _input())
+        assert "peers' state, where teamchat shows it, is `teamchat status`" in text
+        assert "peers' state, in one view, is `teamchat status`" not in text
+        assert "unknown, not down" in text
 
     def test_note_restarts_and_reassigns_nothing(self) -> None:
         text = _text(_handler(), _input())

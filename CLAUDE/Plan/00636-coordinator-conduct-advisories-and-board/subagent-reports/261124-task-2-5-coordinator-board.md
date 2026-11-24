@@ -5,7 +5,7 @@ Spec on disk: PLAN.md Task 2.5 is one line; the Goals line says the board comes 
 Built:
 
 - `handlers/session_start/coordinator_board.py`: SessionStart, priority 48 (shares the slot with `work_queue_rebrief`; both re-brief a coordinator on a new, resumed or compacted session). On a seat `coordinator_advisory_armed` arms, it adds one fixed note: the board is `teamchat status`, run by the seat; teamchat's files (`status.json`, run directory, seat store) are not it; a seat the board does not show, or whose state cannot be read, is unknown, not down, so ask it on the bus before reassigning. It names no restart.
-- The handler runs no teamchat command, opens no teamchat file and relays no status text, so no peer-controlled label reaches the context. A raising resolver counts as armed (the note only adds text). No options.
+- The handler runs no `teamchat status` and opens no teamchat file; the only command it runs is the shared `whoami` seat probe. It relays no status text, so no peer-controlled label reaches the context. A raising resolver counts as armed (the note only adds text). No options.
 - Not on Stop: Task 2.4 found that Stop ALLOW context makes Claude Code continue.
 - No resident CLAUDE.md guidance (T4 row in the guidance coverage table): the note reaches the coordinator each session, and resident text would reach every non-team project.
 - Paperwork: HandlerID, Priority, session_start `__init__`, init_config, both yaml files, HANDLER_REFERENCE, config-changes v3.77.0 under `added:`, release note 099, one acceptance test (silent without a team seat), PLAN.md tick and Success Criteria line, `.claude/HOOKS-DAEMON.md` regenerated.

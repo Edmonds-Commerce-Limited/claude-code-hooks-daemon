@@ -5,14 +5,15 @@ parallel peers' state in one view, and B5 (section 7) for seat liveness on a
 coordinator seat. Both are to come from ``teamchat status`` (or fedora-desktop
 Plan 00251), never from teamchat's files. The output contract of ``teamchat
 status`` is not recorded in this repository and no teamchat binary is present
-to check it against, so this handler parses nothing and runs nothing: on
+to check it against, so this handler parses nothing and runs no status command: on
 SessionStart it tells a coordinator seat where the board is, that teamchat's
 files are not it, and that a seat it cannot read is unknown, not down.
 
 Advisory only: never denies, never terminal, restarts and reassigns nothing
 (DESIGN.md Q6, a supervisor action, is the owner's question). It runs no
-teamchat command and opens no teamchat file, and relays no status text, so no
-peer-controlled label reaches the context. The gate is the shared
+`teamchat status` and opens no teamchat file; the only command it runs is the
+shared `whoami` seat probe. It relays no status text, so no peer-controlled
+label reaches the context. The gate is the shared
 ``coordinator_advisory_armed``: a declared coordinator, a coordinator duty, an
 unreadable role or an unresolved probe hear it; a declared worker, no team and
 a sub-agent do not. A fault reading the seat counts as armed.
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BOARD_NOTE: Final[str] = (
-    "COORDINATOR BOARD (s7, B5): peers' state, in one view, is `teamchat status`; "
+    "COORDINATOR BOARD (s7, B5): peers' state, where teamchat shows it, is `teamchat status`; "
     "run it yourself when you need the board. Never read teamchat's files for it "
     "(status.json, the run directory, the seat store). A seat that view does not "
     "show, or whose state you cannot read, is unknown, not down: ask it on the bus "

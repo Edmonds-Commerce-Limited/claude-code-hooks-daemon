@@ -210,10 +210,11 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
 - [x] ✅ **Task 2.5** (advise-only part): s7 board and B5 liveness. Shipped as
   `coordinator_board` (SessionStart, priority 48, advisory, never denies or
   terminal). On every session start of a seat `coordinator_advisory_armed`
-  arms, one note: peers' state in one view is `teamchat status`, run by the
+  arms, one note: peers' state, where teamchat shows it, is `teamchat status`, run by the
   seat; teamchat's files are not the board; a seat the board does not show, or
   cannot be read, is unknown, not down (ask it on the bus before reassigning).
-  It runs no teamchat command, opens no teamchat file and relays no status
+  It runs no `teamchat status` and opens no teamchat file; the only command it
+  runs is the shared `whoami` seat probe. It relays no status
   text. **Open, not built**: the `teamchat status` output contract is not on
   disk and no binary is here, so nothing reads or summarises the board (a
   parser would be invented); whether it covers other seats or only this

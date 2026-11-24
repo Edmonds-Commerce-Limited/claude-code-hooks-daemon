@@ -4459,7 +4459,7 @@ handlers:
 | **Type**       | Advisory            |
 | **Event**      | SessionStart        |
 
-**Description:** On every session start of a team coordinator seat (Plan 00636 Task 2.5, s7 and B5), adds one note: peers' state in one view is `teamchat status`, run by the seat itself; teamchat's files (`status.json`, the run directory, the seat store) are not the board; and a seat the board does not show, or whose state cannot be read, is unknown, not down, so ask it on the bus before reassigning its work. The handler runs no teamchat command, opens no teamchat file and relays no status text. Same seat gate as `owner_directives_register`: a declared worker, no team and a sub-agent are untouched. Never denies, never terminal, restarts nothing. No options.
+**Description:** On every session start of a team coordinator seat (Plan 00636 Task 2.5, s7 and B5), adds one note: peers' state in one view is `teamchat status`, run by the seat itself; teamchat's files (`status.json`, the run directory, the seat store) are not the board; and a seat the board does not show, or whose state cannot be read, is unknown, not down, so ask it on the bus before reassigning its work. The handler runs no `teamchat status` and opens no teamchat file; the only command it runs is the shared `whoami` seat probe. It relays no status text. Same seat gate as `owner_directives_register`: a declared worker, no team and a sub-agent are untouched. Never denies, never terminal, restarts nothing. No options.
 
 ```yaml
 handlers:
