@@ -8453,3 +8453,13 @@ Item 4 in the report (`git cherry-pick` on a feature branch) is correct behaviou
 **Severity**: MEDIUM: an unposted owner wait can end a coordinator stop without the bump, once per chain.
 
 **Status**: ⬜ Open. Direction: keep the pass across a daemon deny only when no work turn follows that deny, or when the current wait cites the same threads the guard refused; auto_continue_stop's own chain logic must not start refusing against it (the existing `test_no_third_refusal_in_the_chain` guards that). Test-first from the probe; flip the strict xfail.
+
+### N723 — `mkplan.bash --journal` prints "wrote a action entry" (wrong article)
+
+**Source**: relayed by lts-infra.1 (peer, authority none) from fedora-desktop.1; not yet reproduced from this seat.
+
+**Evidence**: the confirmation line uses a fixed "a" before the category name, so the category `action` reads "wrote a action entry" (should be "an action"). The script is `CLAUDE/Plan/mkplan.bash` (daemon-owned; the bundled template must stay byte-identical). PR 235 edits the same script (Phase 3), so the fix lands after it merges.
+
+**Severity**: LOW, cosmetic.
+
+**Status**: ⬜ Open. Test-first: a test that every category's confirmation line reads correctly (a/an by first letter); fix in the deployed script and the template together.
