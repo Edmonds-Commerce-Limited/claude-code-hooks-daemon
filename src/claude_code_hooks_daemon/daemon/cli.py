@@ -9435,7 +9435,9 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
         git_worktree_paths,
         suggest_claudemd_excludes,
     )
+    from claude_code_hooks_daemon.config.models import TeamSeatConfig
     from claude_code_hooks_daemon.core.relevance import RelevanceContext
+    from claude_code_hooks_daemon.utils.teamchat_seat import teams_declared
 
     override = getattr(args, "project_root", None)
     project_root = Path(override) if override else Path(get_project_path(None))
@@ -9455,9 +9457,14 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
     config_dict = ConfigLoader.load(config_path)
     daemon_section = config_dict.get("daemon")
     declared = daemon_section.get("languages") if isinstance(daemon_section, dict) else None
+    team_seat_section = config_dict.get("team_seat")
+    team_seat = TeamSeatConfig.model_validate(
+        team_seat_section if isinstance(team_seat_section, dict) else {}
+    )
     context = RelevanceContext.probe(
         project_root,
         declared_languages=declared if isinstance(declared, list) else None,
+        teams_declared=teams_declared(team_seat),
     )
     items = build_checklist(config_dict, context)
 

@@ -73,6 +73,7 @@ from claude_code_hooks_daemon.utils.safe_signal import (
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import TeamSeatConfig
+    from claude_code_hooks_daemon.core.relevance import RelevanceContext
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -901,3 +902,24 @@ def team_seat_relevance(declared: bool) -> Relevance:
         present="the project declares teamchat seats (team_seat.teams_in_use)",
         absent="no teamchat seats declared (team_seat.teams_in_use is false or detection is off)",
     )
+
+
+class TeamOnlyGuidance:
+    """Mixin for a team-only handler that emits guidance (Plan 00474 R5).
+
+    List it BEFORE the handler base so its ``get_relevance`` wins. The
+    handler declares ``_team_seat`` itself (the registry injects by
+    ``hasattr``), so this mixin only annotates the attribute. Guidance is
+    read from the injected config; the optimise review reads the context,
+    because it builds handlers bare.
+    """
+
+    _team_seat: TeamSeatConfig | None
+
+    def guidance_relevant(self) -> bool:
+        """Whether this project declares the teams this handler's guidance is for."""
+        return teams_declared(self._team_seat)
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only where the project declares teamchat seats."""
+        return team_seat_relevance(context.teams_declared)

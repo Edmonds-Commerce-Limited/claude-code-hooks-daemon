@@ -1383,6 +1383,14 @@ pseudo_events:
 #       five_hour: 85          # optional per-window override
 #       seven_day: 70          # optional per-window override
 
+# Teamchat seats (Plans 00631, 00474). The team-only handlers stay enabled
+# and are silent in any session that resolves no team seat; this block only
+# says whether their guidance is written into CLAUDE.md for this project.
+# team_seat:
+#   teams_in_use: true        # default false: no team rules in the CLAUDE.md block
+#   detection: auto           # auto | off (off: every session reads as in no team)
+#   resolve_ttl_seconds: 60   # 1..3600, how long one role answer is reused
+
 # Documentation SSoT enforcement (Plan 00284): one canonical home per fact,
 # everything else points. OPT-IN: disabled by default. Enabling this feeds
 # policy to docs_qa_edit/docs_qa_sweep above (both already registered, but

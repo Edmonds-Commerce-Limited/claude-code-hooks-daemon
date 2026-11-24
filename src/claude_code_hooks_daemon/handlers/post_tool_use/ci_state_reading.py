@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.utils.team_role_gate import coordinator_advisory_a
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
     SessionSignals,
+    TeamOnlyGuidance,
     shared_resolver,
 )
 
@@ -64,7 +65,7 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
-class CiStateReadingHandler(PostToolUseHandlerBase):
+class CiStateReadingHandler(TeamOnlyGuidance, PostToolUseHandlerBase):
     """Read a `gh` CI output as queued, stuck, pending or unknown. Advisory, never denies."""
 
     def __init__(self) -> None:

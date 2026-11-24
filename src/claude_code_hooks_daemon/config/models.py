@@ -3498,10 +3498,11 @@ class TeamSeatConfig(BaseModel):
         resolve_ttl_seconds: How long one answer is reused; a role change
             takes effect within one TTL
         teams_in_use: Whether this project holds teamchat team seats. Only
-            the generated guidance reads it (Plan 00474, ruling D4): the
-            team-only handlers' rules are written into CLAUDE.md only when it
-            is true. The handlers themselves stay enabled either way and are
-            silent off a team seat.
+            the generated guidance and the optimise review read it (Plan
+            00474, ruling D4): the team-only handlers' rules are written into
+            CLAUDE.md, and the handlers called relevant, only when it is true.
+            The handlers themselves stay enabled either way and are silent
+            off a team seat.
     """
 
     model_config = ConfigDict(extra="forbid")

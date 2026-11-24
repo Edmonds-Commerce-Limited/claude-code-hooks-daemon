@@ -39,6 +39,8 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_downgrade_signal import (
     SIGNAL_SUBDIR,
@@ -174,6 +176,10 @@ class ModelDowngradeRecorderHandler(PostToolUseHandlerBase):
 
         publish(build_signal(facts, session_id=session_id), now=time.time())
         return BlockingResult(decision=Decision.ALLOW)
+
+    def get_relevance(self, context: RelevanceContext) -> Relevance:
+        """Relevant only under an armed ccy supervisor, the signal's only reader."""
+        return supervisor_relevance(context)
 
     def get_claude_md(self) -> str | None:
         return (

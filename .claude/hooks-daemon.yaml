@@ -2006,6 +2006,11 @@ scratch:
   caps:
     mode: advise
 
+# Plan 00474 R5: this repository runs teamchat seats, so the team-only
+# handlers' guidance stays in the generated CLAUDE.md block.
+team_seat:
+  teams_in_use: true
+
 # Pseudo-events: synthetic events triggered by real events with frequency control
 pseudo_events:
   nitpick:

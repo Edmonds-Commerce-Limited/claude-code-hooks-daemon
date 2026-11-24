@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,33 @@ def test_no_worktree_root_adds_no_claudemd_recommendation(
 ) -> None:
     assert cmd_optimise_checklist(_args(project_root=str(tmp_path))) == 0
     assert "claudeMdExcludes" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("team_seat_block", "expected"),
+    [("", False), ("team_seat:\n  teams_in_use: true\n", True)],
+)
+def test_team_handlers_follow_the_declared_teams(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], team_seat_block: str, expected: bool
+) -> None:
+    """Plan 00474 R5: the review builds handlers bare, so the context carries the key."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/r.git"],
+        cwd=tmp_path,
+        check=True,
+    )
+    config = tmp_path / ".claude" / "hooks-daemon.yaml"
+    config.parent.mkdir()
+    config.write_text(f"version: '2.0'\n{team_seat_block}")
+    assert (
+        cmd_optimise_checklist(_args(config=str(config), project_root=str(tmp_path), format="json"))
+        == 0
+    )
+    items = json.loads(capsys.readouterr().out)["items"]
+    lane = [item for item in items if item["config_key"] == "host_seat_lane_guard"]
+    assert lane
+    assert lane[0]["applicable"] is expected
 
 
 def test_missing_config_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

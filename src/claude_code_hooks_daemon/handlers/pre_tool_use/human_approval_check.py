@@ -79,6 +79,7 @@ from claude_code_hooks_daemon.utils.human_approval import (
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
     SessionSignals,
+    TeamOnlyGuidance,
     shared_resolver,
 )
 
@@ -349,7 +350,7 @@ def _is_age(value: object) -> bool:
     return type(value) is int and 0 < value <= MAX_LINE_AGE_LIMIT_SECONDS
 
 
-class HumanApprovalCheckHandler(PreToolUseHandlerBase):
+class HumanApprovalCheckHandler(TeamOnlyGuidance, PreToolUseHandlerBase):
     """Deny a coordinator seat's destructive act that cites no human approval."""
 
     _mode: str | None = MODE_ADVISE

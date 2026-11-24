@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     DUTY_HOST,
     SeatContext,
     SessionSignals,
+    TeamOnlyGuidance,
     shared_resolver,
 )
 
@@ -139,7 +140,7 @@ def is_lane_command(command: str, *, extra_patterns: Sequence[str] = ()) -> bool
     return runs_any(command, (*LANE_PATTERNS, *extra_patterns))
 
 
-class HostSeatLaneGuardHandler(PreToolUseHandlerBase):
+class HostSeatLaneGuardHandler(TeamOnlyGuidance, PreToolUseHandlerBase):
     """Refuse a host-duty seat's test, build, lint or QA command."""
 
     _mode: str | None = MODE_ADVISE

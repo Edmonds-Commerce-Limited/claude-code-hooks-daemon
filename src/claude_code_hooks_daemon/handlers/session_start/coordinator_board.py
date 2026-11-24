@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.team_role_gate import probe_coordinator_advi
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     SeatContext,
     SessionSignals,
+    TeamOnlyGuidance,
     shared_resolver,
 )
 
@@ -50,7 +51,7 @@ class _SeatResolver(Protocol):
     def resolve(self, signals: SessionSignals) -> SeatContext: ...
 
 
-class CoordinatorBoardHandler(SessionStartHandlerBase):
+class CoordinatorBoardHandler(TeamOnlyGuidance, SessionStartHandlerBase):
     """Tell a coordinator seat where the board is: `teamchat status`. Advisory, never denies."""
 
     def __init__(self) -> None:
