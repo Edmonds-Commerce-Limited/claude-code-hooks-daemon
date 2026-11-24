@@ -573,8 +573,8 @@ class TestHardLimitPauseInjectsNothing:
     def test_the_hold_ends_at_resume_at_with_no_grace(
         self, sidecar_dir: Path, machine: Any
     ) -> None:
-        # No resume cron exists to clear a hard-limit record, so the supervisor stops
-        # holding at the reset itself; its next prompt is what lifts the daemon's record.
+        # The supervisor does not wait on the resume cron for a hard-limit record: it
+        # stops holding at the reset itself; its next prompt is what lifts the record.
         _write_pause(sidecar_dir, cause=usage_pause.CAUSE_HARD_LIMIT)
         _decide(sidecar_dir, machine)
         assert (

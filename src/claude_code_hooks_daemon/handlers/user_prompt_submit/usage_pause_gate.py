@@ -259,13 +259,16 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             logger.warning("usage_pause_gate: the ceiling no longer applies, lifting the pause")
             return self._lift(hook_input, session_id, held, env, verified_under_ceiling=True)
         if held.cause == CAUSE_HARD_LIMIT:
-            # Past its resume time but over the ceiling: a ceiling pause takes over, and
-            # its directive sets up the resume cron a hard-limit pause never had.
+            # Past its resume time but over the ceiling: a ceiling pause takes over, and its
+            # directive sets up the resume cron the stop gate requires of every pause.
             renewed = start_pause(session_id, breaches, env)
             if renewed is not None:
                 return BlockingResult(
                     decision=Decision.ALLOW, context=[render_pause_directive(renewed)]
                 )
+            # No ceiling pause could be kept (the owner's override, or the record could not
+            # be written and read back): lift as _resume does, never deny on a past resume time.
+            return self._lift(hook_input, session_id, held, env, verified_under_ceiling=False)
         until = resume_time_text(held.resume_at)
         reason = f"{RuleFormatter().verbose(_rule())}\n\nPaused on: {held.reason}. Resumes about {until}."
         logger.info("usage_pause_gate: dropping a prompt while paused until %s", until)

@@ -3845,10 +3845,15 @@ _USAGE_PAUSE_FIELDS = (
 )
 # Why the pause exists (Plan 00523 Phase 2b). A ceiling pause gets its single
 # /compact; a hard-limit pause gets nothing (every request fails until the reset)
-# and ends here AT resume_at, since no resume cron exists to clear it. An absent
-# or unrecognised cause reads as a ceiling pause, never as more injection.
+# and ends here AT resume_at, with no grace. The daemon's stop gate still requires
+# its one resume cron, but the supervisor does not wait on that cron: the next
+# prompt after resume_at lifts the record, or turns it into a ceiling pause while
+# the host is still over its ceiling. An absent or unrecognised cause reads as a
+# ceiling pause, never as more injection.
 _USAGE_PAUSE_CAUSE_CEILING = "ceiling"
 _USAGE_PAUSE_CAUSE_HARD_LIMIT = "hard_limit"
+# Read only by the test pinning this copy to the daemon's CAUSES: this standalone
+# script cannot import the daemon, so the test is what keeps the two in step.
 _USAGE_PAUSE_CAUSES = frozenset({_USAGE_PAUSE_CAUSE_CEILING, _USAGE_PAUSE_CAUSE_HARD_LIMIT})
 _USAGE_PAUSE_WINDOWS = frozenset({"five_hour", "seven_day"})
 # How long past `resume_at` a record still counts: the daemon clears it when the
@@ -3882,8 +3887,8 @@ class UsagePauseRecord:
         """True while ``now`` is within [paused_at, end].
 
         The end is resume_at + grace for a ceiling pause (the daemon's resume cron
-        clears it). A hard-limit pause has no resume cron, so it ends at resume_at:
-        the supervisor's next prompt is what lifts the daemon's record.
+        clears it). A hard-limit pause ends at resume_at: its resume cron is not
+        waited on, and the supervisor's next prompt is what lifts the daemon's record.
         """
         grace = 0.0 if self.is_hard_limit else _USAGE_PAUSE_GRACE_SECONDS
         return self.paused_at <= now <= self.resume_at + grace

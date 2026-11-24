@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
     read_usage_pause,
+    write_usage_override,
     write_usage_pause,
 )
 
@@ -107,6 +108,31 @@ class TestHeldPromptAtTheResumeTime:
         renewed = read_usage_pause(tmp_path, _SESSION, now=_NOW)
         assert renewed is not None
         assert renewed.cause == CAUSE_CEILING
+
+    def test_an_override_past_resume_at_lifts_it_without_claiming_usage_is_under(
+        self, tmp_path: Path
+    ) -> None:
+        # No ceiling pause may replace the record under the owner's override, and a
+        # deny would hold every prompt on a resume time already past, for up to an hour.
+        _hard_limit_record(tmp_path, resume_at=_NOW - 1)
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        result = _run(_handler(tmp_path, snapshot=_snapshot(five=95.0)), tmp_path, _input())
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "NOT confirmed" in text
+        assert "usage is back under" not in text
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_a_ceiling_pause_that_cannot_be_written_past_resume_at_lifts_it(
+        self, tmp_path: Path
+    ) -> None:
+        _hard_limit_record(tmp_path, resume_at=_NOW - 1)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        with patch.object(gate, "write_usage_pause", side_effect=OSError("disk full")):
+            result = _run(handler, tmp_path, _input())
+        assert result.decision == Decision.ALLOW
+        assert "usage is back under" not in "\n".join(result.context)
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
 
 
 class TestOwnerEscape:

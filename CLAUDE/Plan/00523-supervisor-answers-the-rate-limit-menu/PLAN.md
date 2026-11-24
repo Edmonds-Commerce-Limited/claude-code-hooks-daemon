@@ -106,6 +106,16 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   reset, so the writer waits for the Phase 1 live capture. The screen
   recogniser's `window_reset` is no help to the daemon either: it is keyed on
   the Claude child's pid, not on the session id.
+  Acceptance criteria for the writer:
+  - It needs positive evidence that the stop failure is a usage-window hit and
+    not a passing 429; a `rate_limit` StopFailure alone is not that evidence.
+  - A `hard_limit` span is capped by its window: a `five_hour` record whose
+    `resume_at` is days out must not hold every prompt for days. The 8-day
+    `MAX_PAUSE_SPAN_SECONDS` cap alone is too loose for that.
+  - Open design point: the stop gate still requires exactly one resume cron for
+    every pause, a `hard_limit` one included, though nothing waits on that cron
+    to lift it before `resume_at`. Decide whether a hard-limit pause should have
+    a resume cron at all.
 - [x] ✅ **Task 2b.2**: A pause caused by a hard limit injects nothing, not even
   the single usage-pause `/compact` (`_usage_pause_outcome`), because every
   request fails until the reset. A ceiling pause keeps its `/compact`. TDD in
@@ -114,9 +124,12 @@ weekly limit · resets <time>", and the supervisor retried regardless.
   did not wait on Q16: a hard-limit pause should inject nothing however Q16 is ruled.)
   As built: the record carries `cause` (`ceiling` | `hard_limit`) in both
   readers. An absent or unknown value reads as `ceiling`. The supervisor stops
-  holding a `hard_limit` pause at `resume_at`, with no grace, because no
-  resume cron exists to clear it. The prompt gate lifts a `hard_limit` pause
-  only at `resume_at` (`hard_limit_holds`), and a re-base keeps the cause.
+  holding a `hard_limit` pause at `resume_at`, with no grace; it does not wait
+  on the resume cron, which the stop gate still requires. The prompt gate lifts
+  a `hard_limit` pause only at `resume_at` (`hard_limit_holds`), and a re-base
+  keeps the cause. At `resume_at` still over the ceiling it becomes a ceiling
+  pause; when that cannot be kept (the owner's override, or a failed write) it
+  is lifted unverified, never denied on a past resume time.
   Inert until Task 2b.1 writes a `hard_limit` record.
 - [ ] ⬜ **Task 2b.3**: With no reset time known, back off rather than retrying
   every tick: double the interval after each identical failure, up to a cap.
