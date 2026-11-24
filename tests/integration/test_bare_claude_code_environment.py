@@ -269,15 +269,31 @@ def _resolved(handler: Handler, runner: Callable[..., CommandOutcome]) -> Handle
 
 
 @pytest.mark.parametrize("status", [CommandStatus.NOT_FOUND, CommandStatus.TIMEOUT])
-@pytest.mark.parametrize("handler_name", ["HostSeatLaneGuardHandler", "HumanApprovalCheckHandler"])
+@pytest.mark.parametrize("handler_name", sorted(TEAM_HANDLER_CLASSES))
 def test_case_b_runtime_only_never_resolved_is_silent(
-    tmp_path: Path, status: CommandStatus, handler_name: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: CommandStatus, handler_name: str
 ) -> None:
+    """Every team handler, advisories and owner_wait_stop_guard included."""
+    bus_calls: list[str] = []
+
+    def record(*_a: Any, **_k: Any) -> CommandOutcome:
+        bus_calls.append("spawn")
+        return CommandOutcome(status=CommandStatus.NOT_FOUND)
+
+    # Not the ``spawned`` fixture: it would replace the probe the runner feeds.
+    monkeypatch.setattr(human_approval, "run_kit_command", record)
+    monkeypatch.setattr(subprocess, "Popen", record)
     (handler,) = [h for h in _team_handlers() if type(h).__name__ == handler_name]
     _resolved(handler, _outcome(status=status))
-    for build in PAYLOADS["pre_tool_use"]:
+    for build in PAYLOADS[_event_dir(handler)]:
         result = _run(handler, _with_teamchat(build(tmp_path)))
-        assert result is None or not _speaks(result), (handler_name, result)
+        if result is None:
+            continue
+        if handler_name == WIND_DOWN_ONLY:
+            assert WIND_DOWN_HEADING not in (result.reason or "")
+        else:
+            assert not _speaks(result), (handler_name, result)
+    assert bus_calls == []
 
 
 def test_case_c_null_duty_does_not_arm_the_lane_guard(tmp_path: Path) -> None:

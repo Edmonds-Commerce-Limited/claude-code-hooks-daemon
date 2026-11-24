@@ -31,8 +31,8 @@ unconfirmable wait is exactly the silent wait this guard exists to stop; the
 refusal tells the coordinator to post a notifying reply in each thread and stop
 again, and says why nothing could be confirmed. ``allow`` fails open with a
 WARNING log. ``auto`` (default) is ``refuse`` where the adapter's
-``flags_readable()`` is True, and otherwise (pingbus v1, where no post could
-ever be confirmed) fails open by design with an ADVISORY in the stop's context
+``flags_readable()`` is True, and otherwise (a bus whose posts carry no
+readable notify flag, so no post could ever be confirmed) fails open by design with an ADVISORY in the stop's context
 naming the team and the thread classes left unchecked. A raising
 ``flags_readable()`` makes ``auto`` refuse. The WARNING is always
 written. An invalid value fails CLOSED to ``refuse`` (not to the default).
