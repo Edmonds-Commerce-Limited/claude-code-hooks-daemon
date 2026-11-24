@@ -756,12 +756,25 @@ class TestSingleUse:
         verdict = check(policy=self.POLICY, ledger=CiteLedger(lambda: path))
         assert verdict.refusal is Refusal.LEDGER_UNAVAILABLE
 
-    def test_a_ledger_that_cannot_be_written_refuses(self, tmp_path: Path) -> None:
+    def test_a_ledger_under_a_file_is_unreadable_and_refuses(self, tmp_path: Path) -> None:
         blocker = tmp_path / "file"
         blocker.write_text("", encoding="utf-8")
         ledger = CiteLedger(lambda: blocker / "ledger.json")  # parent is a file
         verdict = check(policy=self.POLICY, ledger=ledger)
         assert (verdict.passed, verdict.refusal) == (False, Refusal.LEDGER_UNAVAILABLE)
+
+    def test_a_ledger_that_reads_but_cannot_be_written_refuses(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        blocker = tmp_path / "file"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(human_approval, "unique_temp_path", lambda path: blocker / "x.tmp")
+        path = tmp_path / "ledger.json"
+        verifier = FixedVerifier(human_line())
+        verdict = check(policy=self.POLICY, ledger=CiteLedger(lambda: path), verifier=verifier)
+        assert (verdict.passed, verdict.refusal) == (False, Refusal.LEDGER_UNAVAILABLE)
+        assert len(verifier.calls) == 1  # the read succeeded; the write is what failed
+        assert not path.exists()
 
     def test_the_ledger_never_holds_the_line_text(self, tmp_path: Path) -> None:
         path = tmp_path / "ledger.json"
@@ -940,11 +953,12 @@ class TestInvariants:
 
     def test_no_refusal_reason_is_built_from_answer_content(self) -> None:
         marker = "answer-content-marker"
-        for overrides in (
+        cases: list[dict[str, Any]] = [
             {"text": marker, "human": False},
             {"text": marker, "room": "main"},
             {"headline": marker, "team": "beta"},
-        ):
+        ]
+        for overrides in cases:
             runner = answering(fx.verify_answer(**overrides))
             verdict = check(verifier=TeamchatVerifyCli(runner=runner))
             assert marker not in verdict.reason

@@ -13,17 +13,16 @@ Child (d) of umbrella [Plan 00630](../00630-coordinator-level-skills-ccy-teams-a
 design in its [DESIGN.md](../00630-coordinator-level-skills-ccy-teams-aware/DESIGN.md)
 section 16. Before a destructive act (push, delete, permission change, merge to
 main) the daemon requires a cited questions-room id and the team it names, and
-runs `$TEAMCHAT_KIT/bin/teamchat verify --team <T> <id>` with the stamped
+runs `$TEAMCHAT_KIT/bin/teamchat verify <id> --room questions` with the stamped
 `TEAMCHAT_RUNTIME`. It passes only if the line is in the questions room, its
 sender is a declared human of T, and the seat's role in T is coordinator.
 Anything else is a deny with the reason, never a pass; there is no `history`
 fallback. Nothing under teamchat's seat store or run directory is opened.
 
-Coded against fedora-desktop issue 369: `verify` takes a questions-room id and
-answers with room, sender, whether a declared team human, the attached `Q<n>`
-and the text, with documented exit codes. Until it lands, today's `verify`
-reads the main room only, so a questions-room cite cannot be verified and the
-guard (and the 00632 GO gate) deny with that reason.
+Coded against the fedora-desktop issue 369 `verify` contract as its peer
+relayed it (one `verified` record: room, sender, `human`, `question`,
+`sent_ms`; documented exit codes). It is not yet checked against a live
+teamchat (Task 2.4); anything off that contract refuses.
 
 A verified readiness GO (Plan 00632) is accepted as the cite for the act
 classes it authorised, until the window ends or the mode lapses; never for a
@@ -128,7 +127,8 @@ flipped to block or defaulted on.
 - [x] Absent-team fixture passes.
 - [x] Release-bound items recorded in the pending-release holding area
   (`CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml`,
-  `release-notes/087-human-approval-check.md`).
+  `release-notes/087-human-approval-check.md`,
+  `release-notes/103-human-approval-check-verifies-cites-and-judges-coordinator-sub-agents.md`).
 
 ## Delivery & Milestones
 

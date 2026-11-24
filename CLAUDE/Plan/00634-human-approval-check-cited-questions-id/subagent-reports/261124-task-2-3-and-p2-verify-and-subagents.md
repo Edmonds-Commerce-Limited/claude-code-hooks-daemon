@@ -67,6 +67,16 @@ While any switch is on, the 300 s in-memory approval record is bypassed, so it c
 - `test_human_approval_check.py`: the default verifier is a `TeamchatVerifyCli` over a fake runner, and the cases cover sub-agent arming, options and policy wiring.
 - `tests/support/teamchat.py`: the contract fixture, a 43-character `HUMAN_ID` and `SENT_MS`.
 
+### QA run
+
+- **Targeted pytest:** about 17,500 tests passed across these suites:
+  - all of `tests/unit/utils`, `tests/unit/config`, `tests/config` and `tests/unit/daemon`;
+  - the tests for every handler that imports `team_role_gate`: `host_seat_lane_guard`, `coordinator_board`, `owner_wait_stop_guard`, `owner_directives_register`, `ci_state_reading` and `auto_continue_stop`, all unchanged and passing. There is no `coordinator_conduct` handler in `src/`;
+  - the QA tests: error-hiding audit, generated-doc drift, declared-invariant pairs, temp names;
+  - the integration tests: handler instantiation, config migrations, guidance coverage, release-note holding area, config-changes manifests.
+- **CI static checks, run locally:** `black --check src tests`, `ruff check src tests` and `mypy src` are clean. Pyright found one test typing error, which is now fixed.
+- **Not run:** `llm_qa.py changed` cannot run in this worktree, because it has no venv and the resolver refuses `/workspace/.venv`.
+
 ## Open items
 
 1. **Live check from a v2 seat (Task 2.4).** These facts are unstated in the relayed contract and were set to the strictest reading:
@@ -79,4 +89,8 @@ While any switch is on, the 300 s in-memory approval record is bypassed, so it c
 
 2. **Ledger lifetime.** The ledger is never pruned. Past 256 KiB (roughly 3,000 entries) it refuses every cite while single use is on, and deleting the file re-allows every recorded cite. This is acceptable only while the switch is off by default.
 
-3. **Unchanged by design.** The approval record is shared by the seat's main thread and its sub-agents, because they carry the same session signals. With the switches off, replay stays unbounded and a human "NO" still verifies (finding 1). Advise mode is annotation only.
+3. **Owner question: the main thread still arms when the role cannot be read.** An unresolved or role-null seat still arms the main thread, as the brief's "main thread unchanged" requires. The ruling "never assume a role exists" could be read to cover this case too. No code was changed; the owner should decide.
+
+4. **P1 footprint.** The single-use ledger is most of P1: a file format, a lock, an atomic write, two error-hiding exclusions and no pruning. It comes to about 120 source lines plus about 20 tests. If P1 is to be trimmed, the ledger is the piece to drop. `require_question` and `max_line_age_seconds` are about 15 lines.
+
+5. **Unchanged by design.** The approval record is shared by the seat's main thread and its sub-agents, because they carry the same session signals. With the switches off, replay stays unbounded and a human "NO" still verifies (finding 1). Advise mode is annotation only.
