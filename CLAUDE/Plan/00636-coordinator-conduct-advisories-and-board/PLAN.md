@@ -140,16 +140,17 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   deny carries the stand-in, and auto_continue_stop judges the re-stop after
   this guard's deny afresh; N3 a raising `flags_readable()` under `auto`
   refuses.
-- [ ] ⬜ **Task 2.1d (OPEN follow-ups from the delta review, not fixed)**:
-  - N4: the guard's stand-in gate is looser than auto_continue_stop's (reads a
-    possibly stale last assistant text, needs neither the `STOPPING BECAUSE:`
-    prefix nor the marker write), so a stray one-off stand-in can be asked for.
-  - N5: the 200-line own-refusal lookback can see this guard's deny from an
-    EARLIER stop chain and pass a later chain another handler denied first.
-    Fix direction: require the guard's marker to be the latest block, or after
-    the last real user prompt.
-  - N6: an unreadable transcript makes every team-session stop "waiting", so a
-    coordinator under v1 `auto` gets the advisory on every such stop.
+- [x] ✅ **Task 2.1d (follow-ups from the delta review)**, test-first
+  (`tests/unit/handlers/stop/test_owner_wait_followups_n4_n5_n6.py`):
+  - N4: the stand-in gate now needs a `STOPPING BECAUSE:` line (per content
+    block, as auto_continue_stop reads it), a real event and a session id.
+    Residual: the last assistant message is not freshness-resolved (no poll),
+    and the marker itself is written later, by auto_continue_stop.
+  - N5: the own-refusal lookback counts only blocks after the last real user
+    prompt (`recent_stop_hook_block_texts_this_chain`); feedback entries and
+    tool results are not prompts.
+  - N6: an unreadable stop message gets no v1 `auto` advisory (still refused
+    where the flags are readable).
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.

@@ -253,6 +253,28 @@ def recent_stop_hook_block_texts(
         ``OSError``: a caller that must stand down on an unverifiable re-entry
         checks :func:`transcript_is_readable` first and treats a raise the same.
     """
+    return _block_texts(transcript_path, lookback, since_last_prompt=False)
+
+
+def recent_stop_hook_block_texts_this_chain(
+    transcript_path: str | None,
+    lookback: int = _DEFAULT_BLOCK_LOOKBACK,
+) -> tuple[str, ...]:
+    """Like :func:`recent_stop_hook_block_texts`, but only the CURRENT stop chain's blocks.
+
+    A stop chain is the run of turns since the last real user prompt: a prompt
+    (a cron tick or a human message) starts a new chain, while a Stop-hook
+    feedback entry and a tool result do not. Blocks before that prompt belong to
+    an earlier chain and are dropped (Plan 00636 N5). With no prompt in the
+    window the whole window is the chain.
+    """
+    return _block_texts(transcript_path, lookback, since_last_prompt=True)
+
+
+def _block_texts(
+    transcript_path: str | None, lookback: int, *, since_last_prompt: bool
+) -> tuple[str, ...]:
+    """The block marker texts in the tail, optionally only those after the last real prompt."""
     if not transcript_path:
         return ()
     try:
@@ -278,7 +300,24 @@ def recent_stop_hook_block_texts(
             text = _entry_block_text(entry)
             if text is not None:
                 texts.append(text)
+            elif since_last_prompt and _entry_is_real_prompt(entry):
+                texts.clear()
     return tuple(texts)
+
+
+def _entry_is_real_prompt(entry: dict[str, Any]) -> bool:
+    """Whether an entry is a user prompt: a user message with text, not a tool result."""
+    if entry.get("type") != "user":
+        return False
+    message = entry.get("message")
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return False
+    content = message.get("content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+    return False
 
 
 def _entry_block_text(entry: dict[str, Any]) -> str | None:
