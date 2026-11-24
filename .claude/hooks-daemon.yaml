@@ -444,10 +444,13 @@ handlers:
 
     human_approval_check:   # A coordinator team seat's push, delete, world-writable chmod or
       enabled: true          # merge into main needs a cited questions-room line a human sent (Plan 00634).
-      priority: 21            # Silent for a session with no team seat. block denies EVERY coordinator
-      options:                # push until fedora-desktop issue 369 lands: the default verifier refuses every cite.
-        mode: advise           # off | advise | block
+      priority: 21            # Silent for a session with no team seat. Cites are checked with
+      options:                # teamchat verify; a declared coordinator seat's sub-agents are judged too.
+        mode: advise           # off | advise | block (owner ruling: advise only)
         coordinator_seats_only: true   # Q5, proposed, owner ruling pending
+        require_question: false        # O4 binding switches, all OFF by owner ruling
+        max_line_age_seconds: null
+        single_use_cites: false
 
     host_seat_lane_guard:   # A teamchat seat with duty host runs no test, build, lint or QA
       enabled: true          # command: host seats deploy and triage (Plan 00635, ruling Q64 D3).

@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import subprocess
 import threading
@@ -59,6 +58,7 @@ from claude_code_hooks_daemon.utils.teamchat_seat import (
     normalise_name,
     run_kit_command,
 )
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
 
@@ -515,7 +515,7 @@ class CiteLedger:
         if path is None:
             return False
         body = json.dumps({"v": LEDGER_VERSION, "used": sorted(list(e) for e in entries)})
-        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temporary = unique_temp_path(path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_text(body, encoding="utf-8")
