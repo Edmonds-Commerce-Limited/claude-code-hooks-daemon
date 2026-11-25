@@ -911,8 +911,13 @@ class AutoContinueStopHandler(StopHandlerBase):
                     self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
-                # Read BEFORE the marker is written: the write replaces the entry.
-                previous_entered_at = previous_awaiting_human_entered_at(hook_input)
+                # Read BEFORE the marker is written: the write replaces the entry. Only a
+                # stop that declares awaiting-human writes one, so only it needs the read.
+                previous_entered_at = (
+                    previous_awaiting_human_entered_at(hook_input)
+                    if _declares_human_blocked(text)
+                    else None
+                )
                 marker_written = self._maybe_record_human_blocked_marker(hook_input, text)
                 if marker_written:
                     stand_in = self._stand_in_block(
