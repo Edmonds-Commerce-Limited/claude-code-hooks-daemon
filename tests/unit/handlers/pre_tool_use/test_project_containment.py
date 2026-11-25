@@ -689,6 +689,49 @@ class TestNestedShells:
         assert handler.matches(_bash("python3 -c \"open('/tmp/x','w')\"")) is False
 
 
+class TestACdInsideACompoundBodyKeepsLaterTargetsInDoubt:
+    """A `cd` inside a loop body moves where the later writes land (Plan 00586 Task 1.8, H)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && for x in a; do cd /tmp; echo hi > x; done",
+            "cd sub && while true; do cd /tmp; echo hi > x; done",
+            "cd sub && if true; then cd /tmp; echo hi > x; fi",
+            "cd sub && { cd /tmp; echo hi > x; }",
+        ],
+    )
+    def test_a_write_after_a_cd_out_of_the_project_inside_a_body_matches(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/repo")) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && for x in a; do cd ..; echo hi > x; done",
+            "cd sub && while true; do cd ..; echo hi > x; done",
+            "cd sub && if true; then cd ..; echo hi > x; fi",
+        ],
+    )
+    def test_a_relative_cd_inside_a_body_leaves_the_write_in_doubt(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        """Where a relative `cd` lands depends on whether the body runs, so the write is denied.
+
+        An absolute `cd /tmp` lands outside the project whichever way the body goes, so the
+        pins above cannot tell a followed `cd` from one kept in doubt; a relative one can
+        (the independent review of PR 272 found the gap by removing the doubt).
+        """
+        assert handler.matches(_bash(command, cwd="/repo")) is True
+
+    def test_the_same_body_with_the_cd_kept_inside_the_project_does_not_match(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        command = "cd sub && for x in a; do cd /repo/sub; echo hi > x; done"
+        assert handler.matches(_bash(command, cwd="/repo")) is False
+
+
 class TestReadsAreNeverBlocked:
     @pytest.mark.parametrize("tool", ["Read", "Grep", "Glob"])
     def test_a_read_shaped_tool_never_matches(
