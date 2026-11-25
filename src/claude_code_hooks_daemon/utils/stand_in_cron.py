@@ -36,7 +36,8 @@ from claude_code_hooks_daemon.utils.cron_tick import (
     tick_sentinel,
     with_tick_sentinel,
 )
-from claude_code_hooks_daemon.utils.session_modes import ModeLabel
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel, SessionModeEntry
 from claude_code_hooks_daemon.utils.stop_hook_helpers import is_stop_hook_active
 
 logger = logging.getLogger(__name__)
@@ -194,12 +195,16 @@ def previous_awaiting_human_entered_at(hook_input: dict[str, Any]) -> float | No
     A caller that goes on to write THIS stop's entry must read this first: the
     write replaces the entry, so afterwards the registry holds only this stop.
     """
+    entries: tuple[SessionModeEntry, ...] = ()
     try:
         entries = session_policy(hook_input).entries
     except (RuntimeError, OSError) as exc:
-        # Best-effort like the marker write itself: no registry means no backoff, never a failed stop.
-        logger.debug("stand-in backoff: cannot read the session's modes: %s", exc)
-        return None
+        log_and_continue(
+            logger,
+            exc,
+            reason="no readable session modes, so no backoff (best-effort, like the marker write)",
+            level=logging.DEBUG,
+        )
     for entry in entries:
         if entry.label is ModeLabel.AWAITING_HUMAN:
             return entry.entered_at
