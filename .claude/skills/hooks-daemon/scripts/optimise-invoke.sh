@@ -29,7 +29,7 @@ CONFIG="${PROJECT_ROOT}/.claude/hooks-daemon.yaml"
 # install. It is the daemon's own checkout when that wrapper resolves to the project's.
 CLIENT_WRAPPER="${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon"
 OWN_WRAPPER="${PROJECT_ROOT}/bin/hooks-daemon"
-if [ -x "${OWN_WRAPPER}" ] && [ "$(readlink -f "${CLIENT_WRAPPER}" 2>/dev/null)" = "$(readlink -f "${OWN_WRAPPER}")" ]; then
+if [ -x "${OWN_WRAPPER}" ] && [ "${CLIENT_WRAPPER}" -ef "${OWN_WRAPPER}" ]; then
     DAEMON_DIR="${PROJECT_ROOT}"                                          # self-install
 elif [ -x "${CLIENT_WRAPPER}" ]; then
     DAEMON_DIR="${PROJECT_ROOT}/.claude/hooks-daemon"                     # normal install
