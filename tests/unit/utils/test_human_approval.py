@@ -408,7 +408,7 @@ class TestTeamchatVerifyCli:
         "error",
         [
             OSError("spawn failed"),
-            subprocess.TimeoutExpired(cmd="teamchat", timeout=3),
+            subprocess.TimeoutExpired(cmd="teamchat", timeout=Timeout.TEAMCHAT_VERIFY),
             ValueError("bad"),
             RecursionError(),
             UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
