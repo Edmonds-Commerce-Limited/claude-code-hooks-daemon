@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00590: daemon dir cd reads only command position](00590-daemon-dir-cd-reads-only-command-position/PLAN.md) - Complete at `fee5dc457` (merge `46cf5c71a`; main CI run 42724555662 success) + the archiving commit (GitHub #194, closed: R-DAEMON-DIR-CD blanks only `grep`/`rg` search arguments nothing can run, so a search for `"cd "` over a daemon path is allowed; every executing twin still denies; release note 024)
+
 - [00589: explain rule covers plugin handlers](00589-explain-rule-covers-plugin-handlers/PLAN.md) - Complete at `bb6dbcb58` (merge `5ba1d98a2`; main CI run 42718913878 success) + the archiving commit (GitHub #171, closed: `explain-rule`/`explain-handler` also load the `plugins:` section through the daemon's own loader; a broken plugin is logged and contributes nothing; release note 023)
 
 - [00588: lsp_enforcement leaves stdin greps and git grep alone](00588-lsp-enforcement-stdin-and-git-grep/PLAN.md) - Complete at `a0ac71f37` (main CI run 42706023447 success) + the archiving commit (GitHub #169, closed: a grep fed by a pipe, `<` or `<<<` with no file target, and any `git grep`, are not judged as symbol lookups; real lookups stay enforced; release note 021)
