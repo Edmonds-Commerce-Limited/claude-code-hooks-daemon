@@ -315,7 +315,7 @@ rules:
     why: the shipped plan scaffolder, linted under the tool's own defaults
   - path_glob: "src/claude_code_hooks_daemon/install/templates/agents/*.md"
     tests: [tests/integration/test_client_owned_asset_lint.py]
-    why: the shipped agent definitions, checked by the asset lint's markdown format rule
+    why: the shipped agent definitions, which the asset lint requires to be a fixed point of the markdown formatter
   - path_glob: ".claude/ccy/claude-supervise"
     tests: [tests/integration/test_client_owned_asset_lint.py]
     why: the shipped supervisor wrapper, linted under the tool's own defaults

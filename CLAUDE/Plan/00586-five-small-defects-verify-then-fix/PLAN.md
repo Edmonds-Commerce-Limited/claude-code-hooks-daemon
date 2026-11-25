@@ -86,7 +86,8 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   `CLIENT_OWNED_ASSETS` manifest, so no import or name links an asset to it. RED test
   `test_every_client_owned_asset_selects_the_asset_lint_test` (reads the manifest, so a new asset cannot be missed)
   failed on `init.sh`; GREEN with one rule per manifest source (108 tests pass). The "Shell" job was not changed: it
-  lints under this repository's config, which is why it passed
+  scans only `scripts/` and `src/`, so the root `provision.sh` and `init.sh` are never shellchecked there, and
+  `run_shell_check.sh` does not fail on info-level findings, which is the level SC2030 and SC2031 report at
 
 - [x] ✅ **Task 1.8 (H)**: Plan 00587's fact-check found that a `cd` INSIDE a compound body (which must keep the
   body's later targets in doubt) is pinned only by a parser-level test. Added the containment-level deny tests
