@@ -46,7 +46,7 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - In Progress (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
-- [00641: release candidate branch lifecycle after release](00641-release-candidate-branch-lifecycle-after-release/PLAN.md) - Not Started (BUG, owner-named process defect: an RC branch is kept after its release on a "client seats may still track it" note no record backs, then blocks new branches; the release procedure names no step that retires it)
+- [00641: release candidate branch lifecycle after release](00641-release-candidate-branch-lifecycle-after-release/PLAN.md) - Not Started (BUG, owner-named process defect: released RC branches stayed on the remote under owner keep records while branch-preflight counted them as unkept and blocked new branches, so the two commands disagree; the release procedure states the RC is deleted but has no numbered step that does it)
 
 - [00639: stand-in no-op declines flood the journal](00639-stand-in-no-op-declines-flood-the-journal/PLAN.md) - Not Started (BUG, owner Q65, next after the v2 PRs: a stand-in that declines with nothing changed must not write a journal entry each tick; evidence relayed, unverified; same defect as Plan 00470 Task 5.2's journal rule)
 
