@@ -28,8 +28,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         php-cli \
         shellcheck \
         wget \
-        gnupg \
-        apt-transport-https \
         tmux \
         git-filter-repo \
     && rm -rf /var/lib/apt/lists/*
