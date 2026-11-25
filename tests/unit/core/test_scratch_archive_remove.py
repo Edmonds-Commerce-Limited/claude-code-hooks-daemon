@@ -1218,21 +1218,32 @@ class TestAdoptedArchives:
         assert resumed.outcome == "removed"
         assert list(root.iterdir()) == []
 
-    def test_a_claim_naming_another_archive_than_the_adopted_one_is_stuck(
+    def test_an_intact_tree_claimed_under_a_fresh_id_is_renamed_back(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
-        """PR 251 review F2 (adopt): the claim cannot be matched to the adopted archive."""
+        """An old adopted record of the entry must not strand an intact interrupted claim."""
         _entry(root)
         _adopted(root, root_fd, store, tar, "none")
         claimed = root / (CLAIM_PREFIX + "e1")
-        aside = root / "aside"
-        claimed.rename(aside)
-        aside.rename(root / "e1")  # same inode and birth: the claim below covers it
+        claimed.rename(root / "e1")  # same inode and birth: the claim below covers it
         _claim(root_fd, "e1", store)  # a fresh id, not the adopted archive's
-        (claimed / "a.txt").unlink()
         resumed = _resume(root_fd, store, tar)
-        assert resumed.outcome == "stuck"
-        assert (claimed / "sub" / "b.bin").read_bytes() == bytes(range(256))
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "sub" / "b.bin").read_bytes() == bytes(range(256))
+
+    def test_a_new_folder_sharing_an_adopted_entrys_name_is_renamed_back(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """A new tree that only shares a name with a long-ago adopted entry is not hidden."""
+        _entry(root)
+        _adopted(root, root_fd, store, tar, "none")
+        shutil.rmtree(root / (CLAIM_PREFIX + "e1"))
+        (root / "e1").mkdir()
+        (root / "e1" / "new.txt").write_text("new")
+        _claim(root_fd, "e1", store)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "new.txt").read_text() == "new"
 
     def test_resume_refuses_a_changed_remaining_file(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool

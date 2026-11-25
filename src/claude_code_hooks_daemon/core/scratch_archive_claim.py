@@ -147,7 +147,8 @@ def _user_xattrs(dir_fd: int, name: str) -> tuple[str, ...] | None:
 
     Read through the procfs link of the already-verified directory descriptor,
     so a path swapped above it cannot redirect the probe. A filesystem without
-    xattrs has none; any other failure is unknown, which refuses a pack.
+    xattrs has none; any other failure is unknown, which refuses a pack. This
+    needs ``/proc``: a host without it reads no xattrs, so every pack is refused.
     """
     try:
         names = _list_xattrs("/".join((*PROC_FD_PARTS, str(dir_fd), name)))

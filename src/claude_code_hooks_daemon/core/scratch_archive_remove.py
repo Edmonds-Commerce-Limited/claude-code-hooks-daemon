@@ -527,13 +527,16 @@ def resume_claimed(
     Only the archive the latest covering claim event names is tried (a claim
     records the id its pack will use, so a record of an earlier claim of the
     same tree, or of an earlier tree of that name, never proves it), whole and
-    then as a partly removed tree; when it verifies it authorises the removal. An archive that is expired, due or not complete authorises
-    nothing: against an intact tree it is skipped, and against a partly removed
-    tree it leaves the claim stuck for a human to restore from it (never
-    removed, never renamed back). When none verifies, the tree is renamed back; when its name is taken,
-    it stays claimed and is reported stuck. A record that could not be checked at
-    all (tar did not run) also leaves it stuck: a partly removed tree is never
-    renamed back for want of a check. Nothing is removed without a record.
+    then as a partly removed tree; when it verifies it authorises the removal.
+    An archive that is expired, due or not complete authorises nothing: against
+    an intact tree it is skipped, and against a partly removed tree it leaves
+    the claim stuck for a human to restore from it (never removed, never
+    renamed back). When none verifies, the tree is renamed back; when its name
+    is taken, it stays claimed and is reported stuck. A record that could not be
+    checked at all (tar did not run) also leaves it stuck: a partly removed tree
+    is never renamed back for want of a check. Nothing is removed without a
+    record. Other records of the entry (adopted ones included) take no part: the
+    claim's archive id is the only link.
 
     A claim name no claim event of this checkout covers (same entry name, same
     device, inode and birth time) was not made by a sweep: it is reported ``foreign`` and
@@ -620,23 +623,6 @@ def resume_claimed(
             return Resumed(name, "removed", f"archive {record.archive_id} verified", removed)
     if unchecked:
         return Resumed(name, "stuck", "a recorded archive could not be checked (tar did not run)")
-    # An adopted archive of this entry that the claim does not name means the
-    # claim cannot be matched to the archive that holds the tree: the tree is
-    # never renamed back (a human reconciles them). Other excluded records of
-    # the entry (earlier claims, earlier trees) stay harmless.
-    if any(
-        r.checkout == checkout
-        and _names_entry(r, name)
-        and r.archive_id != latest.archive_id
-        and ADOPT_PROOF in r.proof_ids
-        for r in records
-    ):
-        return Resumed(
-            name,
-            "stuck",
-            f"the claim names archive {latest.archive_id}, not the adopted archive of this "
-            "entry; left claimed for a human",
-        )
     reason = (
         "the claim's archive does not verify"
         if candidates

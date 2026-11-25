@@ -182,7 +182,7 @@ def refuse_unrestorable(listing: TreeListing, claimed_name: str) -> None:
     for node in listing.nodes:
         where = node.rel or claimed_name
         if node.user_xattrs is None:
-            raise PackRefused(f"{where!r}: its xattrs could not be read")
+            raise PackRefused(f"{where!r}: its xattrs could not be read (this needs /proc)")
         if node.user_xattrs:
             raise PackRefused(
                 f"{where!r} holds {', '.join(node.user_xattrs)}; tar here does not keep xattrs"
