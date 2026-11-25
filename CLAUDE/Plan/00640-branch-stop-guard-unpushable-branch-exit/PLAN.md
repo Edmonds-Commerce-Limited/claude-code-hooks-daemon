@@ -43,9 +43,11 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 
 - [x] The Task 1.1 test failed before the fix and passes after it (the sub-agent saw 9 failed before; my rerun of the 7 touched test files: 271 passed).
 - [x] A parked, unpushable branch with later commits does not produce the three-block cycle or an abandoned record (live check, Task 2.3).
-- [ ] An unparked unpushed branch is still denied three times: covered by the existing unit tests that still pass; not re-run live.
+- [x] An unparked unpushed branch is still denied: `test_unparked_branch_is_still_denied` in `tests/unit/core/test_branch_stop_guard.py` passes; not re-run live.
 - [x] Release-bound consequences: recorded in the pending-release holding area as release note 107.
+- [ ] PR 255 is merged, and the plan is then flipped to Complete and archived in that same step.
 
 ## Delivery & Milestones
 
-- Defect logged by seat 5 (lts-ops); no delivery commit yet.
+- Defect logged by seat 5 (lts-ops).
+- Implemented and verified on branch `fix-ccy-dockerfile-arm64-dart`, delivered by PR 255 (commits `c5c29e2d6`, `1bf547492`, `c99e7f9fb`). The plan is complete when PR 255 merges: the archive move to `Completed/` ships with that merge.
