@@ -73,8 +73,13 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   restore of a non-empty modified file is still denied. GREEN in `destructive_git`, alongside its other
   lossless-removal judgements
 
-- [ ] ⬜ **Task 1.5 (E)**: RED test with the exact command shape, then narrow the discovery-idiom match so it is
-  allowed, keeping the existing tests for real discovery commands red-to-green
+- [x] ✅ **Task 1.5 (E)**: Does not reproduce; closed with the evidence and no change. The original command was
+  never recorded, so 19 shapes were run through `PlanNumberHelperHandler.matches` on main: an `ls` of a plan
+  folder, its `JOURNAL/`, `Completed/` or a glob, and `git status`, each piped to `awk` and chained (`&&` or `;`,
+  either order) with `git add CLAUDE/Plan/...`, are all allowed. The only denied shape is a real discovery
+  (`ls CLAUDE/Plan | awk -F- '{print $1}' | sort | tail -1`), which is correct. GitHub #151's narrowing (a
+  listing inside one numbered folder is allowed) already covers the plan-folder shapes. If the shape recurs,
+  record the exact command and reopen
 
 - [ ] ⬜ **Task 1.7 (G)**: Find why the mapping (and the "Shell" job, which likely lints under the repository's own
   shellcheck config rather than the defaults this test uses) missed it. RED test in the mapping's own tests: a change
