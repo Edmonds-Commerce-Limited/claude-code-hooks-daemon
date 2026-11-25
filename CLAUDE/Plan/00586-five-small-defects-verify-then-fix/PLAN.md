@@ -68,8 +68,9 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   exists. Cause: `.claude/hooks-daemon/bin/hooks-daemon` is a link to the project's own wrapper, so the script's
   client-install probe matched first. RED test `TestALinkedSelfInstallResolvesToTheProjectRoot` (a fixture with that
   link, which the existing self-install fixture lacked) failed; GREEN by testing first whether the client-path wrapper
-  resolves to the project's own. `optimise.md`'s three reference paths, which named a client-only
-  `.claude/hooks-daemon/docs/guides/` tree, now name the printed daemon directory. Deployed skill copies synced
+  resolves to the project's own. `optimise.md`'s three reference paths (the config-changes manifests and two
+  `docs/guides/` references, which named a client-only `.claude/hooks-daemon/` tree) now name the printed daemon
+  directory. Deployed skill copies synced
   (34 related tests pass). Release note 114
 
 - [ ] ⬜ **Task 1.4 (D)**: Confirm on a failed release-gate run that the other shards ran to the end. Fix in the
