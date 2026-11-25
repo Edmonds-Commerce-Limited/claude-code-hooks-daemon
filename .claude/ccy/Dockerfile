@@ -48,15 +48,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # ================================================================
 # Dart SDK - dart analyze
-# Official Google apt repository
+# Official SDK zip (the apt repo is amd64-only, so it fails on arm64 hosts)
 # ================================================================
-RUN wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | \
-    gpg --dearmor -o /usr/share/keyrings/dart.gpg && \
-    echo 'deb [signed-by=/usr/share/keyrings/dart.gpg arch=amd64] https://storage.googleapis.com/download.dartlang.org/linux/debian stable main' \
-        > /etc/apt/sources.list.d/dart_stable.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends dart && \
-    rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) dart_arch=x64 ;; \
+        arm64) dart_arch=arm64 ;; \
+        *) echo "unsupported architecture for Dart SDK" >&2; exit 1 ;; \
+    esac; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends unzip; \
+    rm -rf /var/lib/apt/lists/*; \
+    wget -qO /tmp/dart.zip "https://storage.googleapis.com/dart-archive/channels/stable/release/latest/sdk/dartsdk-linux-${dart_arch}-release.zip"; \
+    unzip -q /tmp/dart.zip -d /usr/lib; \
+    mv /usr/lib/dart-sdk /usr/lib/dart; \
+    rm /tmp/dart.zip
 
 ENV PATH="/usr/lib/dart/bin:${PATH}"
 
