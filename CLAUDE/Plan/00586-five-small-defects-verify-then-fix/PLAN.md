@@ -54,8 +54,16 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ### Phase 1: Verify and fix (one task per defect, independent)
 
-- [ ] ⬜ **Task 1.1 (A)**: Reproduce: list every handler `check-config-migrations` can recommend and compare it with
-  the registered handlers. RED test, then fix the source of the recommendation. Check Plan 00420 first
+- [x] ✅ **Task 1.1 (A)**: Reproduced: a probe over every `added` handler key in the manifests (186 keys across the
+  61 manifests `load_manifests_between` reads, the first version excluded as the from-version) found 9 not
+  registered for their event now. Seven are gone and were being recommended: `plan_completion_advisor`,
+  `task_tdd_advisor`, `hedging_language_detector`, `working_directory`, `current_time`, `upgrade_approval_guard`
+  and `yolo_container_detection`. The other two stay suggested on purpose: the placeholder `handlers.<event>.<handler>.scope`,
+  and `branch_count_advisor`, a live key alias of `branch_sweep` (`HANDLER_KEY_ALIASES`). Plan 00420 is Not Started
+  and does not cover it. RED tests in `test_config_migrations_gone_handlers.py` (3 failed, 4 controls passed);
+  GREEN with `handler_key_is_gone` in `handler_key_audit.py`, applied to `added` and `changed` entries in
+  `generate_migration_advisory`. A name the audit does not classify (retired, relocated, wrong event) stays
+  suggested, since it may be a project handler. Release note 113
 
 - [x] ✅ **Task 1.2 (B)**: Reproduced: the two readers disagreed (`core/relevance.py` treated `[]` as an empty set,
   `core/apply_once.py` treats it as unset). The enforcing reader fails safe (every language guard stays on), so the
