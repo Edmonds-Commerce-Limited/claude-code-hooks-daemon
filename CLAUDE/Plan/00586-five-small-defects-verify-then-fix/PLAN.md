@@ -74,12 +74,21 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   restore of a non-empty modified file is still denied. GREEN in `destructive_git`, alongside its other
   lossless-removal judgements
 
-- [ ] ⬜ **Task 1.5 (E)**: RED test with the exact command shape, then narrow the discovery-idiom match so it is
-  allowed, keeping the existing tests for real discovery commands red-to-green
+- [x] ✅ **Task 1.5 (E)**: Does not reproduce; closed with the evidence and no change. The original command was
+  never recorded, so 19 shapes were run through `PlanNumberHelperHandler.matches` on main: an `ls` of a plan
+  folder, its `JOURNAL/`, `Completed/` or a glob, and `git status`, each piped to `awk` and chained (`&&` or `;`,
+  either order) with `git add CLAUDE/Plan/...`, are all allowed. The only denied shape is a real discovery
+  (`ls CLAUDE/Plan | awk -F- '{print $1}' | sort | tail -1`), which is correct. GitHub #151's narrowing (a
+  listing inside one numbered folder is allowed) already covers the plan-folder shapes. If the shape recurs,
+  record the exact command and reopen
 
-- [ ] ⬜ **Task 1.7 (G)**: Find why the mapping (and the "Shell" job, which likely lints under the repository's own
-  shellcheck config rather than the defaults this test uses) missed it. RED test in the mapping's own tests: a change
-  to any file the asset lint test checks selects that test. GREEN in the mapping
+- [x] ✅ **Task 1.7 (G)**: Cause: `scripts/qa/changed_tests_map.yaml` mapped `*.sh` to shellcheck and the bash 3.2
+  scan only, and nothing named `test_client_owned_asset_lint.py`, which reads its files through the
+  `CLIENT_OWNED_ASSETS` manifest, so no import or name links an asset to it. RED test
+  `test_every_client_owned_asset_selects_the_asset_lint_test` (reads the manifest, so a new asset cannot be missed)
+  failed on `init.sh`; GREEN with one rule per manifest source (108 tests pass). The "Shell" job was not changed: it
+  scans only `scripts/` and `src/`, so the root `provision.sh` and `init.sh` are never shellchecked there, and
+  `run_shell_check.sh` does not fail on info-level findings, which is the level SC2030 and SC2031 report at
 
 - [x] ✅ **Task 1.8 (H)**: Plan 00587's fact-check found that a `cd` INSIDE a compound body (which must keep the
   body's later targets in doubt) is pinned only by a parser-level test. Added the containment-level deny tests

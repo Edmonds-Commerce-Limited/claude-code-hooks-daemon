@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.install.client_owned_assets import resolve_sources
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -641,6 +642,22 @@ class TestDeclaredRules:
         assert problems == []
         scan = "tests/integration/test_bash32_portability.py"
         assert any(scan in rule.tests for rule in rules if rule.matches(changed)), changed
+
+    def test_every_client_owned_asset_selects_the_asset_lint_test(self) -> None:
+        """A change to any shipped asset runs the default-rules lint (Plan 00586 Task 1.7, G).
+
+        `provision.sh` changed in Plan 00581, the change-to-test map selected nothing that
+        lints it under shellcheck's own defaults, and an SC2030/SC2031 finding reached main.
+        The assets are read from the manifest, so a new one cannot be missed.
+        """
+        rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
+        assert problems == []
+        lint = "tests/integration/test_client_owned_asset_lint.py"
+        resolved = resolve_sources(PROJECT_ROOT)
+        assert resolved
+        for _asset, path in resolved:
+            relative = path.relative_to(PROJECT_ROOT).as_posix()
+            assert any(lint in rule.tests for rule in rules if rule.matches(relative)), relative
 
     def test_this_repositorys_map_is_valid_and_honest(self) -> None:
         """Every tool it names is one `changed` runs; every test it names exists."""
