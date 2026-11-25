@@ -8621,3 +8621,13 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW (needs a process in another mount namespace holding a scratch file across a sweep).
 
 **Status**: ⬜ Open. Candidate fix from the review: compare identities instead of text, `os.stat(f"/proc/{pid}/fd/{n}")` (follows the magic link to the real inode in any namespace) matched on `(st_dev, st_ino)` against the entry's walked inodes, test-first. The limit is stated in DESIGN.md's open-file row.
+
+### N737 — adopt: a removal that relies on an adopted archive must record a claim carrying that archive's id
+
+**Source**: Plan 00627, independent PR 251 review finding S1 (the adopt-STUCK branch of `resume_claimed` was removed). Also folds in review nit N2: `/proc/<pid>/maps` escapes a newline in a path as `\012`, so such a path never matches (see N736, which matches by identity instead).
+
+**Evidence**: `ClaimEvent` (`core/scratch_archive.py`) says a claim of an adopted original must carry the adopted archive's id, and `resume_claimed` proves a claimed tree only by the archive the latest claim names. The only claim writer, `_apply_row`, always uses a fresh id, and nothing in `src/` calls `adopt()` or `finish_adoption()`; only tests do. Once adoption is wired, a removal that relies on the adopted archive without a claim naming it is never proven by that archive on resume: an interrupted claim is renamed back (safe, nothing lost), but the adopted archive never authorises the removal.
+
+**Severity**: LOW (no producer yet).
+
+**Status**: ⬜ Open. Enforce the binding where adoption is wired: record the claim with the adopted archive's id, test-first (an interrupted claim of an adopted entry is finished, not renamed back).
