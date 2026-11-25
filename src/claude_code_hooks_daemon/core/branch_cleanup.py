@@ -925,6 +925,30 @@ def _remove_worktree(repo: Path, path: Path) -> str | None:
     return result.stderr.strip() or f"git worktree remove exited {result.returncode}"
 
 
+def _lift_stale_marks_of_kept_branches(repo: Path, records: Mapping[str, BranchRecord]) -> None:
+    """Make the creation guard's labels snapshot agree with the keeps this sweep honours.
+
+    ``branch-preflight`` and the creation guard read a snapshot SessionStart wrote,
+    and only a local ``branch-keep`` cleared its stale mark. A keep written in
+    another clone and fetched by this sweep was honoured here yet left the mark,
+    so the guard kept refusing on a branch the sweep reported kept (Plan 00641).
+    The snapshot is a derived cache, so correcting it is not a change a dry run
+    promises to withhold.
+    """
+    # Function-local: branch_creation imports this module at load time.
+    from claude_code_hooks_daemon.core.branch_creation import (
+        LABELS_RELATIVE_PATH,
+        clear_label_stale,
+    )
+
+    # By name, never by tip: a keep is a note on one tip, and a local and a remote
+    # copy of a branch can sit at different tips, so clearing every label at either
+    # tip would also lift the mark of an unkept branch that merely shares one.
+    for name, record in records.items():
+        if record.kept_reason is not None and not record.stale:
+            clear_label_stale(repo / LABELS_RELATIVE_PATH, name)
+
+
 def clean_sweep(
     repo: Path,
     config: BranchesConfig,
@@ -967,6 +991,7 @@ def clean_sweep(
         update={"sweep": config.sweep.model_copy(update={"budget_ms": BULK_SWEEP_BUDGET_MS})}
     )
     inventory = branch_inventory.build_inventory(repo, unhurried, prove_content=True)
+    _lift_stale_marks_of_kept_branches(repo, inventory.records)
     default = inventory.default_branch
     if default is None:
         raise ValueError("cannot determine the default branch; set branches.default")

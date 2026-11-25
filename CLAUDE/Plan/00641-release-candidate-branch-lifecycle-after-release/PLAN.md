@@ -1,6 +1,6 @@
 # Plan 00641: release candidate branch lifecycle after release
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-25
 **Owner**: dev
 **Priority**: Medium
@@ -33,22 +33,23 @@ What was checked (an independent reviewer of this plan's first draft corrected t
 
 ### Phase 1: Establish the facts
 
-- [ ] ⬜ **Task 1.1**: Reproduce the disagreement: with a merged branch that carries an unexpired `branch-keep` note, run `branch-sweep --clean --remote` and `branch-preflight` and record both outputs. Find why preflight counts it as unkept (notes not fetched or read, or a time budget) and record the cause in the JOURNAL.
-- [ ] ⬜ **Task 1.2**: Read `CLAUDE/development/RELEASING.md` start to end, and the `/release` skill, and record each place RCs are named and which step, if any, retires one.
+- [x] ✅ **Task 1.1**: Reproduce the disagreement: with a merged branch that carries an unexpired `branch-keep` note, run `branch-sweep --clean --remote` and `branch-preflight` and record both outputs. Find why preflight counts it as unkept (notes not fetched or read, or a time budget) and record the cause in the JOURNAL.
+- [x] ✅ **Task 1.2**: Read `CLAUDE/development/RELEASING.md` start to end, and the `/release` skill, and record each place RCs are named and which step, if any, retires one.
 
 ### Phase 2: Fix, test first
 
-- [ ] ⬜ **Task 2.1**: Test first, then fix: `branch-preflight` and `branch-sweep` agree on a keep record (live, lapsed, absent).
-- [ ] ⬜ **Task 2.2**: Add the numbered post-release step that retires the RC branch (or records a dated keep with a reason) to the release procedure and to the `/release` skill if it drives that procedure; the step prints the restore line.
-- [ ] ⬜ **Task 2.3**: Restart the daemon and verify live; run targeted QA.
+- [x] ✅ **Task 2.1**: Test first, then fix: `branch-preflight` and `branch-sweep` agree on a keep record (live, lapsed, absent).
+- [x] ✅ **Task 2.2**: Add the numbered post-release step that retires the RC branch (or records a dated keep with a reason) to the release procedure and to the `/release` skill if it drives that procedure; the step prints the restore line.
+- [ ] ⬜ **Task 2.3**: Restart the daemon and verify live; run targeted QA. (Daemon restarted; live `branch-preflight` still refuses on three unkept merged branches, which is correct since none has a keep. Ticked at completion, after the merge.)
 
 ## Success Criteria
 
 - [ ] The Task 1.1 and 1.2 answers are in the JOURNAL.
-- [ ] The two commands agree on every keep state, shown by a test that failed first.
-- [ ] The release procedure retires its RC branch in a numbered step.
-- [ ] Release-bound consequences recorded in the pending-release holding area as a release note.
+- [ ] The two commands agree on every keep state (live, lapsed, absent), shown by tests in `tests/unit/daemon/test_cli_branch_preflight.py` that failed first.
+- [ ] The release procedure retires its RC branch in a numbered step (Step 15.2 of `CLAUDE/development/RELEASING.md`).
+- [ ] Release-bound consequences recorded in the pending-release holding area as release note 109 under `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
-- Plan filed by seat 5 (lts-ops); corrected after an independent review; no delivery commit yet.
+- Plan filed by seat 5 (lts-ops); corrected after an independent review.
+- Delivery: branch `fix-rc-branch-keep-agreement`. `clean_sweep` clears the stale mark of every branch it sees as kept, by branch name; Step 15.2 of RELEASING.md retires the released RC; release note 109 holds the operator-facing consequence. Independent review approved, with two findings applied (clear by name, add the lapsed-keep test).
