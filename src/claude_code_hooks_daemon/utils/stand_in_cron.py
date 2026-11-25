@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.utils.cron_tick import (
     tick_sentinel,
     with_tick_sentinel,
 )
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.stop_hook_helpers import is_stop_hook_active
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ DEFAULT_STAND_IN_DELAY_HOURS: Final[float] = 3.0
 #: The awaiting-human marker expires after 24 hours by default; a stand-in that
 #: would fire at or after that would find no live marker and do nothing.
 MAX_STAND_IN_DELAY_HOURS: Final[float] = 24.0
+#: A backed-off delay stays below this, so the stand-in still fires inside the marker's day.
+BACKOFF_CEILING_HOURS: Final[float] = 23.0
 STAND_IN_SENTINEL: Final[str] = tick_sentinel(TickKind.STAND_IN)
 #: ``auto_continue_stop``'s option holding the stand-in delay in hours.
 STAND_IN_DELAY_OPTION: Final[str] = "stand_in_delay_hours"
@@ -62,7 +65,9 @@ _PROMPT_BODY: Final[str] = (
     "rewrites, upgrade approvals, anything a guard says to ask the user. If the "
     "question is one of those, record that the stand-in declined and stay blocked.\n"
     "- Record the choice or decline with `mkplan.bash --journal` as the stand-in's "
-    "ruling, never as the owner's. A later real owner message can overturn it."
+    "ruling, never as the owner's. A later real owner message can overturn it.\n"
+    "- A repeat decline with the question unchanged since the last journalled one "
+    "gets NO new journal entry; a ruling that changes anything is always journalled."
 )
 
 
@@ -101,6 +106,24 @@ def validate_delay_hours(value: object) -> float:
     if problem is not None:
         raise ValueError(problem)
     return float(cast("float", value))
+
+
+def backed_off_delay_hours(
+    delay_hours: float, *, previous_entered_at: float | None, now: float
+) -> float:
+    """The delay for a stand-in, longer when this stop repeats one nobody answered.
+
+    ``previous_entered_at`` is when the still-live awaiting-human entry of the
+    session was made (``None`` when the session is not awaiting a human). Each
+    stop replaces that entry, so ``now - previous_entered_at`` is the gap since
+    the last stop that no human message ended; waiting twice that gap doubles the
+    cadence each round (3h, 6h, 12h) up to ``BACKOFF_CEILING_HOURS``. A human
+    message ends the entry, so the next stop starts again at ``delay_hours``.
+    """
+    if previous_entered_at is None or previous_entered_at >= now:
+        return delay_hours
+    gap_hours = (now - previous_entered_at) / _SECONDS_PER_HOUR
+    return min(max(delay_hours, 2 * gap_hours), max(delay_hours, BACKOFF_CEILING_HOURS))
 
 
 def one_off_schedule(now: float, delay_hours: float) -> str:
@@ -181,4 +204,14 @@ def stand_in_requirement(
         return None
     if not config.persistent_crons.enabled:
         return None
-    return stand_in_verdict(hook_input, delay_hours=delay_hours, now=now)
+    when = time.time() if now is None else now
+    previous = next(
+        (entry for entry in autonomy.session.entries if entry.label is ModeLabel.AWAITING_HUMAN),
+        None,
+    )
+    delay = backed_off_delay_hours(
+        delay_hours,
+        previous_entered_at=None if previous is None else previous.entered_at,
+        now=when,
+    )
+    return stand_in_verdict(hook_input, delay_hours=delay, now=when)

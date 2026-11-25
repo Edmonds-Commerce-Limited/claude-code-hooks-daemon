@@ -95,6 +95,14 @@ class TestPrompt:
         ):
             assert needle in text
 
+    def test_an_unchanged_repeat_decline_writes_no_new_journal_entry(self) -> None:
+        """Plan 00639: a decline with nothing changed since the last journalled one is not journalled again."""
+        text = " ".join(stand_in_prompt().split())
+        assert "unchanged" in text
+        assert "NO new journal entry" in text
+        # The rule must not swallow a ruling that changes something.
+        assert "changes anything" in text
+
     def test_fits_the_delivered_prompt_cap(self) -> None:
         assert len(stand_in_prompt()) < 1000
 
