@@ -51,6 +51,16 @@ def _store(project: Path) -> Path:
     return project / "untracked" / "scratch-archive"
 
 
+def _archives(project: Path) -> set[str]:
+    """Every archive file the main store holds, relative to the store."""
+    store = _store(project)
+    return {
+        str(path.relative_to(store))
+        for path in store.rglob("*")
+        if path.is_file() and ".tar" in path.name
+    }
+
+
 def _linked(tree: ScratchTree, now: float) -> Path:
     linked = tree.base / "linked"
     git(_project(tree), "worktree", "add", "-q", "-b", "side", str(linked))
@@ -375,6 +385,34 @@ class TestApplyIsLimitedToItsOwnCheckout:
         assert _run(_project(tree), "--apply", now=now) == 0
         assert (linked / "untracked" / "scratch" / "lone.log").exists()
         assert not (_project(tree) / "untracked" / "scratch" / "mine").exists()
+
+    def test_apply_in_a_linked_worktree_expires_none_of_the_main_checkouts_archives(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Both checkouts record original paths under the same `untracked/scratch`
+        # prefix, so a linked run would judge the main checkout's archives by the
+        # linked checkout's claims and references: it must expire nothing.
+        now = time.time() + 3 * _DAY
+        linked = _linked(tree, now)
+        tree.file("mine/f.txt", b"x")
+        tree.set_tree_mtime("mine", now - 5 * _DAY)
+        assert _run(_project(tree), "--apply", now=now) == 0
+        before = _archives(_project(tree))
+        assert before, "the main run packed nothing"
+        assert _run(linked, "--apply", now=now + 400 * _DAY) == 0, capsys.readouterr().err
+        assert before <= _archives(_project(tree))
+
+    def test_apply_in_the_main_checkout_still_expires_its_own_archives(
+        self, tree: ScratchTree
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        tree.file("mine/f.txt", b"x")
+        tree.set_tree_mtime("mine", now - 5 * _DAY)
+        assert _run(_project(tree), "--apply", now=now) == 0
+        before = _archives(_project(tree))
+        assert before, "the main run packed nothing"
+        assert _run(_project(tree), "--apply", now=now + 400 * _DAY) == 0
+        assert not before & _archives(_project(tree))
 
     def test_apply_with_a_root_in_another_worktree_is_refused(self, tree: ScratchTree) -> None:
         now = time.time() + 3 * _DAY

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -147,3 +147,40 @@ def test_a_git_failure_reading_the_worktree_keeps_it(
     line = _line_for(capsys.readouterr().out)
     assert line.startswith("KEEP")
     assert "injected" in line
+
+
+def test_a_note_written_after_the_blockers_check_is_not_deleted(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Plan 00627 finding 4: the blockers are read again just before the removal.
+
+    The seam runs the real check, then writes an ignored note into the worktree
+    after the first check returns, as an agent still at work would.
+    """
+    note = _worktree(repo) / "untracked" / "scratch" / "late.md"
+    calls: list[Path] = []
+
+    def check_then_write(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
+        found = branch_cleanup.worktree_blockers(path, regenerable)
+        calls.append(path)
+        if len(calls) == 1:
+            note.parent.mkdir(parents=True)
+            note.write_text("written after the check\n", encoding="utf-8")
+        return found
+
+    args = argparse.Namespace(
+        project_root=str(repo), base_branch="main", reap=True, only=None, reap_branches=False
+    )
+    rc = cmd_worktree_reap(
+        args,
+        age_fn=lambda _p: 999_999.0,
+        process_cwds_fn=lambda: {},
+        blockers_fn=check_then_write,
+    )
+
+    assert note.read_text(encoding="utf-8") == "written after the check\n"
+    line = _line_for(capsys.readouterr().out)
+    assert line.startswith("KEEP")
+    assert "untracked/" in line
+    assert rc == 1
+    assert _NAME in _git(repo, "branch", "--list", _NAME)

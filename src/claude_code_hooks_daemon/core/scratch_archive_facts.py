@@ -36,7 +36,8 @@ def entry_in_use(
     """True when a process or a tracked background command may be using entry ``name``.
 
     ``root`` must be the resolved scratch root (process working directories are
-    resolved). Both ``<root>/<name>`` and ``<root>/.sweeping-<name>`` count. An
+    resolved). Both ``<root>/<name>`` and ``<root>/.sweeping-<name>`` count, as a
+    working directory or as a file held open by a descriptor or a map. An
     unreadable pid, an empty process map or unreadable background records are
     all "live": liveness is then unknown.
     """
@@ -45,6 +46,9 @@ def entry_in_use(
     names = (name, f"{CLAIM_PREFIX}{name}")
     paths = tuple(root / each for each in names)
     if any(path_is_relative_to(cwd, path) for cwd in reading.cwds.values() for path in paths):
+        return True
+    held = (each for opened in reading.open_paths.values() for each in opened)
+    if any(path_is_relative_to(each, path) for each in held for path in paths):
         return True
     needles = [str(path) for path in paths]
     if relative_root:

@@ -38,7 +38,7 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     open_dir,
     walk_tree,
 )
-from claude_code_hooks_daemon.core.scratch_archive_pack import PackRefused, refuse_foreign_owner
+from claude_code_hooks_daemon.core.scratch_archive_pack import PackRefused, refuse_unrestorable
 from claude_code_hooks_daemon.core.scratch_session import is_session_dir_name
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport, pending_verdict
 from claude_code_hooks_daemon.utils.birth_time import birth_stamp
@@ -164,7 +164,7 @@ def _entry_blocker(root_fd: int, name: str, max_inodes: int, max_depth: int) -> 
         return NO_BIRTH_STAMP.format(name=name)
     try:
         listing = walk_tree(root_fd, name, max_inodes=max_inodes, max_depth=max_depth)
-        refuse_foreign_owner(listing, name)
+        refuse_unrestorable(listing, name)
     except PackRefused as exc:
         return f"{name}: {exc}"
     except (WalkRefused, OSError) as exc:

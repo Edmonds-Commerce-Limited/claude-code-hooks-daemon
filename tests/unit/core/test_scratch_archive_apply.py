@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
     session_facts,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
+from claude_code_hooks_daemon.core.scratch_archive_expire import expired_ids
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
 from claude_code_hooks_daemon.core.scratch_archive_remove import RemoveRefused
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
@@ -453,6 +454,26 @@ class TestResumeReclaimExpireOrder:
         assert outcome_of(result, "e1").outcome == "archived"
         assert not (root / "e1").exists()
 
+    def test_a_crash_after_the_record_append_resumes_to_removal(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The claim's id binds the archive: a kill after the append finishes the removal."""
+        entry(root, "e1")
+
+        def crash(step: str, name: str) -> None:
+            if step == apply_mod.STEP_APPEND:
+                raise _Killed(step)
+
+        with pytest.raises(_Killed):
+            apply_sweep(
+                store, FakeFacts([row("e1")]).facts(), settings(root, tar), after_step=crash
+            )
+        assert (root / (CLAIM_PREFIX + "e1")).exists()
+        result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar))
+        assert [r.outcome for r in result.resumed] == ["removed"]
+        assert not (root / "e1").exists()
+        assert not (root / (CLAIM_PREFIX + "e1")).exists()
+
     def test_a_claim_name_no_sweep_recorded_is_foreign_and_untouched(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -512,7 +533,7 @@ class TestResumeReclaimExpireOrder:
         result = apply_sweep(store, FakeFacts([]).facts(), quiet)
         assert result.expired == ()
         assert archive_id in {record.archive_id for record in store.read_index().records}
-        assert archive_id not in apply_mod.expired_ids(store.read_events())
+        assert archive_id not in expired_ids(store.read_events())
 
     def test_an_archive_whose_claim_is_still_present_never_expires(
         self, root: Path, store: ArchiveStore, tar: TarTool

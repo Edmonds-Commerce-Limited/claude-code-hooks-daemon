@@ -96,20 +96,22 @@ def _walk_reporting_owner(
     Injected rather than made with ``chown``, which needs root: the refusal
     is then exercised under every euid.
     """
+    changes: dict[str, Any] = {}
+    if uid is not None:
+        changes["uid"] = uid
+    if gid is not None:
+        changes["gid"] = gid
+    _walk_reporting(monkeypatch, rel, **changes)
+
+
+def _walk_reporting(monkeypatch: pytest.MonkeyPatch, rel: str, **changes: Any) -> None:
+    """Make pack's walk report ``rel`` with ``changes`` applied to its node."""
     real_walk = pack_mod.walk_tree
 
     def walk(*args: Any, **kwargs: Any) -> TreeListing:
         listing = real_walk(*args, **kwargs)
         nodes = tuple(
-            (
-                dataclasses.replace(
-                    node,
-                    uid=node.uid if uid is None else uid,
-                    gid=node.gid if gid is None else gid,
-                )
-                if node.rel == rel
-                else node
-            )
+            dataclasses.replace(node, **changes) if node.rel == rel else node
             for node in listing.nodes
         )
         assert nodes != listing.nodes, f"the walk never reached {rel!r}"
@@ -275,6 +277,49 @@ class TestPack:
         _walk_reporting_owner(monkeypatch, "sub/b.bin", uid=65534)
         claimed = _claim(root_fd, "e1")
         with pytest.raises(PackRefused, match="owned by uid 65534"):
+            pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
+        assert _store_files(store) == []
+        claimed.close()
+
+    @pytest.mark.parametrize(
+        ("changes", "reason"),
+        [
+            ({"user_xattrs": ("user.note",)}, "user.note"),
+            ({"user_xattrs": None}, "xattrs could not be read"),
+            ({"sparse": True}, "sparse"),
+            ({"sparse": None}, "holes could not be checked"),
+        ],
+    )
+    def test_what_a_restore_cannot_give_back_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+        changes: dict[str, Any],
+        reason: str,
+    ) -> None:
+        """Finding 3 (Task 3.9): tar here keeps no xattrs and restores holes dense."""
+        _entry(root)
+        _walk_reporting(monkeypatch, "sub/b.bin", **changes)
+        claimed = _claim(root_fd, "e1")
+        with pytest.raises(PackRefused, match=reason):
+            pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
+        assert _store_files(store) == []
+        claimed.close()
+
+    def test_a_real_sparse_file_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry = _entry(root)
+        with open(entry / "holey.bin", "wb") as handle:
+            handle.truncate(4 * 1024 * 1024)
+            handle.write(b"end")
+        if (entry / "holey.bin").stat().st_blocks * 512 >= 4 * 1024 * 1024:
+            pytest.skip("this filesystem stores no holes")
+        claimed = _claim(root_fd, "e1")
+        with pytest.raises(PackRefused, match="sparse"):
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
         assert _store_files(store) == []
         claimed.close()

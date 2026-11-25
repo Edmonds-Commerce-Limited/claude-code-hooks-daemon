@@ -9,6 +9,7 @@ a blocker named by entry, and the gate decides before anything is packed.
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 
 import pytest
@@ -186,8 +187,21 @@ class TestBlockers:
         def refuse(listing: object, name: str) -> None:
             raise PackRefused("an inode another user owns")
 
-        monkeypatch.setattr(gate_mod, "refuse_foreign_owner", refuse)
+        monkeypatch.setattr(gate_mod, "refuse_unrestorable", refuse)
         assert gate(report(root, row("a"))).blockers == ("a: an inode another user owns",)
+
+    def test_an_entry_holding_a_user_xattr_blocks_before_anything_is_packed(
+        self, root: Path
+    ) -> None:
+        """A pack would refuse it, so the gate must, or the worktree is half evacuated."""
+        make(root, "a", "b")
+        try:
+            os.setxattr(root / "b" / "f.txt", "user.note", b"x")
+        except OSError as exc:
+            pytest.skip(f"this filesystem keeps no user xattrs: {exc}")
+        result = gate(report(root, row("a"), row("b")))
+        assert len(result.blockers) == 1
+        assert result.blockers[0].startswith("b: ") and "user.note" in result.blockers[0]
 
     def test_an_entry_that_cannot_be_walked_blocks(self, root: Path) -> None:
         make(root, "a")

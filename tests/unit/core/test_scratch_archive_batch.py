@@ -215,6 +215,19 @@ class TestPackBatch:
             pack_batch([_claim(root_fd, "f")], store, new_archive_id(), tar=tar)
         assert _store_files(store) == []
 
+    def test_a_sparse_loose_file_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """Finding 3 (Task 3.9): a hole would come back dense, so it is never batched."""
+        with open(root / "holey", "wb") as handle:
+            handle.truncate(4 * 1024 * 1024)
+            handle.write(b"end")
+        if (root / "holey").stat().st_blocks * 512 >= 4 * 1024 * 1024:
+            pytest.skip("this filesystem stores no holes")
+        with pytest.raises(BatchRefused, match="sparse"):
+            pack_batch([_claim(root_fd, "holey")], store, new_archive_id(), tar=tar)
+        assert _store_files(store) == []
+
     def test_claims_from_two_directories_are_refused(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:

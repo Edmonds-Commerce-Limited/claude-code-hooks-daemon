@@ -19,8 +19,8 @@ import stat
 import subprocess
 import tarfile
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     claim,
     fingerprint_at,
     open_dir,
+    release,
 )
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar, pack
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
@@ -110,9 +111,17 @@ def _entry(root: Path, name: str = "e1") -> Path:
 
 
 def _claim(
-    root_fd: int, name: str, store: ArchiveStore | None = None, checkout: str = CHECKOUT
+    root_fd: int,
+    name: str,
+    store: ArchiveStore | None = None,
+    checkout: str = CHECKOUT,
+    at: datetime | None = None,
+    archive_id: str | None = None,
 ) -> Claimed:
-    """Claim ``name``; with a store, record the claim first as a sweep does."""
+    """Claim ``name``; with a store, record the claim first (at ``at``, else NOW) as a sweep does.
+
+    ``archive_id`` is the archive the claim names (a fresh id unless given).
+    """
     expected = fingerprint_at(root_fd, name, max_inodes=MAX)
     if store is not None:
         record_claim(
@@ -120,25 +129,36 @@ def _claim(
             expected,
             parent_fd=root_fd,
             name=name,
-            archive_id=new_archive_id(),
+            archive_id=new_archive_id() if archive_id is None else archive_id,
             original_path=f"untracked/scratch/{name}",
             checkout=checkout,
-            at=NOW,
+            at=NOW if at is None else at,
         )
     result = claim(root_fd, name, expected, max_inodes=MAX)
     assert isinstance(result, Claimed)
     return result
 
 
+def _claimed_id(store: ArchiveStore, name: str) -> str:
+    """The archive id the latest claim of ``name`` recorded; a fresh id when none did."""
+    claims = [
+        e
+        for e in store.read_events().events
+        if isinstance(e, ClaimEvent) and PurePosixPath(e.original_path).name == name
+    ]
+    return claims[-1].archive_id if claims else new_archive_id()
+
+
 def _record(name: str, store: ArchiveStore, handle: Claimed, tar: TarTool) -> ArchiveRecord:
-    result = pack(handle, store, new_archive_id(), tar=tar, max_inodes=MAX)
+    """Pack under the id the claim recorded, as a sweep does (``_apply_row``)."""
+    result = pack(handle, store, _claimed_id(store, name), tar=tar, max_inodes=MAX)
     return ArchiveRecord(
         archive_id=result.archive_id,
         original_path=f"untracked/scratch/{name}",
         checkout=CHECKOUT,
         verdict="DISPOSABLE",
         proof_ids=("P1",),
-        packed_at="2026-11-20T00:00:00Z",
+        packed_at="2026-11-20T12:00:00Z",
         expires_at=None,
         counts=result.counts,
         archive_size=result.size,
@@ -1106,7 +1126,8 @@ def _adopted(
     )
     record = store.read_index().by_id(adopted.archive_id)
     assert record is not None and ADOPT_PROOF_ID in record.proof_ids
-    _claim(root_fd, "e1", store)
+    # The claim names the adopted archive: only the archive a claim names proves it.
+    _claim(root_fd, "e1", store, archive_id=adopted.archive_id)
     return record
 
 
@@ -1196,6 +1217,33 @@ class TestAdoptedArchives:
         resumed = _resume(root_fd, store, tar)
         assert resumed.outcome == "removed"
         assert list(root.iterdir()) == []
+
+    def test_an_intact_tree_claimed_under_a_fresh_id_is_renamed_back(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """An old adopted record of the entry must not strand an intact interrupted claim."""
+        _entry(root)
+        _adopted(root, root_fd, store, tar, "none")
+        claimed = root / (CLAIM_PREFIX + "e1")
+        claimed.rename(root / "e1")  # same inode and birth: the claim below covers it
+        _claim(root_fd, "e1", store)  # a fresh id, not the adopted archive's
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "sub" / "b.bin").read_bytes() == bytes(range(256))
+
+    def test_a_new_folder_sharing_an_adopted_entrys_name_is_renamed_back(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """A new tree that only shares a name with a long-ago adopted entry is not hidden."""
+        _entry(root)
+        _adopted(root, root_fd, store, tar, "none")
+        shutil.rmtree(root / (CLAIM_PREFIX + "e1"))
+        (root / "e1").mkdir()
+        (root / "e1" / "new.txt").write_text("new")
+        _claim(root_fd, "e1", store)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "new.txt").read_text() == "new"
 
     def test_resume_refuses_a_changed_remaining_file(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
@@ -1288,9 +1336,9 @@ FUTURE = "2026-12-01T00:00:00Z"
 
 
 def _archived_with(
-    root_fd: int, store: ArchiveStore, tar: TarTool, **changes: Any
+    root_fd: int, store: ArchiveStore, tar: TarTool, at: datetime = NOW, **changes: Any
 ) -> tuple[Claimed, ArchiveRecord]:
-    handle = _claim(root_fd, "e1", store)
+    handle = _claim(root_fd, "e1", store, at=at)
     record = dataclasses.replace(_record("e1", store, handle, tar), **changes)
     store.append(record)
     return handle, record
@@ -1298,7 +1346,95 @@ def _archived_with(
 
 def _due(root_fd: int, store: ArchiveStore, tar: TarTool) -> tuple[Claimed, ArchiveRecord]:
     """An archive whose expiry (``expires_at`` and packed + 24h) is before NOW."""
-    return _archived_with(root_fd, store, tar, expires_at=PAST, packed_at="2026-11-18T00:00:00Z")
+    return _archived_with(
+        root_fd,
+        store,
+        tar,
+        at=datetime(2026, 11, 18, tzinfo=UTC),
+        expires_at=PAST,
+        packed_at="2026-11-18T00:00:00Z",
+    )
+
+
+class TestResumeAfterARestore:
+    """Task 3.9 finding 2: a restored tree's leftover claim is never proved by the old record."""
+
+    def test_a_record_packed_before_the_claim_does_not_prove_the_tree(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, old = _archived_with(
+            root_fd, store, tar, at=datetime(2026, 11, 19, tzinfo=UTC), packed_at=NOW.isoformat()
+        )
+        # The tree is restored (a NEW directory, so a new birth) and claimed again.
+        claimed = root / (CLAIM_PREFIX + "e1")
+        aside = root / "aside"
+        claimed.rename(aside)
+        shutil.copytree(aside, root / "e1", symlinks=True)
+        shutil.rmtree(aside)
+        _claim(root_fd, "e1", store, at=datetime(2026, 11, 21, tzinfo=UTC))
+        (claimed / "a.txt").unlink()  # part of the restored tree was deleted since
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "sub" / "b.bin").read_bytes() == bytes(range(256))
+        assert _archive_path(store, old).exists()
+
+    def test_a_record_packed_after_the_claim_still_proves_it(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _archived_with(root_fd, store, tar, at=datetime(2026, 11, 19, tzinfo=UTC))
+        assert _resume(root_fd, store, tar).outcome == "removed"
+
+    def test_a_clock_step_back_before_the_pack_still_finishes_a_partial_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """PR 251 review F2: the claim's own archive proves it whatever the clock said."""
+        _entry(root)
+        _archived_with(
+            root_fd, store, tar, at=NOW, packed_at=(NOW - timedelta(seconds=1)).isoformat()
+        )
+        (root / (CLAIM_PREFIX + "e1") / "a.txt").unlink()  # crash mid-removal
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "removed"
+        assert list(root.iterdir()) == []
+
+    @pytest.mark.parametrize("second_claim_at", [NOW, datetime(2026, 11, 10, tzinfo=UTC)])
+    def test_a_renamed_back_tree_claimed_again_is_not_proved_by_the_first_claims_archive(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        second_claim_at: datetime,
+    ) -> None:
+        """PR 251 review F1: only the latest claim's archive proves it, by order, not by clock."""
+        _entry(root)
+        first = datetime(2026, 11, 13, 13, tzinfo=UTC)
+        handle, old = _archived_with(
+            root_fd,
+            store,
+            tar,
+            at=first,
+            verdict="UNCERTAIN",
+            packed_at=first.isoformat(),
+            expires_at=(first + timedelta(hours=168)).isoformat(),
+        )
+        release(handle, "test: renamed back after a refused removal")
+        _claim(root_fd, "e1", store, at=second_claim_at)  # crash before the pack
+        resumed = resume_claimed(
+            root_fd,
+            CLAIM_PREFIX + "e1",
+            store,
+            checkout=CHECKOUT,
+            tar=tar,
+            max_inodes=MAX,
+            clock=clock,
+            retention_hours={"DISPOSABLE": 24.0, "UNCERTAIN": 168.0},
+        )
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
+        assert _archive_path(store, old).exists()
 
 
 def _archive_path(store: ArchiveStore, record: ArchiveRecord) -> Path:

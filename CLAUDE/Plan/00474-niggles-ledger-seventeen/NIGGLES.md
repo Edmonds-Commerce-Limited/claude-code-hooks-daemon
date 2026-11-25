@@ -8571,3 +8571,63 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW (human doc wording only).
 
 **Status**: ⬜ Open. Reword the paragraph so it says "a bus whose notify flag cannot be read", as the docstring now does.
+
+### N732 — scratch archive: POSIX ACLs and `security.capability` are lost on restore and are not refused
+
+**Source**: Plan 00627, Task 3.9 finding 3 fix (PR 251).
+
+**Evidence**: `walk_tree` (`core/scratch_archive_claim.py`) records only `user.*` xattr names, and `refuse_unrestorable` refuses an entry holding one. The archive format keeps no xattrs at all, so `system.posix_acl_access`, `system.posix_acl_default` and `security.capability` are dropped the same way by a pack and restore, and no check sees the loss.
+
+**Severity**: MEDIUM (silent permission loss on restore; rare in scratch).
+
+**Status**: ⬜ Open. Extend the probe to every xattr namespace the archive cannot carry and refuse the entry, test-first.
+
+### N733 — scratch resume-after-restore test was never seen failing against the old code
+
+**Source**: Plan 00627, Task 3.9 finding 2 fix (commit d91e326b3, PR 251).
+
+**Evidence**: `TestResumeAfterARestore` (`tests/unit/core/test_scratch_archive_remove.py`) was written with the fix, but the conftest source-tree guard refuses to import another checkout's `src`, so the run against main's code that would have shown it RED never happened. The test may pass on the old code too.
+
+**Severity**: LOW (test strength unproven; the fix itself is reviewed).
+
+**Status**: ✅ Closed. The independent PR 251 security review (`CLAUDE/Plan/00627-scratch-management-ttl-and-filing/subagent-reports/261124-pr251-security-review-opus.md`, finding F4, probe `p3_n733_old_behaviour`) neutralised the `packed_at` check and reran the test's sequence: the outcome was `removed` where the test asserts `renamed-back`, so the test is RED on the old behaviour. The `packed_at` check was later replaced by binding the record to the latest claim's `archive_id` (review F1/F2); the test now guards that binding and stays green under it.
+
+### N734 — other `worktree_blockers` callers keep the check-to-removal gap finding 4 narrowed in `reap_worktree`
+
+**Source**: Plan 00627, Task 3.9 finding 4 fix (commit 24399b596, PR 251).
+
+**Evidence**: `reap_worktree` now reads the blockers again as its last step before `git worktree remove`. The other callers, `branch_cleanup.py` (around lines 1007 and 1195) and the WorktreeRemove handler, still check once and remove later, so a scratch note written in between is deleted unarchived.
+
+**Severity**: MEDIUM (data loss window, narrow).
+
+**Status**: ⬜ Open. Move the re-read into the shared removal path so every caller gets it, test-first.
+
+### N735 — a main-checkout `scratch-sweep --apply` judges worktree-packed archives by the main checkout's claims
+
+**Source**: Plan 00627, DESIGN.md Task 6.2 row (commit 444c9a265, PR 251).
+
+**Evidence**: a linked-worktree run now expires nothing. A main-checkout run still expires an archive packed from a worktree (same `untracked/scratch` prefix; its `checkout` field names the worktree) judged by the main checkout's claims and references, so a live worktree's referenced archive can expire.
+
+**Severity**: MEDIUM (owner decision needed).
+
+**Status**: ⬜ Open, owner question: what may expire the archives of a live worktree, and of a removed one?
+
+### N736 — scratch liveness: a file held open from another mount namespace is not seen as in use
+
+**Source**: Plan 00627, independent PR 251 security review finding F3 (PLAUSIBLE; not tested, `unshare` returned EPERM on the review host).
+
+**Evidence**: `_descriptor_paths` and `_mapped_paths` (`core/scratch_liveness.py`) and `entry_in_use` (`core/scratch_archive_facts.py`) compare the TEXT of `/proc/<pid>/fd/<n>` links and `/proc/<pid>/maps` paths with the entry's path. That text is the path in the holder's mount namespace, so a container started with `docker run -v "$PWD":/app` holding `/app/untracked/scratch/x/f` never matches, and the entry can be claimed, packed and removed under it. The cwd check has the same limit, so this is not a regression of PR 251.
+
+**Severity**: LOW (needs a process in another mount namespace holding a scratch file across a sweep).
+
+**Status**: ⬜ Open. Candidate fix from the review: compare identities instead of text, `os.stat(f"/proc/{pid}/fd/{n}")` (follows the magic link to the real inode in any namespace) matched on `(st_dev, st_ino)` against the entry's walked inodes, test-first. The limit is stated in DESIGN.md's open-file row.
+
+### N737 — adopt: a removal that relies on an adopted archive must record a claim carrying that archive's id
+
+**Source**: Plan 00627, independent PR 251 review finding S1 (the adopt-STUCK branch of `resume_claimed` was removed). Also folds in review nit N2: `/proc/<pid>/maps` escapes a newline in a path as `\012`, so such a path never matches (see N736, which matches by identity instead).
+
+**Evidence**: `ClaimEvent` (`core/scratch_archive.py`) says a claim of an adopted original must carry the adopted archive's id, and `resume_claimed` proves a claimed tree only by the archive the latest claim names. The only claim writer, `_apply_row`, always uses a fresh id, and nothing in `src/` calls `adopt()` or `finish_adoption()`; only tests do. Once adoption is wired, a removal that relies on the adopted archive without a claim naming it is never proven by that archive on resume: an interrupted claim is renamed back (safe, nothing lost), but the adopted archive never authorises the removal.
+
+**Severity**: LOW (no producer yet).
+
+**Status**: ⬜ Open. Enforce the binding where adoption is wired: record the claim with the adopted archive's id, test-first (an interrupted claim of an adopted entry is finished, not renamed back).

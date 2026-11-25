@@ -261,7 +261,10 @@ class ClaimEvent:
     a sweep, so a resume leaves it alone (D-PATH F1). The birth is what tells a
     NEW folder that reused the inode number apart: ext4 hands a freed inode
     straight back. An event with no birth (``""``, written before it was
-    recorded) covers nothing. ``archive_id`` is the id the pack uses.
+    recorded) covers nothing. ``archive_id`` is the id of the archive that will
+    prove the tree: the pack uses it, and a claim of an adopted original must
+    carry the adopted archive's id. A resume accepts only the record bearing the
+    id of the latest covering claim, so a claim naming any other id proves nothing.
     """
 
     archive_id: str

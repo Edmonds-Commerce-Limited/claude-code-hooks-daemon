@@ -68,6 +68,100 @@ class TestReadProcessCwds:
         assert reading.unreadable == ()
 
 
+def _process(proc: Path, pid: int, cwd: Path) -> Path:
+    entry = proc / str(pid)
+    entry.mkdir(parents=True)
+    (entry / "cwd").symlink_to(cwd)
+    return entry
+
+
+class TestReadOpenFiles:
+    """DESIGN.md open-descriptor row: a file held open inside an entry is seen.
+
+    A process whose working directory is elsewhere can hold a descriptor or a
+    memory map on a file in the entry; a write through it after the pack would
+    land in an unlinked inode and be lost.
+    """
+
+    def test_each_descriptor_link_to_a_path_is_read(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        entry = _process(proc, 40, tmp_path)
+        (entry / "fd").mkdir()
+        (entry / "fd" / "0").symlink_to("/dev/null")
+        (entry / "fd" / "3").symlink_to("/p/untracked/scratch/e/log")
+        (entry / "fd" / "4").symlink_to("socket:[123]")
+        (entry / "fd" / "5").symlink_to("pipe:[9]")
+        (entry / "fd" / "6").symlink_to("anon_inode:[eventpoll]")
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert set(reading.open_paths[40]) == {
+            Path("/dev/null"),
+            Path("/p/untracked/scratch/e/log"),
+        }
+        assert reading.unreadable == ()
+
+    def test_a_deleted_file_still_names_where_it_was(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        entry = _process(proc, 41, tmp_path)
+        (entry / "fd").mkdir()
+        (entry / "fd" / "3").symlink_to("/p/untracked/scratch/e/log (deleted)")
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.open_paths[41] == (Path("/p/untracked/scratch/e/log"),)
+
+    def test_each_mapped_file_is_read(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        entry = _process(proc, 42, tmp_path)
+        (entry / "maps").write_text(
+            "7f00-7f01 r-xp 00000000 08:01 12 /p/untracked/scratch/e/lib.so\n"
+            "7f01-7f02 rw-p 00000000 00:00 0 \n"
+            "7f02-7f03 rw-p 00000000 00:00 0 [heap]\n"
+            "7f03-7f04 rw-s 00000000 08:01 13 /p/untracked/scratch/e/a b.db\n",
+            encoding="utf-8",
+        )
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert set(reading.open_paths[42]) == {
+            Path("/p/untracked/scratch/e/lib.so"),
+            Path("/p/untracked/scratch/e/a b.db"),
+        }
+
+    def test_an_unlistable_descriptor_table_makes_the_pid_unreadable(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        entry = _process(proc, 43, tmp_path)
+        (entry / "fd").write_text("not a directory", encoding="utf-8")
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.unreadable == (43,)
+
+    def test_an_unreadable_map_makes_the_pid_unreadable(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        entry = _process(proc, 44, tmp_path)
+        (entry / "maps").mkdir()  # reading a directory fails
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.unreadable == (44,)
+
+    def test_an_unreadable_descriptor_link_makes_the_pid_unreadable(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        entry = _process(proc, 45, tmp_path)
+        (entry / "fd").mkdir()
+        (entry / "fd" / "3").mkdir()  # not a link: readlink fails with EINVAL
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.unreadable == (45,)
+
+    def test_an_exited_process_holds_nothing_open(self, tmp_path: Path) -> None:
+        """No ``fd`` or ``maps`` at all: the process is gone, so it holds no file."""
+        proc = tmp_path / "proc"
+        _process(proc, 46, tmp_path)
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.open_paths.get(46, ()) == ()
+        assert reading.unreadable == ()
+
+    def test_this_process_own_open_file_is_seen_on_the_real_proc(self, tmp_path: Path) -> None:
+        held = tmp_path / "held.log"
+        with held.open("w", encoding="utf-8"):
+            reading = read_process_cwds(own_pid=-1)
+        import os
+
+        assert held in reading.open_paths.get(os.getpid(), ())
+
+
 class TestReadBackgroundRecords:
     def test_a_missing_file_is_no_records(self, tmp_path: Path) -> None:
         records = read_background_records(tmp_path / "absent.jsonl")

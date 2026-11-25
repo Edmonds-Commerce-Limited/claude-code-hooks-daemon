@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -448,12 +448,19 @@ class ReapOutcome:
     removed: bool
     branch_removed: bool
     detail: str
+    #: True when the last blockers read kept the worktree: a keep, not a failure.
+    blocked: bool = False
+
+
+#: Paths a removal of the worktree at the given path would lose; empty when none.
+BlockersFn = Callable[[Path], Sequence[str]]
 
 
 def reap_worktree(
     repo_root: Path,
     state: WorktreeState,
     *,
+    blockers_fn: BlockersFn,
     run_fn: RunGit = run_git,
     dry_run: bool = False,
 ) -> ReapOutcome:
@@ -469,6 +476,11 @@ def reap_worktree(
 
     A git refusal is REPORTED, never retried with force. That is the whole
     value of asking.
+
+    Git's refusal does not cover IGNORED files: a plain remove deletes them.
+    ``blockers_fn`` (required, so no caller can skip it) is therefore read as
+    the last step before the removal; any path it names keeps the worktree,
+    with ``blocked`` set. The gap between that read and git's delete remains.
 
     The removal runs under ``Timeout.GIT_WORKTREE_REMOVE``, not ``run_git``'s
     metadata default: it deletes the whole tree. If even that is exceeded, the
@@ -497,6 +509,18 @@ def reap_worktree(
         )
 
     removal_budget = scaled_timeout(Timeout.GIT_WORKTREE_REMOVE, Timeout.GIT_WORKTREE_REMOVE_MAX)
+    # Plan 00627 finding 4: a plain remove deletes ignored files, which git's
+    # refusal does not cover, so a file written since the caller's check would
+    # go unarchived. Read last; this narrows that window and cannot close it.
+    blockers = tuple(blockers_fn(state.path))
+    if blockers:
+        return ReapOutcome(
+            state.name,
+            removed=False,
+            branch_removed=False,
+            detail=f"{state.name}: a removal would now lose {', '.join(blockers)}",
+            blocked=True,
+        )
     removal = run_fn(repo_root, "worktree", "remove", str(state.path), timeout=removal_budget)
     if removal.returncode == GIT_TIMED_OUT:
         # git was killed part-way through deleting the tree, so what is on disk

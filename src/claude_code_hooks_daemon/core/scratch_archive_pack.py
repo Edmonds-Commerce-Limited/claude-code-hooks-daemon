@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore, StoreRefused
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     DEFAULT_MAX_DEPTH,
+    PROC_FD_PARTS,
     Claimed,
     TreeListing,
     WalkRefused,
@@ -66,7 +67,6 @@ _COMMON = ("--no-recursion", "--one-file-system", "--numeric-owner", "--format=g
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _MEMBER_TYPES = (tarfile.DIRTYPE, tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.SYMTYPE)
 _CHUNK = 1 << 20
-_PROC_FD_PARTS = ("", "proc", "self", "fd")
 #: A member operand is a literal name: no glob, no backslash unquoting.
 _LITERAL_OPERANDS = ("--no-wildcards", "--no-unquote")
 #: A P6 archive's members are ``<entry>/...``; compared inside the entry, the root is stripped.
@@ -170,6 +170,29 @@ def refuse_foreign_owner(listing: TreeListing, claimed_name: str) -> None:
             )
 
 
+def refuse_unrestorable(listing: TreeListing, claimed_name: str) -> None:
+    """Raise :class:`PackRefused` unless a restore could give every inode back as it is.
+
+    Task 3.9 finding 3: GNU tar here stores no extended attributes and
+    restores a hole as written zeros, and ``tar --compare`` sees neither loss.
+    So an entry holding a ``user.*`` xattr or a sparse file, or one where
+    either could not be checked, is never archived and therefore never removed.
+    """
+    refuse_foreign_owner(listing, claimed_name)
+    for node in listing.nodes:
+        where = node.rel or claimed_name
+        if node.user_xattrs is None:
+            raise PackRefused(f"{where!r}: its xattrs could not be read (this needs /proc)")
+        if node.user_xattrs:
+            raise PackRefused(
+                f"{where!r} holds {', '.join(node.user_xattrs)}; tar here does not keep xattrs"
+            )
+        if node.sparse is None:
+            raise PackRefused(f"{where!r}: its holes could not be checked")
+        if node.sparse:
+            raise PackRefused(f"{where!r} is sparse; a restore would write it dense")
+
+
 def members_of(listing: TreeListing, claimed_name: str) -> Members:
     """Turn a walk into tar's member list; refuse a special root or a multiply-linked file."""
     counts = dict(Counter(n.kind for n in listing.nodes))
@@ -223,7 +246,7 @@ def _run_tar(
     stdout: int | None,
     timeout: float,
 ) -> subprocess.CompletedProcess[bytes]:
-    cwd = "/".join((*_PROC_FD_PARTS, str(cwd_fd)))
+    cwd = "/".join((*PROC_FD_PARTS, str(cwd_fd)))
     out = stdout if stdout is not None else subprocess.PIPE
     if isinstance(stdin, bytes):
         return subprocess.run(  # nosec B603 - argv only, scrubbed env
@@ -724,7 +747,7 @@ def pack(
         raise PackRefused(f"the claimed entry cannot be walked: {exc}") from exc
     if fingerprint_of(listing) != handle.fingerprint:
         raise PackRefused("fingerprint changed since the claim")
-    refuse_foreign_owner(listing, handle.claimed_name)
+    refuse_unrestorable(listing, handle.claimed_name)
     members = members_of(listing, handle.claimed_name)
     try:
         archive_fd = store.create_archive(archive_id)

@@ -70,7 +70,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     PackResult,
     TarTool,
     pack,
-    refuse_foreign_owner,
+    refuse_unrestorable,
 )
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
     RemoveRefused,
@@ -597,7 +597,7 @@ def _fingerprint_all(
             listing = walk_tree(
                 root_fd, name, max_inodes=settings.max_inodes, max_depth=settings.max_depth
             )
-            refuse_foreign_owner(listing, name)
+            refuse_unrestorable(listing, name)
             prints[name] = fingerprint_of(listing)
         except PackRefused as exc:
             foreign[name] = EntryOutcome(name, "refused", str(exc))

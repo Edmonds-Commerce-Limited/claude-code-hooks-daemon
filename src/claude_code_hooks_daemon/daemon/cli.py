@@ -7112,7 +7112,8 @@ def confirm_apply_interactively(
     phrase = f"apply {relative_root}"
     prompt_stream.write(
         "scratch-sweep --apply archives and then removes every due DISPOSABLE or "
-        f"UNCERTAIN entry under {relative_root}, and expires archives past retention.\n"
+        f"UNCERTAIN entry under {relative_root}, and (from the main checkout only) "
+        "expires archives past retention.\n"
         + (f"{pressure_notice}\n" if pressure_notice else "")
         + f"Type '{phrase}' to go ahead: "
     )
@@ -7366,7 +7367,17 @@ def _scratch_apply(
         clock=sources.now,
         empty_session_hours=sweep_root.ttl_hours,
         pressure=pressure,
+        # A linked worktree shares the main checkout's `untracked/scratch` prefix,
+        # so expiry here would judge the main checkout's archives by this
+        # checkout's claims and references (Task 6.2 row): expire nothing.
+        expire=(sources.store_checkout or sources.repo).resolve() == sources.repo.resolve(),
     )
+    if not settings.expire:
+        print(
+            "scratch-sweep: this is a linked worktree: no archive is expired here; "
+            "expiry runs only from the main checkout",
+            file=sys.stderr,
+        )
     if settings.pressure is not None:
         print(
             "scratch-sweep: a scratch cap is at block: pressure mode also packs idle entries "
@@ -11238,7 +11249,13 @@ def cmd_worktree_reap(
         # The state carries the path git reported. Rebuilding it here picked
         # `.claude/worktrees/` unconditionally, which named a path that does
         # not exist for every worktree under the other sanctioned root.
-        outcome = reap_worktree(repo_root, state, dry_run=not reap, **collect_kwargs)
+        outcome = reap_worktree(
+            repo_root, state, blockers_fn=blockers_of, dry_run=not reap, **collect_kwargs
+        )
+        if outcome.blocked:
+            refused += 1
+            print(f"KEEP    {outcome.detail}")
+            continue
         # Under `--reap` an unremoved worktree means git refused or failed, which
         # is not a dry run: nothing about the run was hypothetical.
         label = "REAPED " if outcome.removed else ("FAILED " if reap else "DRY-RUN")

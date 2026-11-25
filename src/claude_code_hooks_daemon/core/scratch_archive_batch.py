@@ -43,12 +43,14 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
 )
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     DEFAULT_TAR_TIMEOUT_SECONDS,
+    PackRefused,
     TarDidNotRun,
     TarTool,
     VerifyFailed,
     batched_compare,
     digest_fd,
     read_member_names,
+    refuse_unrestorable,
     run_tar,
     tar_create_args,
 )
@@ -136,6 +138,10 @@ def _loose_node(handle: Claimed) -> Node:
         raise BatchRefused(f"{handle.name!r} has {node.nlink} hard links")
     if fingerprint_of(listing) != handle.fingerprint:
         raise BatchRefused(f"{handle.name!r} changed since its claim")
+    try:
+        refuse_unrestorable(listing, handle.name)
+    except PackRefused as exc:
+        raise BatchRefused(str(exc)) from exc
     return node
 
 

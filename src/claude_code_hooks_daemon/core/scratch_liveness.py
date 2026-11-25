@@ -17,7 +17,7 @@ import json
 import logging
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -61,6 +61,8 @@ class ProcessCwdReading:
 
     cwds: Mapping[int, Path]
     unreadable: tuple[int, ...]
+    #: pid -> every path it holds open by a descriptor or a memory map.
+    open_paths: Mapping[int, tuple[Path, ...]] = field(default_factory=dict)
 
 
 #: Where the kernel lists processes.
@@ -83,6 +85,7 @@ def read_process_cwds(
         return ProcessCwdReading({}, ())
     me = os.getpid() if own_pid is None else own_pid
     cwds: dict[int, Path] = {}
+    open_paths: dict[int, tuple[Path, ...]] = {}
     unreadable: list[int] = []
     for entry in sorted(proc_root.iterdir()):
         if not entry.name.isdigit() or int(entry.name) == me:
@@ -90,6 +93,7 @@ def read_process_cwds(
         pid = int(entry.name)
         try:
             cwds[pid] = (entry / "cwd").readlink().resolve()
+            open_paths[pid] = (*_descriptor_paths(entry), *_mapped_paths(entry))
         except (FileNotFoundError, ProcessLookupError) as exc:
             log_and_continue(
                 logger,
@@ -100,7 +104,72 @@ def read_process_cwds(
             continue
         except OSError:
             unreadable.append(pid)
-    return ProcessCwdReading(cwds, tuple(sorted(unreadable)))
+    return ProcessCwdReading(cwds, tuple(sorted(unreadable)), open_paths)
+
+
+#: What the kernel appends to a descriptor link whose file has been unlinked.
+_DELETED_SUFFIX = " (deleted)"
+
+#: A ``maps`` line's path is its sixth field onward; earlier fields hold no space.
+_MAPS_FIELDS_BEFORE_PATH = 5
+
+
+def _file_path(text: str) -> Path | None:
+    """The file a descriptor link or map names, or None for a socket, pipe or anonymous map."""
+    if not text.startswith("/"):
+        return None
+    return Path(text.removesuffix(_DELETED_SUFFIX))
+
+
+def _descriptor_paths(entry: Path) -> tuple[Path, ...]:
+    """Every file ``<entry>/fd`` holds open.
+
+    A table that is gone means the process exited and holds nothing; a
+    descriptor closed while the table is read holds nothing either. Any other
+    failure is raised: an unread table may hold a file inside an entry.
+    """
+    try:
+        links = list((entry / "fd").iterdir())
+    except FileNotFoundError as exc:
+        log_and_continue(
+            logger, exc, reason="a process with no fd table has exited", level=logging.DEBUG
+        )
+        return ()
+    found: list[Path] = []
+    for link in links:
+        try:
+            target = str(link.readlink())
+        except FileNotFoundError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a descriptor closed while listed holds nothing",
+                level=logging.DEBUG,
+            )
+            continue
+        path = _file_path(target)
+        if path is not None:
+            found.append(path)
+    return tuple(found)
+
+
+def _mapped_paths(entry: Path) -> tuple[Path, ...]:
+    """Every file ``<entry>/maps`` maps; a missing map means the process exited."""
+    try:
+        text = (entry / "maps").read_text(encoding="utf-8", errors="surrogateescape")
+    except FileNotFoundError as exc:
+        log_and_continue(
+            logger, exc, reason="a process with no memory map has exited", level=logging.DEBUG
+        )
+        return ()
+    found: list[Path] = []
+    for line in text.splitlines():
+        fields = line.split(maxsplit=_MAPS_FIELDS_BEFORE_PATH)
+        if len(fields) > _MAPS_FIELDS_BEFORE_PATH:
+            path = _file_path(fields[_MAPS_FIELDS_BEFORE_PATH])
+            if path is not None:
+                found.append(path)
+    return tuple(found)
 
 
 def read_background_records(state_file: Path) -> BackgroundRecords:
