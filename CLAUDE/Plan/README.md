@@ -46,8 +46,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - In Progress (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
-- [00640: branch stop guard unpushable branch exit](00640-branch-stop-guard-unpushable-branch-exit/PLAN.md) - In Progress (BUG, found by lts-ops seat 5: a parked branch that cannot be pushed re-arms the three-block stop cycle on every later commit, then is recorded abandoned)
-
 - [00639: stand-in no-op declines flood the journal](00639-stand-in-no-op-declines-flood-the-journal/PLAN.md) - Not Started (BUG, owner Q65, next after the v2 PRs: a stand-in that declines with nothing changed must not write a journal entry each tick; evidence relayed, unverified; same defect as Plan 00470 Task 5.2's journal rule)
 
 - [00638: hooks screen install and missing binary surface](00638-hooks-screen-install-and-missing-binary-surface/PLAN.md) - Not Started (child of the 00523 line, context 00630: release deploy installs verified hooks-screen-<triple> to untracked/bin; missing binary surfaced to a person, not only decision.log)
@@ -224,6 +222,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00640: branch stop guard unpushable branch exit](Completed/00640-branch-stop-guard-unpushable-branch-exit/PLAN.md) - Complete at merge `cf2fdb17a` (PR 255) + the archiving commit (a park follows its branch while the parked commit is an ancestor of the tip, bounded by `max_age_days`; an unpushed-only branch is no longer called abandoned; release note 107)
+
 - [00620: agent no value branch removal verdict](Completed/00620-agent-no-value-branch-removal-verdict/PLAN.md) - Complete at merge `69e375788` + `662750cf4` + the archiving commit (owner proposal: an Opus sub-agent verdict, bound to the tip, plus a recovery bundle the guard verifies, lets an agent remove unproven work; local delete only; reviews of 8260463ff/09e744603 signed off, main CI green at `61a916143`; release note 014; follow-up Plan 00629, niggle N688)
 
 - [00613: worktree link secret verb](Completed/00613-worktree-link-secret-verb/PLAN.md) - Complete at merge `69e375788` + `2f1c14e80` (live-daemon check) + the archiving commit (a protected file is seeded into a worktree as a link from the committed seed list, by the creation hook or `seed-worktree`; copy refused; reads through the link denied on a live daemon, N683 to N685 open; release notes 009, 019; peer reply drafted, owner to send)
@@ -282,8 +282,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00589: explain rule covers plugin handlers](Completed/00589-explain-rule-covers-plugin-handlers/PLAN.md) - Complete at `bb6dbcb58` (merge `5ba1d98a2`; main CI run 42718913878 success) + the archiving commit (GitHub #171, closed: `explain-rule`/`explain-handler` also load the `plugins:` section through the daemon's own loader; a broken plugin is logged and contributes nothing; release note 023)
 
-- [00588: lsp_enforcement leaves stdin greps and git grep alone](Completed/00588-lsp-enforcement-stdin-and-git-grep/PLAN.md) - Complete at `a0ac71f37` (main CI run 42706023447 success) + the archiving commit (GitHub #169, closed: a grep fed by a pipe, `<` or `<<<` with no file target, and any `git grep`, are not judged as symbol lookups; real lookups stay enforced; release note 021)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -337,28 +335,28 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 636 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 640 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 526 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 527 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 90 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 89 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 80 + 526 + 13 = **619 folders**, spanning
-  **616 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 89 + 527 + 13 = **629 folders**, spanning
+  **626 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **14** of the
-  630 allocated numbers with no folder on main: 00005, 00015, 00036, 00073, 00074,
+  640 allocated numbers with no folder on main: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325, 00611 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work), and 00611,
   filed only on an unmerged work branch (commit `833dcf072`).
-  616 + 14 = 630. ✅
+  626 + 14 = 640. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
