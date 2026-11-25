@@ -17,12 +17,14 @@ Run with `PYTHONPATH=<worktree>/src` and the python at `/workspace/untracked/ven
 - Red-first runs: the two S1 tests failed on the old code (2 failed). The evacuation file gave 2 failed, 24 passed, the failures being the new xattr test and the foreign-owner test, which patched a name the module did not yet have.
 - `black`: unchanged on the 6 touched Python files. `ruff check`: all checks passed. `mypy`: no issues in the 6 files.
 
-## Not done: `llm_qa.py changed`
+## `llm_qa.py changed` result
 
-It did NOT run to completion, so there is no QA summary to report and no `changed_tests` mapping result. Three attempts failed to run:
+Run at tip `e9e676179` (after the host QA lock freed), with `FULL_QA_LOCK_WAIT_SECONDS=3300 HOOKS_DAEMON_VENV_PATH=/workspace/untracked/venv-workspace-py313-ee75a947 PYTHONPATH=<worktree>/src`. Earlier attempts failed to start (no venv for the worktree, then a 600s lock timeout).
 
-1. No `HOOKS_DAEMON_VENV_PATH` set, so the interpreter could not be resolved (the worktree has no venv). This is an environment problem and not a code result.
-2. The same, with `HOOKS_DAEMON_PYTHON` only.
-3. With `HOOKS_DAEMON_VENV_PATH` set, it waited 600s on the host-wide QA lock held by another agent's worktree (pid 291216) and then exited without starting.
+**QA: 42/43 PASSED, 1/43 FAILED.** The single failure is `changed_tests`: 1744 passed, 0 failed, 5 skipped across 46 test files, with 10 unmapped changed files. Every unmapped file has reason `too-broad`, not `uncovered`: their tests through `daemon/cli.py` reach 40 or more test files, so the run says the coordinator's full gate covers them. The ten files:
 
-A fourth run, with `FULL_QA_LOCK_WAIT_SECONDS=3300`, was queued behind that lock when this report was written. Its output file is `untracked/scratch/qa2.txt` in this worktree. PR 251's earlier CI QA failure came from two literals fixed in PR 256 (now merged here), but no run has confirmed that.
+- `core/scratch_archive.py`, `scratch_archive_apply.py`, `scratch_archive_claim.py`, `scratch_archive_facts.py`, `scratch_archive_pack.py`
+- `core/scratch_liveness.py`, `scratch_repos.py`, `scratch_sweep.py`, `worktree_reaping.py`
+- `daemon/cli.py`
+
+Because of those ten, the `changed_tests` step cannot pass without `--allow-unmapped`. I did not pass it. Everything else is green, including magic_values (0 violations), format, lint, type_check, pyright, docs_qa and plan_qa (advisories only, 0 blocking), and sensitive_content. The run also printed one warning: `install_mode_marker` was "NOT RECORDED FOR THIS TREE" because the working tree changed during its run (its own result was 0 violations). The two timeout literals that failed PR 251's earlier CI are fixed by PR 256, now merged here, and `magic_values` is clean.
