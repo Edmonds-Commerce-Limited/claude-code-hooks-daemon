@@ -1,6 +1,6 @@
 # Plan 00641: release candidate branch lifecycle after release
 
-**Status**: In Progress
+**Status**: Complete at merge `1d6acd844` (PR 261)
 **Created**: 2026-11-25
 **Owner**: dev
 **Priority**: Medium
@@ -40,14 +40,14 @@ What was checked (an independent reviewer of this plan's first draft corrected t
 
 - [x] ✅ **Task 2.1**: Test first, then fix: `branch-preflight` and `branch-sweep` agree on a keep record (live, lapsed, absent).
 - [x] ✅ **Task 2.2**: Add the numbered post-release step that retires the RC branch (or records a dated keep with a reason) to the release procedure and to the `/release` skill if it drives that procedure; the step prints the restore line.
-- [ ] ⬜ **Task 2.3**: Restart the daemon and verify live; run targeted QA. (Daemon restarted; live `branch-preflight` still refuses on three unkept merged branches, which is correct since none has a keep. Ticked at completion, after the merge.)
+- [x] ✅ **Task 2.3**: Restart the daemon and verify live; run targeted QA. (Daemon restarted; live `branch-preflight` still refuses on three unkept merged branches, which is correct since none has a keep. Targeted QA: 42 of 43 checks passed; `changed_tests` ran 3187 passed, 0 failed, and flagged only `core/branch_cleanup.py` as `[too-broad]` unmapped, which no map rule can clear. CI ran the full suite on PR 261.)
 
 ## Success Criteria
 
-- [ ] The Task 1.1 and 1.2 answers are in the JOURNAL.
-- [ ] The two commands agree on every keep state (live, lapsed, absent), shown by tests in `tests/unit/daemon/test_cli_branch_preflight.py` that failed first.
-- [ ] The release procedure retires its RC branch in a numbered step (Step 15.2 of `CLAUDE/development/RELEASING.md`).
-- [ ] Release-bound consequences recorded in the pending-release holding area as release note 109 under `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] The Task 1.1 and 1.2 answers are in the JOURNAL.
+- [x] The two commands agree on every keep state (live, lapsed, absent), shown by tests in `tests/unit/daemon/test_cli_branch_preflight.py` that failed first.
+- [x] The release procedure retires its RC branch in a numbered step (Step 15.2 of `CLAUDE/development/RELEASING.md`).
+- [x] Release-bound consequences recorded in the pending-release holding area as release note 109 under `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 

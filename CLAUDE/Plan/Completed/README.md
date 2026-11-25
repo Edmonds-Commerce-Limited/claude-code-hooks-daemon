@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00589: explain rule covers plugin handlers](00589-explain-rule-covers-plugin-handlers/PLAN.md) - Complete at `bb6dbcb58` (merge `5ba1d98a2`; main CI run 42718913878 success) + the archiving commit (GitHub #171, closed: `explain-rule`/`explain-handler` also load the `plugins:` section through the daemon's own loader; a broken plugin is logged and contributes nothing; release note 023)
+
 - [00588: lsp_enforcement leaves stdin greps and git grep alone](00588-lsp-enforcement-stdin-and-git-grep/PLAN.md) - Complete at `a0ac71f37` (main CI run 42706023447 success) + the archiving commit (GitHub #169, closed: a grep fed by a pipe, `<` or `<<<` with no file target, and any `git grep`, are not judged as symbol lookups; real lookups stay enforced; release note 021)
 
 - [00587: containment follows a cd into compound command bodies](00587-containment-cd-into-compound-bodies/PLAN.md) - Complete at `f05530f35` (main CI run 42697064932 success) + the archiving commit (GitHub #195, closed: a `../` redirect in a loop, `if` or `( )` body after a `cd` is resolved from the `cd` target; a `cd` that may have failed still denies; release note 020)
