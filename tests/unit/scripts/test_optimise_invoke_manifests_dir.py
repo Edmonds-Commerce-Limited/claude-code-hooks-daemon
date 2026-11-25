@@ -122,6 +122,37 @@ def self_install_project(tmp_path: Path) -> Path:
     return root
 
 
+@pytest.fixture
+def linked_self_install_project(self_install_project: Path) -> Path:
+    """A self-install that ALSO holds ``.claude/hooks-daemon/bin/hooks-daemon`` as a link to its own wrapper.
+
+    This repository's real layout (Plan 00586 Task 1.3, C): the wrapper under the client
+    path exists, so a probe that asks "is there a wrapper under .claude/hooks-daemon" says
+    "client install" and resolves the manifests to a directory that does not exist here.
+    """
+    link = self_install_project / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(Path("..") / ".." / ".." / "bin" / "hooks-daemon")
+    return self_install_project
+
+
+class TestALinkedSelfInstallResolvesToTheProjectRoot:
+    def test_manifests_and_run_state_are_inside_the_project_root(
+        self, linked_self_install_project: Path
+    ) -> None:
+        stdout = _run_script(linked_self_install_project)
+        printed = _printed_manifests_dir(stdout)
+        expected = linked_self_install_project / _MANIFESTS_SUBPATH
+        assert printed.resolve() == expected.resolve(), (
+            f"A self-install's manifests live at {expected}, but the script printed {printed}."
+        )
+        assert printed.is_dir()
+        run_state = re.search(r"^- Run state:\s+(?P<path>\S.*)$", stdout, re.MULTILINE)
+        assert run_state is not None
+        state_dir = Path(run_state.group("path").strip()).parent
+        assert state_dir.resolve() == (linked_self_install_project / "untracked").resolve()
+
+
 class TestManifestsDirResolvesOnEveryLayout:
     def test_client_install_points_inside_daemon_checkout(self, client_project: Path) -> None:
         printed = _printed_manifests_dir(_run_script(client_project))

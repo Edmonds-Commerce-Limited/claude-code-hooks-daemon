@@ -8,8 +8,9 @@ Analyse the current hooks daemon configuration against the project's profile (la
 tests, CI, plans) and produce a scored report across six areas, derived from the
 handler registry rather than a hand-kept list (Plan 00330). Also compares the
 project's config against the installed daemon's config-changes manifests
-(`.claude/hooks-daemon/CLAUDE/UPGRADES/config-changes/` on a client install; the
-script prints the resolved path) to surface capabilities introduced since the
+(`<daemon dir>/CLAUDE/UPGRADES/config-changes/`, where the daemon dir is `.claude/hooks-daemon/`
+on a client install and the project root in the daemon's own repository; the script prints
+the resolved path) to surface capabilities introduced since the
 last recorded run, and can apply recommendations
 automatically. Every run (report-only or apply) records itself via
 `bin/hooks-daemon record-config-optimisation-run`, which silences the
@@ -133,8 +134,8 @@ After viewing the report, Claude asks whether to apply recommendations:
 
 **SINGLE SOURCE OF TRUTH:**
 
-- Handler options and values: `.claude/hooks-daemon/docs/guides/HANDLER_REFERENCE.md`
-- Configuration format: `.claude/hooks-daemon/docs/guides/CONFIGURATION.md`
+- Handler options and values: `docs/guides/HANDLER_REFERENCE.md` inside the daemon directory the script prints as `Daemon dir`
+- Configuration format: `docs/guides/CONFIGURATION.md` inside the same daemon directory
 - Available handlers: `.claude/HOOKS-DAEMON.md` (project root)
 
 ## Version

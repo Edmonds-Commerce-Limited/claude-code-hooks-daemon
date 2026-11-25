@@ -23,9 +23,17 @@ CONFIG="${PROJECT_ROOT}/.claude/hooks-daemon.yaml"
 # install that is .claude/hooks-daemon/, and only in self-install mode does it
 # coincide with PROJECT_ROOT. Resolving them here is what lets Step 0 read a
 # path that exists on every layout (Plan 00362).
-if [ -x "${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon" ]; then
+#
+# A self-install can ALSO hold a wrapper under .claude/hooks-daemon/bin/ that links back to
+# the project's own, so "a wrapper exists under .claude/hooks-daemon" does not mean a client
+# install. It is the daemon's own checkout when that wrapper resolves to the project's.
+CLIENT_WRAPPER="${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon"
+OWN_WRAPPER="${PROJECT_ROOT}/bin/hooks-daemon"
+if [ -x "${OWN_WRAPPER}" ] && [ "$(readlink -f "${CLIENT_WRAPPER}" 2>/dev/null)" = "$(readlink -f "${OWN_WRAPPER}")" ]; then
+    DAEMON_DIR="${PROJECT_ROOT}"                                          # self-install
+elif [ -x "${CLIENT_WRAPPER}" ]; then
     DAEMON_DIR="${PROJECT_ROOT}/.claude/hooks-daemon"                     # normal install
-elif [ -x "${PROJECT_ROOT}/bin/hooks-daemon" ]; then
+elif [ -x "${OWN_WRAPPER}" ]; then
     DAEMON_DIR="${PROJECT_ROOT}"                                          # self-install
 else
     echo "ERROR: bin/hooks-daemon wrapper not found under ${PROJECT_ROOT}." >&2
