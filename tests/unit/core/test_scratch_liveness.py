@@ -54,6 +54,19 @@ class TestReadProcessCwds:
         assert dict(reading.cwds) == {123: work.resolve()}
         assert reading.unreadable == (125,)
 
+    def test_a_non_dumpable_agent_is_not_an_unreadable_process(self, tmp_path: Path) -> None:
+        # ssh-agent and gpg-agent mark themselves non-dumpable, so without
+        # CAP_SYS_PTRACE their /proc/<pid>/cwd refuses even root. One such
+        # agent in the container must not make every sweep and every worktree
+        # evacuation "classification incomplete" for ever.
+        proc = tmp_path / "proc"
+        (proc / "51" / "cwd").mkdir(parents=True)  # not a link: readlink fails
+        (proc / "51" / "comm").write_text("ssh-agent\n", encoding="utf-8")
+        (proc / "52" / "cwd").mkdir(parents=True)
+        (proc / "52" / "comm").write_text("some-worker\n", encoding="utf-8")
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.unreadable == (52,)
+
     def test_skips_its_own_pid(self, tmp_path: Path) -> None:
         proc = tmp_path / "proc"
         (proc / "7").mkdir(parents=True)
