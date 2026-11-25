@@ -3,7 +3,8 @@
 :func:`decide_stop` turns the judgement of :mod:`core.branch_stop_guard` into
 what a stop handler returns: a deny reason (at most ``MAX_STOP_BLOCKS`` times
 per stopping identity, after which the guard gives way and records the branches
-as abandoned; stops refused only on own harness-directory branches have a second
+(as left unpushed when unpushed commits are a branch's only finding, otherwise as
+abandoned); stops refused only on own harness-directory branches have a second
 budget of the same size) and context lines. The main thread also gets a once-an-hour line
 naming branches idle at the noisy dormancy stage or later. Both handlers share
 this function so the rules cannot drift apart.
@@ -99,7 +100,8 @@ def _deny_reason(
     else:
         lines.append(
             f"Block {block} of {MAX_STOP_BLOCKS}; after that the stop is allowed and the "
-            "branches are recorded as abandoned."
+            f"branches are recorded as abandoned (or as {_UNPUSHED_RECORD} where unpushed "
+            "commits are a branch's only finding)."
         )
     lines.append(BRANCH_LIMIT_PRINCIPLE)
     return "\n".join(lines)

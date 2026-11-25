@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -15,8 +16,10 @@ from claude_code_hooks_daemon.config.models import (
 )
 from claude_code_hooks_daemon.core.branch_creation import creation_verdict
 from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
     announce_ended_parks,
     park_branch,
+    park_covers_tip,
     read_park_record,
 )
 from tests.support.git_fixtures import git_setup_timeout
@@ -211,3 +214,39 @@ def test_branch_sweep_prints_an_ended_park_once(
 
     assert "Park cleared: work (waiting)" in run()
     assert "Park cleared" not in run()
+
+
+class TestParkCoversTip:
+    """The one rule every park consumer applies (``park_covers_tip``)."""
+
+    _DAY = 86400
+
+    def _park(self, age_days: float) -> ParkRecord:
+        return ParkRecord("aaa", "waiting", int(time.time() - age_days * self._DAY), "t")
+
+    def test_an_exact_tip_is_covered(self) -> None:
+        assert park_covers_tip(
+            self._park(1), "aaa", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: False
+        )
+
+    def test_an_exact_tip_stays_covered_past_max_age(self) -> None:
+        # An unmoved park is never ended by age: the parked pool shows it STALE instead
+        # (R-BRANCH-PARKED-POOL), so the record and its reason stay visible.
+        assert park_covers_tip(
+            self._park(_MAX_AGE + 5), "aaa", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: False
+        )
+
+    def test_a_descendant_tip_is_covered_inside_max_age(self) -> None:
+        assert park_covers_tip(
+            self._park(1), "bbb", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: True
+        )
+
+    def test_a_descendant_tip_is_not_covered_past_max_age(self) -> None:
+        assert not park_covers_tip(
+            self._park(_MAX_AGE + 5), "bbb", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: True
+        )
+
+    def test_a_tip_that_does_not_build_on_the_park_is_not_covered(self) -> None:
+        assert not park_covers_tip(
+            self._park(1), "bbb", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: False
+        )

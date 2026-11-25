@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_keep import read_keeps
 from claude_code_hooks_daemon.core.branch_park import (
     ParkRecord,
+    park_covers_tip,
     read_park_records,
     walk_park_range,
 )
@@ -914,6 +915,13 @@ class _Pass:
             self._park_records = read_park_records(self.repo)
         return self._park_records
 
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        """Whether ``ancestor`` is in ``descendant``'s history; False when git cannot say."""
+        result = run_git(
+            self.repo, "merge-base", "--is-ancestor", ancestor, descendant, timeout=_GIT_TIMEOUT
+        )
+        return result.returncode == 0
+
     def within_budget(self) -> bool:
         """Whether the sweep's time budget (``sweep.budget_ms``) has not yet run out."""
         return time.monotonic() < self.deadline
@@ -1263,7 +1271,12 @@ def _classify(
     if row.parked_reason is None and isinstance(local, _RefRow) and local.sha == row.sha:
         # A park with no trailer commit lives only in the record; its age is the record's.
         standing = run.park_records().get(name)
-        if standing is not None and standing.sha == row.sha:
+        if standing is not None and park_covers_tip(
+            standing,
+            row.sha,
+            max_age_days=run.config.effective_pool_max_age(Pool.PARKED),
+            is_ancestor=run.is_ancestor,
+        ):
             facts["parked_reason"] = standing.reason
             facts["age_days"] = (context.moment - standing.parked_at) / _SECONDS_PER_DAY
             return BranchRecord(state=BranchState.PARKED, **fixed, **facts, **own)

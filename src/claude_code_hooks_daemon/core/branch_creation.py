@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 from claude_code_hooks_daemon.core.branch_park import (
     ParkRecord,
     is_park_residue,
+    park_covers_tip,
     park_marked_refs,
     read_park_records,
 )
@@ -400,20 +401,30 @@ def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
-def _with_standing_parks(repo: Path, refs: list[_Ref]) -> list[_Ref]:
+def _with_standing_parks(repo: Path, config: BranchesConfig, refs: list[_Ref]) -> list[_Ref]:
     """``refs`` with each remote copy that sits behind a standing local park marked parked.
 
     A park whose push was rejected leaves the park commit only in the local
     branch; the remote still holds the older tip, so the same-tip group would
-    otherwise read OPEN (DESIGN.md section 2.4). The park stands when the local
-    tip is the recorded park commit; the remote copy is then the park's own
-    past, because its tip is an ancestor of the park commit.
+    otherwise read OPEN (DESIGN.md section 2.4). The park stands while the local
+    tip covers it (:func:`park_covers_tip`: the recorded park commit, or later
+    commits on top of it inside the parked pool's ``max_age_days``); the remote
+    copy is then the park's own past, because its tip is an ancestor of the park
+    commit.
     """
     records = read_park_records(repo)
+    max_age = config.effective_pool_max_age(Pool.PARKED)
     standing = {
         ref.name: record
         for ref in refs
-        if ref.local and (record := records.get(ref.name)) and record.sha == ref.tip
+        if ref.local
+        and (record := records.get(ref.name))
+        and park_covers_tip(
+            record,
+            ref.tip,
+            max_age_days=max_age,
+            is_ancestor=lambda ancestor, descendant: _is_ancestor(repo, ancestor, descendant),
+        )
     }
     return [_with_standing_park(repo, ref, standing) for ref in refs]
 
@@ -907,6 +918,7 @@ def _pool_groups(
     """Every connected piece of work with its pool: the one builder verdict and report use."""
     work_refs = _with_standing_parks(
         repo,
+        config,
         _owned_refs(repo, [ref for ref in refs if is_work_branch(ref.name, config, default)]),
     )
     merged = _merged_refnames(repo, config, refs, default)
