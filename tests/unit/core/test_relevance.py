@@ -115,6 +115,12 @@ class TestRelevanceContext:
         context = RelevanceContext.probe(tmp_path, declared_languages=["PHP"])
         assert context.languages == frozenset({"php"})
 
+    def test_an_empty_declaration_is_unset_so_detection_applies(self, tmp_path: Path) -> None:
+        """``daemon.languages: []`` reads as unset, as the handler language filter reads it (Plan 00586 B)."""
+        (tmp_path / "package.json").write_text("{}\n")
+        context = RelevanceContext.probe(tmp_path, declared_languages=[])
+        assert "javascript" in context.languages
+
     def test_has_file_is_relative_to_root(self, tmp_path: Path) -> None:
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".claude" / "x.md").write_text("x\n")

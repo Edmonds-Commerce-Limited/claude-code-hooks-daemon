@@ -68,7 +68,7 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00584: pull requests start as drafts](00584-pull-requests-start-as-drafts/PLAN.md) - Not Started (owner request: every PR is created with a `[DRAFT]` title prefix everywhere, plus `--draft` where GitHub offers native drafts; leaving draft removes the prefix in the same step, `gh pr ready --undo` re-adds it; the release flows comply)
 
-- [00586: five small defects, verify then fix](00586-five-small-defects-verify-then-fix/PLAN.md) - Not Started, Medium (five defects noticed in passing: each task reproduces the defect first and closes with evidence and no change if it does not reproduce)
+- [00586: five small defects, verify then fix](00586-five-small-defects-verify-then-fix/PLAN.md) - In Progress, Medium (Task 1.2 (B) fixed, empty `daemon.languages` is unset in the relevance review; five defects noticed in passing: each task reproduces the defect first and closes with evidence and no change if it does not reproduce)
 
 - [00448: plan completion gate has no commit time backstop](00448-plan-completion-gate-has-no-commit-time-backstop/PLAN.md) - Not Started (the Complete-flip gate keys on Write/Edit only, so a `PLAN.md` written through Bash escapes it — as Plan 00437 did)
 

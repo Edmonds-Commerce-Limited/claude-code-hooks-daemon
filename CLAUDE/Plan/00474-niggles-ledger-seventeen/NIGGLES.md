@@ -8651,3 +8651,13 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW.
 
 **Status**: ✅ Fixed on branch `fix-scratch-liveness-review-findings`: the docstring names the exemption, the real exception is logged, and the `gpg-agent` and no-readable-`comm` cases are tested.
+
+### N740 — `lsp_noise_checker` ignores `daemon.languages` and always detects the project's languages
+
+**Source**: Plan 00586 Task 1.2 (B), independent review of the PR 271 diff (non-blocking, pre-existing).
+
+**Evidence**: `src/claude_code_hooks_daemon/handlers/session_start/lsp_noise_checker.py` (about lines 273 and 280) calls `RelevanceContext.probe(root)` with no `declared_languages`, so at runtime it always detects languages from marker files and ignores even a non-empty `daemon.languages`. Only `cmd_optimise_checklist` (`daemon/cli.py` near line 9477) passes the declaration.
+
+**Severity**: LOW. It changes what an advisory reports, never what is enforced.
+
+**Status**: ⬜ Open. Decide whether the checker should read the declared languages the way the optimise checklist does.

@@ -57,10 +57,11 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 - [ ] ⬜ **Task 1.1 (A)**: Reproduce: list every handler `check-config-migrations` can recommend and compare it with
   the registered handlers. RED test, then fix the source of the recommendation. Check Plan 00420 first
 
-- [ ] ⬜ **Task 1.2 (B)**: Reproduce with a config holding `daemon.languages: []`. Fact-check: plausibly real, the
-  two readers disagree (`core/relevance.py` treats `[]` as an empty set, `core/apply_once.py` treats it as unset).
-  Decide which reading the config documentation promises; RED test for that reading, then fix the loader (or the documentation, if the code matches
-  what it promises)
+- [x] ✅ **Task 1.2 (B)**: Reproduced: the two readers disagreed (`core/relevance.py` treated `[]` as an empty set,
+  `core/apply_once.py` treats it as unset). The enforcing reader fails safe (every language guard stays on), so the
+  relevance review now reads `[]` as unset too. RED test
+  `test_an_empty_declaration_is_unset_so_detection_applies` failed with `frozenset()`, green after the fix; release
+  note 112
 
 - [ ] ⬜ **Task 1.3 (C)**: Run the optimise procedure in this self-install checkout and record each wrong path. RED
   test, then fix through the existing install-mode path resolution
