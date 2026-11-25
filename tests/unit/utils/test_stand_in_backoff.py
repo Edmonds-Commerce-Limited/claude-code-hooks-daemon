@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,8 +17,10 @@ from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
     MAX_STAND_IN_DELAY_HOURS,
     backed_off_delay_hours,
+    previous_awaiting_human_entered_at,
     stand_in_requirement,
 )
+from tests.support.autonomy import pin_session_modes
 
 _NOW = time.mktime((2026, 11, 25, 9, 0, 0, 0, 0, -1))
 _HOUR = 3600.0
@@ -46,18 +49,41 @@ class TestBackedOffDelayHours:
 
 
 def _requirement_for(monkeypatch: pytest.MonkeyPatch, *, previous_entered_at: float | None) -> Any:
-    entries = (
-        []
-        if previous_entered_at is None
-        else [declared_blocked_entry("s1", entered_at=previous_entered_at)]
-    )
-    verdict = SimpleNamespace(environment_allowed=True, session=SessionPolicy.from_entries(entries))
+    verdict = SimpleNamespace(environment_allowed=True, session=SessionPolicy.from_entries([]))
     monkeypatch.setattr(stand_in_cron, "autonomy_verdict", lambda _hook_input: verdict)
     config = Config.model_validate({"persistent_crons": {"enabled": True}})
     payload = {"hook_event_name": "Stop", "session_id": "s1", "session_crons": []}
     return stand_in_requirement(
-        payload, config=config, delay_hours=DEFAULT_STAND_IN_DELAY_HOURS, now=_NOW
+        payload,
+        config=config,
+        delay_hours=DEFAULT_STAND_IN_DELAY_HOURS,
+        previous_entered_at=previous_entered_at,
+        now=_NOW,
     )
+
+
+class TestPreviousEntryRead:
+    def test_an_unreadable_registry_reads_none_not_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _unreadable(_hook_input: dict[str, Any]) -> None:
+            raise RuntimeError("no project context")
+
+        monkeypatch.setattr(stand_in_cron, "session_policy", _unreadable)
+        assert previous_awaiting_human_entered_at({"session_id": "s1"}) is None
+
+    def test_no_entry_reads_none(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        pin_session_modes(monkeypatch, tmp_path)
+        payload = {"hook_event_name": "Stop", "session_id": "s1"}
+        assert previous_awaiting_human_entered_at(payload) is None
+
+    def test_a_live_entry_reads_its_entry_time(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        entered = time.time() - 2 * _HOUR
+        pin_session_modes(monkeypatch, tmp_path, declared_blocked_entry("s1", entered_at=entered))
+        payload = {"hook_event_name": "Stop", "session_id": "s1"}
+        assert previous_awaiting_human_entered_at(payload) == entered
 
 
 class TestRequirementBacksOff:

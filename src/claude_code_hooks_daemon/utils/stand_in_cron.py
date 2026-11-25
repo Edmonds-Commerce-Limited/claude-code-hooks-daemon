@@ -28,7 +28,7 @@ from typing import Any, Final, cast
 from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.result_types import BlockingResult
-from claude_code_hooks_daemon.utils.autonomy import autonomy_verdict
+from claude_code_hooks_daemon.utils.autonomy import autonomy_verdict, session_policy
 from claude_code_hooks_daemon.utils.cron_enforcement import SessionCron, parse_session_crons
 from claude_code_hooks_daemon.utils.cron_tick import (
     TickKind,
@@ -188,10 +188,36 @@ def configured_delay_hours(config: Config) -> float:
     return float(value)
 
 
+def previous_awaiting_human_entered_at(hook_input: dict[str, Any]) -> float | None:
+    """When the session's still-live awaiting-human entry was made, or ``None``.
+
+    A caller that goes on to write THIS stop's entry must read this first: the
+    write replaces the entry, so afterwards the registry holds only this stop.
+    """
+    try:
+        entries = session_policy(hook_input).entries
+    except (RuntimeError, OSError) as exc:
+        # Best-effort like the marker write itself: no registry means no backoff, never a failed stop.
+        logger.debug("stand-in backoff: cannot read the session's modes: %s", exc)
+        return None
+    for entry in entries:
+        if entry.label is ModeLabel.AWAITING_HUMAN:
+            return entry.entered_at
+    return None
+
+
 def stand_in_requirement(
-    hook_input: dict[str, Any], *, config: Config, delay_hours: float, now: float | None = None
+    hook_input: dict[str, Any],
+    *,
+    config: Config,
+    delay_hours: float,
+    previous_entered_at: float | None,
+    now: float | None = None,
 ) -> BlockingResult | None:
     """The stand-in deny an ``[awaiting-human]`` stop owes, or ``None`` when none is owed.
+
+    ``previous_entered_at`` is :func:`previous_awaiting_human_entered_at` as read
+    BEFORE this stop wrote its own entry; it lengthens the delay for a repeat stop.
 
     The ONE gate both ``auto_continue_stop`` and ``owner_wait_stop_guard`` use, so the
     guard's earlier deny can carry the requirement the chain would otherwise hide
@@ -205,13 +231,5 @@ def stand_in_requirement(
     if not config.persistent_crons.enabled:
         return None
     when = time.time() if now is None else now
-    previous = next(
-        (entry for entry in autonomy.session.entries if entry.label is ModeLabel.AWAITING_HUMAN),
-        None,
-    )
-    delay = backed_off_delay_hours(
-        delay_hours,
-        previous_entered_at=None if previous is None else previous.entered_at,
-        now=when,
-    )
+    delay = backed_off_delay_hours(delay_hours, previous_entered_at=previous_entered_at, now=when)
     return stand_in_verdict(hook_input, delay_hours=delay, now=when)

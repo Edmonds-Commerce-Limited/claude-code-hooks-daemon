@@ -60,9 +60,15 @@ failed first; the directive now says an unchanged repeat decline gets no new ent
 anything is always journalled. Task 1.3's backoff is code: `backed_off_delay_hours` schedules the next stand-in
 at twice the gap since the previous `[awaiting-human]` stop while that entry is still live (so no human message
 came between), capped at 23 hours and never below the configured delay. The registry replaces the entry on each
-stop, so its `entered_at` is the previous stop's time, which makes the doubling need no stored counter; tests
-are in `tests/unit/utils/test_stand_in_backoff.py` (they failed first on the missing function). Plan 00470
-Task 5.2 already links to this plan. Release note 110 is filed.
+stop, so its `entered_at` is the previous stop's time, which makes the doubling need no stored counter. The
+previous entry must be read BEFORE the stop writes its own: `auto_continue_stop` writes the marker and then asks
+for the stand-in, so a read inside `stand_in_requirement` saw only the entry just written and never backed off.
+An independent review of the first version found this, and the callers now pass
+`previous_awaiting_human_entered_at(hook_input)` (read before the write) to `stand_in_requirement`. Tests:
+`tests/unit/utils/test_stand_in_backoff.py` (the delay function failed first on its missing import) and
+`TestARepeatedWaitBacksOffTheStandIn` in `tests/unit/handlers/stop/test_auto_continue_stop_stand_in.py`, which
+runs the real stop path from a real earlier entry. Plan 00470 Task 5.2 already links to this plan. Release note
+110 is filed.
 
 ## Success Criteria
 

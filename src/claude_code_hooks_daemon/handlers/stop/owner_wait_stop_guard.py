@@ -112,6 +112,7 @@ from claude_code_hooks_daemon.utils.owner_wait_check import (
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.stand_in_cron import (
     configured_delay_hours,
+    previous_awaiting_human_entered_at,
     stand_in_requirement,
 )
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
@@ -411,7 +412,10 @@ class OwnerWaitStopGuardHandler(TeamOnlyGuidance, StopHandlerBase):
             return None
         config = self._config_loader()
         requirement = stand_in_requirement(
-            hook_input, config=config, delay_hours=configured_delay_hours(config)
+            hook_input,
+            config=config,
+            delay_hours=configured_delay_hours(config),
+            previous_entered_at=previous_awaiting_human_entered_at(hook_input),
         )
         return None if requirement is None else requirement.reason
 
