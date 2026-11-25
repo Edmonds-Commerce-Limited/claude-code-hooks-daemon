@@ -112,7 +112,17 @@ class TestBlocking:
         assert "git push" in decision.reason
         assert BRANCH_LIMIT_PRINCIPLE in decision.reason
 
-    def test_gives_way_after_max_blocks_and_records_abandoned(
+    def test_unpushed_only_deny_says_the_work_is_intact_not_abandoned(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        _unpushed_branch(repo, "feat-a")
+        reason = _decide(repo, untracked).reason
+        assert reason is not None
+        assert "abandoned" not in reason
+        assert "intact locally" in reason
+        assert "branch-park" in reason
+
+    def test_gives_way_after_max_blocks_and_records_unpushed_not_abandoned(
         self, repo: Path, untracked: Path
     ) -> None:
         _unpushed_branch(repo, "feat-a")
@@ -120,9 +130,11 @@ class TestBlocking:
             assert _decide(repo, untracked).reason is not None
         decision = _decide(repo, untracked)
         assert decision.reason is None
-        assert any("abandoned" in line and "feat-a" in line for line in decision.context)
+        assert any("intact locally" in line and "feat-a" in line for line in decision.context)
+        assert not any("abandoned" in line for line in decision.context)
         state = read_state(state_path(untracked, SESSION, STATE_KIND, "main"))
-        assert state["abandoned"] == ["feat-a"]
+        assert state["unpushed"] == ["feat-a"]
+        assert "abandoned" not in state
 
     def test_warn_mode_allows_with_context(self, repo: Path, untracked: Path) -> None:
         _unpushed_branch(repo, "feat-a")

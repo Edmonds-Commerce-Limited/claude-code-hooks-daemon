@@ -53,6 +53,12 @@ _NOISY_STAGES: Final[frozenset[DormancyStage]] = frozenset(
     {DormancyStage.NOISY, DormancyStage.BLOCK}
 )
 _MAX_NOISY_NAMES: Final[int] = 10
+#: Branches whose only finding is "no remote holds the commits": nothing is lost.
+_UNPUSHED_KEY: Final[str] = "unpushed"
+_UNPUSHED_RECORD: Final[str] = "left unpushed"
+_UNPUSHED_TRUTH: Final[str] = (
+    "The work is intact locally; what is missing is a push, or a branch-park with a reason."
+)
 
 
 @dataclass(frozen=True)
@@ -85,12 +91,48 @@ def _deny_reason(
     if handoff:
         lines.append("Handoff: record these in the handoff note (branch @ tip):")
         lines.extend(f"  {name} @ {tip}" for name, tip in sorted(tips.items()))
-    lines.append(
-        f"Block {block} of {MAX_STOP_BLOCKS}; after that the stop is allowed and the "
-        "branches are recorded as abandoned."
-    )
+    if all(finding.check == StopCheck.UNPUSHED for finding in findings):
+        lines.append(
+            f"Block {block} of {MAX_STOP_BLOCKS}; after that the stop is allowed and the "
+            f"branches are recorded as {_UNPUSHED_RECORD}. {_UNPUSHED_TRUTH}"
+        )
+    else:
+        lines.append(
+            f"Block {block} of {MAX_STOP_BLOCKS}; after that the stop is allowed and the "
+            "branches are recorded as abandoned."
+        )
     lines.append(BRANCH_LIMIT_PRINCIPLE)
     return "\n".join(lines)
+
+
+def _record_given_way(state: dict[str, Any], blocking: list[StopFinding]) -> list[str]:
+    """Record the branches a stop is let through on, and the context lines saying so.
+
+    A branch whose only finding is unpushed commits is recorded under ``unpushed``
+    with what is true (the work is intact locally; a push or a park is missing); any
+    other branch is recorded under ``abandoned``.
+    """
+    unpushed_only = {f.branch for f in blocking} - {
+        f.branch for f in blocking if f.check != StopCheck.UNPUSHED
+    }
+    abandoned = sorted({f.branch for f in blocking} - unpushed_only)
+    lines: list[str] = []
+    if unpushed_only:
+        names = sorted(unpushed_only)
+        state[_UNPUSHED_KEY] = names
+        logger.warning("branch_stop_guard: left unpushed at stop: %s", ", ".join(names))
+        lines.append(
+            f"Branches {_UNPUSHED_RECORD} at stop after {MAX_STOP_BLOCKS} blocks: "
+            + ", ".join(names)
+            + f". {_UNPUSHED_TRUTH}"
+        )
+    if abandoned:
+        state["abandoned"] = abandoned
+        logger.warning("branch_stop_guard: abandoned at stop: %s", ", ".join(abandoned))
+        lines.append(
+            f"Branches abandoned at stop after {MAX_STOP_BLOCKS} blocks: " + ", ".join(abandoned)
+        )
+    return lines
 
 
 def _noisy_line(inventory: BranchInventory) -> str | None:
@@ -274,12 +316,7 @@ def decide_stop(
             state[key] = blocks + 1
             reason = _deny_reason(blocking, judgement.tips, block=blocks + 1, handoff=handoff)
         else:
-            names = sorted({f.branch for f in blocking})
-            state["abandoned"] = names
-            logger.warning("branch_stop_guard: abandoned at stop: %s", ", ".join(names))
-            context.append(
-                f"Branches abandoned at stop after {MAX_STOP_BLOCKS} blocks: " + ", ".join(names)
-            )
+            context.extend(_record_given_way(state, blocking))
     if reason is None and agent_id is None:
         context.extend(_noisy_context(inventory, state, now=now))
     if state:

@@ -34,7 +34,11 @@ from claude_code_hooks_daemon.core.branch_creation import (
     render_creation_report,
     write_labels,
 )
-from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
+from claude_code_hooks_daemon.core.branch_inventory import (
+    BranchInventoryError,
+    Pool,
+    build_inventory,
+)
 from claude_code_hooks_daemon.core.branch_ladder import ladder_notice
 from claude_code_hooks_daemon.core.branch_park import BranchParkError, announce_ended_parks
 from claude_code_hooks_daemon.core.branch_reject import (
@@ -123,7 +127,10 @@ class BranchSweepHandler(SessionStartHandlerBase):
     def _ended_park_lines(self) -> list[str]:
         """``Park cleared: ...`` for each park that ended since the last session; empty if none."""
         try:
-            return announce_ended_parks(self._get_project_root())
+            return announce_ended_parks(
+                self._get_project_root(),
+                max_age_days=self._branches.effective_pool_max_age(Pool.PARKED),
+            )
         except BranchParkError as exc:
             log_and_continue(
                 logger,

@@ -113,12 +113,19 @@ class TestNoCommitPark:
         assert _git(repo, "rev-parse", "work") == tip
         assert result.local_only is True
 
-    def test_new_work_ends_the_park(self, repo: Path) -> None:
+    def test_new_work_on_top_keeps_the_park_standing(self, repo: Path) -> None:
         park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
         _git(repo, "checkout", "-q", "work")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
         _git(repo, "checkout", "-q", "main")
-        assert announce_ended_parks(repo) == [f"Park cleared: work ({_REASON})"]
+        assert announce_ended_parks(repo, max_age_days=30) == []
+        assert read_park_record(repo, "work") is not None
+
+    def test_a_tip_off_the_recorded_commit_ends_the_park(self, repo: Path) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
+        assert announce_ended_parks(repo, max_age_days=30) == [f"Park cleared: work ({_REASON})"]
 
 
 class TestNoPushPark:
@@ -204,11 +211,19 @@ class TestStopGuard:
         decision = _stop(repo, tmp_path, "agent-1")
         assert decision.reason is None and decision.context == ()
 
-    def test_work_after_the_park_is_held_again(self, repo: Path, tmp_path: Path) -> None:
+    def test_work_after_the_park_stays_handed_over(self, repo: Path, tmp_path: Path) -> None:
+        # Plan 00640: the park follows the branch while the parked commit is an ancestor.
         park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
         _git(repo, "checkout", "-q", "work")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
         _git(repo, "checkout", "-q", "main")
+        decision = _stop(repo, tmp_path, "agent-1")
+        assert decision.reason is None and decision.context == ()
+
+    def test_a_tip_off_the_parked_commit_is_held_again(self, repo: Path, tmp_path: Path) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
         decision = _stop(repo, tmp_path, "agent-1")
         assert decision.reason is not None or decision.context
 

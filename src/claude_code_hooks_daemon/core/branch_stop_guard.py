@@ -34,7 +34,11 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     Pool,
     pool_of,
 )
-from claude_code_hooks_daemon.core.branch_park import BranchParkError, read_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    BranchParkError,
+    park_covers_tip,
+    read_park_record,
+)
 from claude_code_hooks_daemon.core.branch_records import touched_by_session
 from claude_code_hooks_daemon.core.branch_sweep import open_work_count
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -46,7 +50,6 @@ logger = logging.getLogger(__name__)
 _DONE_STATES = frozenset(
     {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
 )
-_SECONDS_PER_DAY = 86400
 #: Branches that are never a session's work, whatever the touch record says.
 _NEVER_JUDGED = frozenset({BranchState.EXEMPT, BranchState.BOT_OWNED, BranchState.PROTECTED})
 #: Default and integration lines: judged only with ``include_default``.
@@ -208,13 +211,17 @@ def _handed_over_by_park(
         return False
     if park is None:
         return False
-    if park.sha == record.local_tip:
-        return True
-    age_days = (time.time() - park.parked_at) / _SECONDS_PER_DAY
-    if age_days > config.effective_pool_max_age(Pool.PARKED):
-        return False
-    result = budget.git(repo, "merge-base", "--is-ancestor", park.sha, record.local_tip or "")
-    return result is not None and result.returncode == 0
+
+    def is_ancestor(ancestor: str, descendant: str) -> bool:
+        result = budget.git(repo, "merge-base", "--is-ancestor", ancestor, descendant)
+        return result is not None and result.returncode == 0
+
+    return park_covers_tip(
+        park,
+        record.local_tip or "",
+        max_age_days=config.effective_pool_max_age(Pool.PARKED),
+        is_ancestor=is_ancestor,
+    )
 
 
 def _park_commands(record: BranchRecord) -> tuple[str, ...]:

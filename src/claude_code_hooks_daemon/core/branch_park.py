@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
 logger = logging.getLogger(__name__)
 
+_SECONDS_PER_DAY = 86400
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
 
@@ -178,22 +180,52 @@ def _recorded_park_names(repo: Path) -> list[str]:
     return names
 
 
-def announce_ended_parks(repo: Path) -> list[str]:
+def park_covers_tip(
+    park: ParkRecord,
+    tip: str,
+    *,
+    max_age_days: int,
+    is_ancestor: Callable[[str, str], bool],
+) -> bool:
+    """Whether ``park`` still covers a branch whose tip is ``tip`` (Plan 00640).
+
+    The one rule every park consumer applies: the tip is the parked commit, or the
+    parked commit is an ancestor of it (later commits land on top of a park), and
+    the park is no older than ``max_age_days``. ``is_ancestor(park_sha, tip)`` is
+    supplied by the caller so each keeps its own git budget; it must answer False
+    when git cannot say, so a failure ends the park rather than extending it.
+    """
+    if park.sha == tip:
+        return True
+    if (time.time() - park.parked_at) / _SECONDS_PER_DAY > max_age_days:
+        return False
+    return is_ancestor(park.sha, tip)
+
+
+def announce_ended_parks(repo: Path, *, max_age_days: int) -> list[str]:
     """Report each park that has ended, then remove its record, so it is said once.
 
-    A park ends when the branch gained new work (its tip is no longer the park
-    commit) or is gone. A merge clears its record itself and says so
-    (``cleanup_after_merge``). The line is the one the merge path prints:
-    ``Park cleared: <name> (<reason>)``. Nothing is reported for a park that
-    still stands.
+    A park ends when the branch is gone, its tip does not build on the park
+    commit (rewritten or unrelated history), or it outlived ``max_age_days``
+    (:func:`park_covers_tip`); later commits on top of the park commit do not end
+    it. A merge clears its record itself and says so (``cleanup_after_merge``).
+    The line is the one the merge path prints: ``Park cleared: <name> (<reason>)``.
+    Nothing is reported for a park that still stands.
     """
+
+    def is_ancestor(ancestor: str, descendant: str) -> bool:
+        probe = run_git(repo, "merge-base", "--is-ancestor", ancestor, descendant)
+        return probe.returncode == 0
+
     lines: list[str] = []
     for name in _recorded_park_names(repo):
         record = read_park_record(repo, name)
         if record is None:
             continue
         tip = run_git(repo, "rev-parse", "--verify", "--quiet", f"{_HEADS}{name}^{{commit}}")
-        if tip.returncode == 0 and tip.stdout.strip() == record.sha:
+        if tip.returncode == 0 and park_covers_tip(
+            record, tip.stdout.strip(), max_age_days=max_age_days, is_ancestor=is_ancestor
+        ):
             continue
         clear_park_record(repo, name)
         lines.append(f"Park cleared: {name} ({record.reason})")

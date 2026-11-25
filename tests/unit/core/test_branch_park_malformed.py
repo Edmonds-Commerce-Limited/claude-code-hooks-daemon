@@ -99,7 +99,7 @@ def test_stop_guard_still_judges_the_branch(repo: Path) -> None:
 
 def test_session_start_announce_does_not_raise(repo: Path) -> None:
     _malformed_park(repo, "feat")
-    assert announce_ended_parks(repo) == []
+    assert announce_ended_parks(repo, max_age_days=30) == []
 
 
 def test_inventory_judges_the_branch_as_unparked(repo: Path) -> None:

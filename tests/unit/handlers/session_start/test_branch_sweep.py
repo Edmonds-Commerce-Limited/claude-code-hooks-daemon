@@ -144,9 +144,23 @@ class TestSummary:
         _commit(repo, "waits")
         _git(repo, "checkout", "-q", "main")
         park_branch(repo, "waits", reason="blocked on review", remote="origin")
-        _git(repo, "checkout", "-q", "waits")
-        _commit(repo, "more")
-        _git(repo, "checkout", "-q", "main")
+        # A tip that does not descend from the parked commit ends the park.
+        rewritten = subprocess.run(
+            ["git", "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.com",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.com",
+            },
+        ).stdout.strip()
+        _git(repo, "update-ref", "refs/heads/waits", rewritten)
         handler = BranchSweepHandler()
         assert "Park cleared: waits (blocked on review)" in _run(handler, repo, _new())
         assert "Park cleared: waits (blocked on review)" not in _run(handler, repo, _new())

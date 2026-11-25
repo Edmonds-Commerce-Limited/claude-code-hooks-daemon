@@ -36,7 +36,7 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 ### Phase 2: Fix
 
 - [x] ✅ **Task 2.1**: Implement the chosen rule in `core/branch_stop_guard.py` and `core/branch_park.py`, test first.
-- [ ] ⬜ **Task 2.2**: Make the abandoned record and the deny text say what is true for a branch that only lacks a push.
+- [x] ✅ **Task 2.2**: Make the abandoned record and the deny text say what is true for a branch that only lacks a push. Also: `announce_ended_parks` follows the same ancestor rule (shared `park_covers_tip` in `core/branch_park.py`); release callout `CLAUDE/UPGRADES/UNRELEASED/release-notes/106-...`.
 - [ ] ⬜ **Task 2.3**: Restart the daemon and verify live with an unpushable branch, then run targeted QA.
 
 ## Success Criteria
