@@ -1,6 +1,6 @@
 # Plan 00639: stand-in no-op declines flood the journal
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Type**: Bug
@@ -40,15 +40,39 @@ that task gets a cross-link.
 
 ### Phase 1: Reproduce and fix test-first
 
-- [ ] ⬜ **Task 1.1**: Locate where the stand-in directive tells the agent to journal its ruling
+- [x] ✅ **Task 1.1**: Locate where the stand-in directive tells the agent to journal its ruling
   (the stand-in tick text and `utils/stand_in_cron.py`); confirm the flood from the directive
   alone, not only from the relayed evidence.
-- [ ] ⬜ **Task 1.2**: Red test: two consecutive declines with an unchanged state fingerprint
+- [x] ✅ **Task 1.2**: Red test: two consecutive declines with an unchanged state fingerprint
   produce one journal instruction, not two.
-- [ ] ⬜ **Task 1.3**: Implement the no-op check (compare against the last recorded decline) and the
+- [x] ✅ **Task 1.3**: Implement the no-op check (compare against the last recorded decline) and the
   backoff; green.
 - [ ] ⬜ **Task 1.4**: Cross-link from Plan 00470 Task 5.2; release note; PR with independent
   review and a green full CI run before merge.
+
+### How it was built
+
+The stand-in is a prompt an agent follows, not code that writes the journal, so there is no state fingerprint
+to compare. Task 1.1: the directive (`utils/stand_in_cron.py`, `_PROMPT_BODY`) told the sub-agent to journal
+every choice or decline with no exception for an unchanged repeat, which alone produces one entry per tick.
+Task 1.2 became a test on the directive, `test_an_unchanged_repeat_decline_writes_no_new_journal_entry`, which
+failed first; the directive now says an unchanged repeat decline gets no new entry and a ruling that changes
+anything is always journalled. Task 1.3's backoff is code: `backed_off_delay_hours` schedules the next stand-in
+at twice the gap since the previous `[awaiting-human]` stop while that entry is still live (so no human message
+came between), capped at 23 hours and never below the configured delay. The registry replaces the entry on each
+stop, so its `entered_at` is the previous stop's time, which makes the doubling need no stored counter. The
+previous entry must be read BEFORE the stop writes its own: `auto_continue_stop` writes the marker and then asks
+for the stand-in, so a read inside `stand_in_requirement` saw only the entry just written and never backed off.
+An independent review of the first version found this, and the callers now pass
+`previous_awaiting_human_entered_at(hook_input)` (read before the write) to `stand_in_requirement`. Tests:
+`tests/unit/utils/test_stand_in_backoff.py` (the delay function failed first on its missing import) and
+`TestARepeatedWaitBacksOffTheStandIn` in `tests/unit/handlers/stop/test_auto_continue_stop_stand_in.py`, which
+runs the real stop path from a real earlier entry, and a guard-path test in
+`test_owner_wait_stand_in_cooperation.py`. Known limit, found by the second independent review: the backoff keys
+on "no human message since the previous `[awaiting-human]` stop", not on the question being the same, because the
+daemon cannot read the question; a new question raised after the stand-in let work continue also waits longer than
+the base delay until a human message resets it. Plan 00470 Task 5.2 already links to this plan. Release note
+110 is filed.
 
 ## Success Criteria
 
@@ -58,4 +82,4 @@ that task gets a cross-link.
 
 ## Delivery & Milestones
 
-- Filed from the Q65 relay; nothing built.
+- Filed from the Q65 relay. Directive rule and backoff built test-first on branch `plan-00639-stand-in-noop-no-journal`; review and CI pending.

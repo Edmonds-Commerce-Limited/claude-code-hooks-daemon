@@ -74,6 +74,7 @@ from claude_code_hooks_daemon.utils.stand_in_cron import (
     DEFAULT_STAND_IN_DELAY_HOURS,
     STAND_IN_DELAY_OPTION,
     delay_hours_problem,
+    previous_awaiting_human_entered_at,
     stand_in_requirement,
     validate_delay_hours,
 )
@@ -758,7 +759,9 @@ class AutoContinueStopHandler(StopHandlerBase):
             logger.debug("auto_continue_stop: cannot load config: %s", exc)
             return default_config()
 
-    def _stand_in_block(self, hook_input: dict[str, Any]) -> BlockingResult | None:
+    def _stand_in_block(
+        self, hook_input: dict[str, Any], *, previous_entered_at: float | None
+    ) -> BlockingResult | None:
         """The block for an awaiting-human stop that left no stand-in cron.
 
         Gated on the same ``persistent_crons.enabled`` master switch as the
@@ -769,7 +772,10 @@ class AutoContinueStopHandler(StopHandlerBase):
         enters awaiting-human, and the stand-in is what answers it (Plan 00501).
         """
         verdict = stand_in_requirement(
-            hook_input, config=self._config_loader(), delay_hours=self._stand_in_delay_hours
+            hook_input,
+            config=self._config_loader(),
+            delay_hours=self._stand_in_delay_hours,
+            previous_entered_at=previous_entered_at,
         )
         if verdict is None:
             return None
@@ -905,9 +911,13 @@ class AutoContinueStopHandler(StopHandlerBase):
                     self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
+                # Read BEFORE the marker is written: the write replaces the entry.
+                previous_entered_at = previous_awaiting_human_entered_at(hook_input)
                 marker_written = self._maybe_record_human_blocked_marker(hook_input, text)
                 if marker_written:
-                    stand_in = self._stand_in_block(hook_input)
+                    stand_in = self._stand_in_block(
+                        hook_input, previous_entered_at=previous_entered_at
+                    )
                     if stand_in is not None:
                         self._log_stop_event(hook_input, Decision.DENY, stand_in.reason or "")
                         return stand_in

@@ -7,6 +7,7 @@ what is under test.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -27,7 +28,7 @@ from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import AutoContin
 from claude_code_hooks_daemon.handlers.user_prompt_submit.failsafe_cron_blockage_suppressor import (
     FailsafeCronBlockageSuppressorHandler,
 )
-from claude_code_hooks_daemon.utils.session_modes import ModeLabel
+from claude_code_hooks_daemon.utils.session_modes import ModeLabel, declared_blocked_entry
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 from claude_code_hooks_daemon.utils.stand_in_cron import stand_in_prompt
 
@@ -121,6 +122,27 @@ class TestAwaitingHumanStopNeedsAStandIn:
     def test_inert_while_persistent_crons_is_off(self, tmp_path: Path) -> None:
         result = _stop(tmp_path, handler=_handler(Config()), session_crons=[])
         assert result.decision is Decision.ALLOW
+
+
+class TestARepeatedWaitBacksOffTheStandIn:
+    """Plan 00639: the stand-in reads the PREVIOUS stop's entry, not the one this stop writes."""
+
+    def test_a_repeat_stop_with_no_human_between_asks_for_a_longer_delay(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        previous = declared_blocked_entry("lead", entered_at=time.time() - 3 * 3600)
+        pin_session_modes(monkeypatch, tmp_path, previous)
+        result = _stop(tmp_path, session_crons=[])
+        assert result.decision is Decision.DENY
+        assert "about 6 hours out" in result.reason
+
+    def test_a_first_stop_keeps_the_configured_delay(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        pin_session_modes(monkeypatch, tmp_path)
+        result = _stop(tmp_path, session_crons=[])
+        assert result.decision is Decision.DENY
+        assert "about 3 hours out" in result.reason
 
 
 _REAL_STOP_LINE = "STOPPING BECAUSE: background QA is still running."
