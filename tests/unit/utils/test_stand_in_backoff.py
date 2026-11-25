@@ -48,6 +48,14 @@ class TestBackedOffDelayHours:
     def test_a_configured_delay_above_the_ceiling_is_kept_as_is(self) -> None:
         assert backed_off_delay_hours(23.5, previous_entered_at=_NOW - 20 * _HOUR, now=_NOW) == 23.5
 
+    def test_a_nan_entry_time_keeps_the_configured_delay(self) -> None:
+        delay = backed_off_delay_hours(3.0, previous_entered_at=float("nan"), now=_NOW)
+        assert delay == 3.0
+
+    def test_an_infinitely_old_entry_time_is_capped_not_infinite(self) -> None:
+        delay = backed_off_delay_hours(3.0, previous_entered_at=float("-inf"), now=_NOW)
+        assert delay == 23.0
+
     def test_a_previous_entry_in_the_future_is_ignored(self) -> None:
         assert backed_off_delay_hours(3.0, previous_entered_at=_NOW + _HOUR, now=_NOW) == 3.0
 
