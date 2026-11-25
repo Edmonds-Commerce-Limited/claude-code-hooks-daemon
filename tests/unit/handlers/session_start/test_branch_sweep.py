@@ -24,7 +24,13 @@ from claude_code_hooks_daemon.config.models import (
     HandlersConfig,
     fold_handler_aliases,
 )
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    Timeout,
+)
 from claude_code_hooks_daemon.core import Decision, branch_ladder
 from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, read_labels
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
@@ -151,7 +157,7 @@ class TestSummary:
             check=True,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=Timeout.GIT_COMMIT,
             env={
                 **os.environ,
                 "GIT_AUTHOR_NAME": "t",

@@ -36,15 +36,15 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 ### Phase 2: Fix
 
 - [x] ✅ **Task 2.1**: Implement the chosen rule in `core/branch_stop_guard.py` and `core/branch_park.py`, test first.
-- [x] ✅ **Task 2.2**: Make the abandoned record and the deny text say what is true for a branch that only lacks a push. Also: `announce_ended_parks` follows the same ancestor rule (shared `park_covers_tip` in `core/branch_park.py`); release callout `CLAUDE/UPGRADES/UNRELEASED/release-notes/106-...`.
-- [ ] ⬜ **Task 2.3**: Restart the daemon and verify live with an unpushable branch, then run targeted QA.
+- [x] ✅ **Task 2.2**: Make the abandoned record and the deny text say what is true for a branch that only lacks a push. Also: `announce_ended_parks` follows the same ancestor rule (shared `park_covers_tip` in `core/branch_park.py`); release callout `CLAUDE/UPGRADES/UNRELEASED/release-notes/107-...` (numbered 107 because PR 251 holds 106).
+- [x] ✅ **Task 2.3**: Restart the daemon and verify live with an unpushable branch, then run targeted QA. Daemon restarted on the new code; a park recorded at `1bf547492` with the later commit `1e069f69d` on top was not named by the next stop. Targeted QA: 5109 changed tests passed; `magic_values` flags only literals outside this plan on `main` after the one this plan introduced was replaced; `changed_tests` lists three `[too-broad]` unmapped source files (`core/branch_park.py`, `daemon/cli.py`, `handlers/session_start/branch_sweep.py`) that need `--allow-unmapped` or a map rule.
 
 ## Success Criteria
 
-- [ ] The Task 1.1 test failed before the fix and passes after it.
-- [ ] A parked, unpushable branch with later commits does not produce the three-block cycle or an abandoned record.
-- [ ] An unparked unpushed branch is still denied three times.
-- [ ] Release-bound consequences: none for users beyond the changed guard behaviour, recorded in the pending-release holding area as a release note.
+- [x] The Task 1.1 test failed before the fix and passes after it (the sub-agent saw 9 failed before; my rerun of the 7 touched test files: 271 passed).
+- [x] A parked, unpushable branch with later commits does not produce the three-block cycle or an abandoned record (live check, Task 2.3).
+- [ ] An unparked unpushed branch is still denied three times: covered by the existing unit tests that still pass; not re-run live.
+- [x] Release-bound consequences: recorded in the pending-release holding area as release note 107.
 
 ## Delivery & Milestones
 
