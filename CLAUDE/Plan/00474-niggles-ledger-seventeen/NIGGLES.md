@@ -8631,3 +8631,23 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW (no producer yet).
 
 **Status**: ⬜ Open. Enforce the binding where adoption is wired: record the claim with the adopted archive's id, test-first (an interrupted claim of an adopted entry is finished, not renamed back).
+
+### N738 — llm_qa changed: a changed file classed too-broad fails the whole run with no rule able to clear it
+
+**Source**: Plan 00641 targeted QA, 25 Nov. Not filed upstream: the issue-report generator refuses a citation outside `src/claude_code_hooks_daemon/`, and this is the repository's own QA script.
+
+**Evidence**: `./scripts/qa/llm_qa.py changed` ran 3187 tests with 0 failures and reported 42 of 43 checks passed, because `core/branch_cleanup.py` was classed `too-broad` and unmapped. The verdict text (`scripts/qa/llm_qa.py:1147`, reason set in `scripts/qa/run_changed_tests.py:137`) says no `changed_tests_map.yaml` rule can narrow it and to pass `--allow-unmapped`. A change to that file can therefore never give a clean targeted run.
+
+**Severity**: LOW (CI runs the full suite, so nothing ships untested).
+
+**Status**: ⬜ Open. Decide whether a too-broad file should select the whole suite, or be advisory, instead of failing a run whose selected tests all pass.
+
+### N739 — scratch liveness: the non-dumpable agent exemption (PR 258) left three review findings
+
+**Source**: Plan 00627, independent review of PR 258 (APPROVE, three non-blocking findings).
+
+**Evidence**: `src/claude_code_hooks_daemon/core/scratch_liveness.py` `read_process_cwds`: the docstring still says any other failure, permission included, is reported, which is no longer true; the skipped pid is logged with a made-up `OSError(pid)` instead of the real errno; `tests/unit/core/test_scratch_liveness.py` has no `gpg-agent` case and no case where `comm` is unreadable, which is the branch that keeps the fail-closed rule.
+
+**Severity**: LOW.
+
+**Status**: ✅ Fixed on branch `fix-scratch-liveness-review-findings`: the docstring names the exemption, the real exception is logged, and the `gpg-agent` and no-readable-`comm` cases are tested.
