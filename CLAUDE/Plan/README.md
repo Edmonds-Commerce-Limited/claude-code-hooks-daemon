@@ -46,6 +46,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - In Progress (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
+- [00641: release candidate branch lifecycle after release](00641-release-candidate-branch-lifecycle-after-release/PLAN.md) - Not Started (BUG, owner-named process defect: an RC branch is kept after its release on a "client seats may still track it" note no record backs, then blocks new branches; the release procedure names no step that retires it)
+
 - [00639: stand-in no-op declines flood the journal](00639-stand-in-no-op-declines-flood-the-journal/PLAN.md) - Not Started (BUG, owner Q65, next after the v2 PRs: a stand-in that declines with nothing changed must not write a journal entry each tick; evidence relayed, unverified; same defect as Plan 00470 Task 5.2's journal rule)
 
 - [00638: hooks screen install and missing binary surface](00638-hooks-screen-install-and-missing-binary-surface/PLAN.md) - Not Started (child of the 00523 line, context 00630: release deploy installs verified hooks-screen-<triple> to untracked/bin; missing binary surfaced to a person, not only decision.log)
@@ -339,7 +341,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 526 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 88 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 90 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
