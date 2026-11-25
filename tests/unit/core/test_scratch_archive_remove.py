@@ -1218,10 +1218,6 @@ class TestAdoptedArchives:
         assert resumed.outcome == "removed"
         assert list(root.iterdir()) == []
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="parked RED: resume renames back instead of STUCK; see review-fixes-handoff-4.md",
-    )
     def test_a_claim_naming_another_archive_than_the_adopted_one_is_stuck(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:

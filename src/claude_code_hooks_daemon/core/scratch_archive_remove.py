@@ -620,6 +620,23 @@ def resume_claimed(
             return Resumed(name, "removed", f"archive {record.archive_id} verified", removed)
     if unchecked:
         return Resumed(name, "stuck", "a recorded archive could not be checked (tar did not run)")
+    # An adopted archive of this entry that the claim does not name means the
+    # claim cannot be matched to the archive that holds the tree: the tree is
+    # never renamed back (a human reconciles them). Other excluded records of
+    # the entry (earlier claims, earlier trees) stay harmless.
+    if any(
+        r.checkout == checkout
+        and _names_entry(r, name)
+        and r.archive_id != latest.archive_id
+        and ADOPT_PROOF in r.proof_ids
+        for r in records
+    ):
+        return Resumed(
+            name,
+            "stuck",
+            f"the claim names archive {latest.archive_id}, not the adopted archive of this "
+            "entry; left claimed for a human",
+        )
     reason = (
         "the claim's archive does not verify"
         if candidates
