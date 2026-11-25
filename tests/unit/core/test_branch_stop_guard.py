@@ -11,6 +11,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.branch_inventory import build_inventory
+from claude_code_hooks_daemon.core.branch_park import park_branch
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY, touched_by_session
 from claude_code_hooks_daemon.core.branch_stop_guard import (
     StopCheck,
@@ -197,6 +198,58 @@ class TestUnpushed:
         _touch(repo, "work", AGENT)
         # Merged but present: the merged check fires, the unpushed one does not.
         assert _checks(_judge(repo)) == {("work", StopCheck.MERGED)}
+
+
+def _park(repo: Path, name: str) -> None:
+    """Park ``name`` locally (trailer commit, no push): the park of an unpushable branch."""
+    park_branch(repo, name, reason="push refused: no write access", remote="origin", push=False)
+
+
+def _commit_on(repo: Path, name: str) -> None:
+    """Move ``name`` one commit past its tip, as later work on a parked branch does."""
+    _git(repo, "update-ref", f"refs/heads/{name}", tmp_commit(repo, name))
+
+
+class TestParkFollowsBranch:
+    """Plan 00640: a park keeps covering later commits on top of the parked tip."""
+
+    def test_parked_tip_is_handed_over(self, repo: Path) -> None:
+        _branch(repo, "work")
+        _park(repo, "work")
+        _touch(repo, "work")
+        assert _judge(repo).findings == ()
+
+    def test_commit_after_park_is_still_handed_over(self, repo: Path) -> None:
+        _branch(repo, "work")
+        _park(repo, "work")
+        _commit_on(repo, "work")
+        _touch(repo, "work")
+        assert _judge(repo).findings == ()
+
+    def test_unparked_branch_is_still_denied(self, repo: Path) -> None:
+        _branch(repo, "work")
+        _commit_on(repo, "work")
+        _touch(repo, "work")
+        assert _checks(_judge(repo)) == {("work", StopCheck.UNPUSHED)}
+
+    def test_tip_not_descending_from_the_parked_tip_is_judged(self, repo: Path) -> None:
+        _branch(repo, "work")
+        _park(repo, "work")
+        # Rewritten history: a sibling commit off main replaces the parked line.
+        rewritten = _git(
+            repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten"
+        ).strip()
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
+        _touch(repo, "work")
+        assert _checks(_judge(repo)) == {("work", StopCheck.UNPUSHED)}
+
+    def test_park_past_its_max_age_no_longer_covers(self, repo: Path) -> None:
+        _branch(repo, "work")
+        _park(repo, "work")
+        _commit_on(repo, "work")
+        _git(repo, "config", "branch.work.hooksDaemonParkedAt", "1000000000")
+        _touch(repo, "work")
+        assert _checks(_judge(repo)) == {("work", StopCheck.UNPUSHED)}
 
 
 class TestMerged:

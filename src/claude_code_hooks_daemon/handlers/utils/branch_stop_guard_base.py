@@ -48,7 +48,8 @@ def stop_guard_rule(rule_id: str, who: str) -> Rule:
             "  uncommitted, unpushed, or merged but not deleted.\n\n"
             "DO INSTEAD:\n"
             "  Run the listed commands per branch. After three blocked stops the guard\n"
-            "  gives way and records the branches as abandoned."
+            "  gives way and records the branches as left unpushed (unpushed commits are\n"
+            "  the only finding) or as abandoned (anything else)."
         ),
     )
 

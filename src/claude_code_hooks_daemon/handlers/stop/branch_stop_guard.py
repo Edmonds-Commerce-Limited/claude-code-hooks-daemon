@@ -3,7 +3,8 @@
 Judges the branches this session touched (and the unpushed or merged leftovers
 of its sub-agents) with :func:`core.branch_stop_gate.decide_stop`: a dirty
 worktree, commits no remote holds, a merged branch not yet deleted. Denies at
-most three times, then gives way and records the branches as abandoned; stops
+most three times, then gives way and records the branches (as left unpushed when
+unpushed commits are a branch's only finding, otherwise as abandoned); stops
 refused only on its own unheld ``.claude/worktrees/`` branches have a second,
 separate budget of three. Also
 adds, at most hourly, a non-blocking line naming branches idle at the noisy
@@ -51,7 +52,8 @@ class BranchStopGuardHandler(BranchStopGuardBase):
             "Stopping (main thread or sub-agent) with a dirty worktree, commits no remote "
             "holds, or a merged branch not deleted is denied up to three times, naming the "
             "branch, the check and the exact commands; then the guard gives way and records "
-            "the branches as abandoned. A main-thread stop refused only on a branch it "
+            "the branches as left unpushed (unpushed commits are the only finding) or "
+            "abandoned (anything else). A main-thread stop refused only on a branch it "
             "touched in an unlocked `.claude/worktrees/` worktree with no work-queue record "
             "has a separate budget of three, so those never spend the other branches' "
             "blocks. The coordinator also answers for its sub-agents' "

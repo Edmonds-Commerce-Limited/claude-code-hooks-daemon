@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -15,13 +16,16 @@ from claude_code_hooks_daemon.config.models import (
 )
 from claude_code_hooks_daemon.core.branch_creation import creation_verdict
 from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
     announce_ended_parks,
     park_branch,
+    park_covers_tip,
     read_park_record,
 )
 from tests.support.git_fixtures import git_setup_timeout
 
 _REFUSAL = "gate: a fresh full-QA verdict is required"
+_MAX_AGE = 30
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -145,20 +149,42 @@ class TestGroupPoolResolvesToParked:
 
 
 class TestEndedParkIsAnnounced:
-    def test_new_work_prints_park_cleared_once_then_removes_the_record(self, repo: Path) -> None:
+    def test_rewritten_history_prints_park_cleared_once_then_removes_the_record(
+        self, repo: Path
+    ) -> None:
+        park_branch(repo, "work", reason="waiting", remote="origin")
+        # A tip that does not descend from the parked commit ends the park.
+        rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
+        assert announce_ended_parks(repo, max_age_days=_MAX_AGE) == ["Park cleared: work (waiting)"]
+        assert read_park_record(repo, "work") is None
+        assert announce_ended_parks(repo, max_age_days=_MAX_AGE) == []
+
+    def test_new_work_on_top_of_the_park_keeps_it_standing(self, repo: Path) -> None:
+        # Plan 00640: the park follows the branch while the recorded commit is an ancestor.
         park_branch(repo, "work", reason="waiting", remote="origin")
         _git(repo, "checkout", "-q", "work")
         (repo / "h.txt").write_text("h")
         _git(repo, "add", "h.txt")
         _git(repo, "commit", "-q", "-m", "more work")
         _git(repo, "checkout", "-q", "main")
-        assert announce_ended_parks(repo) == ["Park cleared: work (waiting)"]
+        assert announce_ended_parks(repo, max_age_days=_MAX_AGE) == []
+        assert read_park_record(repo, "work") is not None
+
+    def test_a_park_past_its_max_age_ends_even_with_the_commit_an_ancestor(
+        self, repo: Path
+    ) -> None:
+        park_branch(repo, "work", reason="waiting", remote="origin")
+        _git(repo, "checkout", "-q", "work")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more work")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "config", "branch.work.hooksDaemonParkedAt", "1000000000")
+        assert announce_ended_parks(repo, max_age_days=_MAX_AGE) == ["Park cleared: work (waiting)"]
         assert read_park_record(repo, "work") is None
-        assert announce_ended_parks(repo) == []
 
     def test_a_standing_park_is_not_announced(self, repo: Path) -> None:
         park_branch(repo, "work", reason="waiting", remote="origin")
-        assert announce_ended_parks(repo) == []
+        assert announce_ended_parks(repo, max_age_days=_MAX_AGE) == []
         assert read_park_record(repo, "work") is not None
 
     def test_a_vanished_branch_ends_the_park_visibly(self, repo: Path) -> None:
@@ -166,7 +192,7 @@ class TestEndedParkIsAnnounced:
         # deletion leaves the record behind, and that must be said.
         park_branch(repo, "work", reason="waiting", remote="origin")
         _git(repo, "update-ref", "-d", "refs/heads/work")
-        assert announce_ended_parks(repo) == ["Park cleared: work (waiting)"]
+        assert announce_ended_parks(repo, max_age_days=_MAX_AGE) == ["Park cleared: work (waiting)"]
         assert read_park_record(repo, "work") is None
 
 
@@ -177,11 +203,8 @@ def test_branch_sweep_prints_an_ended_park_once(
 
     (repo / ".claude" / "hooks-daemon").mkdir(parents=True)
     park_branch(repo, "work", reason="waiting", remote="origin")
-    _git(repo, "checkout", "-q", "work")
-    (repo / "h.txt").write_text("h")
-    _git(repo, "add", "h.txt")
-    _git(repo, "commit", "-q", "-m", "more work")
-    _git(repo, "checkout", "-q", "main")
+    rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+    _git(repo, "update-ref", "refs/heads/work", rewritten)
 
     def run() -> str:
         args = build_parser().parse_args(["--project-root", str(repo), "branch-sweep"])
@@ -191,3 +214,39 @@ def test_branch_sweep_prints_an_ended_park_once(
 
     assert "Park cleared: work (waiting)" in run()
     assert "Park cleared" not in run()
+
+
+class TestParkCoversTip:
+    """The one rule every park consumer applies (``park_covers_tip``)."""
+
+    _DAY = 86400
+
+    def _park(self, age_days: float) -> ParkRecord:
+        return ParkRecord("aaa", "waiting", int(time.time() - age_days * self._DAY), "t")
+
+    def test_an_exact_tip_is_covered(self) -> None:
+        assert park_covers_tip(
+            self._park(1), "aaa", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: False
+        )
+
+    def test_an_exact_tip_stays_covered_past_max_age(self) -> None:
+        # An unmoved park is never ended by age: the parked pool shows it STALE instead
+        # (R-BRANCH-PARKED-POOL), so the record and its reason stay visible.
+        assert park_covers_tip(
+            self._park(_MAX_AGE + 5), "aaa", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: False
+        )
+
+    def test_a_descendant_tip_is_covered_inside_max_age(self) -> None:
+        assert park_covers_tip(
+            self._park(1), "bbb", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: True
+        )
+
+    def test_a_descendant_tip_is_not_covered_past_max_age(self) -> None:
+        assert not park_covers_tip(
+            self._park(_MAX_AGE + 5), "bbb", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: True
+        )
+
+    def test_a_tip_that_does_not_build_on_the_park_is_not_covered(self) -> None:
+        assert not park_covers_tip(
+            self._park(1), "bbb", max_age_days=_MAX_AGE, is_ancestor=lambda a, d: False
+        )

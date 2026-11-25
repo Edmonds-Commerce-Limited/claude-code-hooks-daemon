@@ -6722,7 +6722,9 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     cap = branch_sweep.effective_wip_cap(branches, legacy)
     if not args.json:
         # A park that ended (new work, a vanished branch) is said once, then its record goes.
-        for line in announce_ended_parks(repo):
+        for line in announce_ended_parks(
+            repo, max_age_days=branches.effective_pool_max_age(branch_inventory.Pool.PARKED)
+        ):
             print(line)
     # A runnable remote delete is printed only for what the remote-delete guard's proof accepts.
     proven = branch_cleanup.proven_remote_only(repo, branches, inventory)

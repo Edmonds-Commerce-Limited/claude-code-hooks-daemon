@@ -113,12 +113,19 @@ class TestNoCommitPark:
         assert _git(repo, "rev-parse", "work") == tip
         assert result.local_only is True
 
-    def test_new_work_ends_the_park(self, repo: Path) -> None:
+    def test_new_work_on_top_keeps_the_park_standing(self, repo: Path) -> None:
         park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
         _git(repo, "checkout", "-q", "work")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
         _git(repo, "checkout", "-q", "main")
-        assert announce_ended_parks(repo) == [f"Park cleared: work ({_REASON})"]
+        assert announce_ended_parks(repo, max_age_days=30) == []
+        assert read_park_record(repo, "work") is not None
+
+    def test_a_tip_off_the_recorded_commit_ends_the_park(self, repo: Path) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
+        assert announce_ended_parks(repo, max_age_days=30) == [f"Park cleared: work ({_REASON})"]
 
 
 class TestNoPushPark:
@@ -164,13 +171,50 @@ class TestInventoryAndPools:
         assert verdict.decision == "deny"
         assert any("Parked branches: 1" in line for line in verdict.lines)
 
-    def test_new_work_returns_the_branch_to_open(self, repo: Path) -> None:
+    def test_new_work_on_top_of_the_park_stays_parked(self, repo: Path) -> None:
+        # The park follows the branch (park_covers_tip), as it does for the stop guard.
         park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
         _git(repo, "checkout", "-q", "work")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
         _git(repo, "checkout", "-q", "main")
         inventory = build_inventory(repo, BranchesConfig(default="main"))
+        assert inventory.records["work"].state == BranchState.PARKED
+        assert open_work_count(inventory) == 0
+
+    def test_new_work_after_the_park_aged_out_is_open_again(self, repo: Path) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        _git(repo, "checkout", "-q", "work")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "config", "branch.work.hooksDaemonParkedAt", "1000000000")
+        inventory = build_inventory(repo, BranchesConfig(default="main"))
         assert inventory.records["work"].state != BranchState.PARKED
+
+    def test_a_tip_off_the_parked_commit_is_open_again(self, repo: Path) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
+        inventory = build_inventory(repo, BranchesConfig(default="main"))
+        assert inventory.records["work"].state != BranchState.PARKED
+
+    def test_new_work_on_top_of_the_park_counts_in_the_parked_pool_of_the_guard(
+        self, repo: Path
+    ) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        _git(repo, "checkout", "-q", "work")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
+        _git(repo, "checkout", "-q", "main")
+        config = BranchesConfig.model_validate(
+            {
+                "default": "main",
+                "wip": {"cap": 1, "mode": "block", "creation_grace": 0},
+                "parked": {"cap": 1},
+                "duplicates": {"mode": "off"},
+            }
+        )
+        verdict = creation_verdict(repo, config, "fresh")
+        assert verdict.decision == "deny"
+        assert any("Parked branches: 1" in line for line in verdict.lines)
 
 
 def _stop(repo: Path, untracked: Path, agent: str | None) -> StopDecision:
@@ -204,11 +248,19 @@ class TestStopGuard:
         decision = _stop(repo, tmp_path, "agent-1")
         assert decision.reason is None and decision.context == ()
 
-    def test_work_after_the_park_is_held_again(self, repo: Path, tmp_path: Path) -> None:
+    def test_work_after_the_park_stays_handed_over(self, repo: Path, tmp_path: Path) -> None:
+        # Plan 00640: the park follows the branch while the parked commit is an ancestor.
         park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
         _git(repo, "checkout", "-q", "work")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
         _git(repo, "checkout", "-q", "main")
+        decision = _stop(repo, tmp_path, "agent-1")
+        assert decision.reason is None and decision.context == ()
+
+    def test_a_tip_off_the_parked_commit_is_held_again(self, repo: Path, tmp_path: Path) -> None:
+        park_branch(repo, "work", reason=_REASON, remote="origin", commit=False)
+        rewritten = _git(repo, "commit-tree", "main^{tree}", "-p", "main", "-m", "rewritten")
+        _git(repo, "update-ref", "refs/heads/work", rewritten)
         decision = _stop(repo, tmp_path, "agent-1")
         assert decision.reason is not None or decision.context
 
