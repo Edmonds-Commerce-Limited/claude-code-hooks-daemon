@@ -46,8 +46,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - In Progress (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
-- [00639: stand-in no-op declines flood the journal](00639-stand-in-no-op-declines-flood-the-journal/PLAN.md) - In Progress (BUG, owner Q65: the directive rule and the backoff are built, review and CI pending; a stand-in that declines with nothing changed must not write a journal entry each tick; evidence relayed, unverified; same defect as Plan 00470 Task 5.2's journal rule)
-
 - [00638: hooks screen install and missing binary surface](00638-hooks-screen-install-and-missing-binary-surface/PLAN.md) - Not Started (child of the 00523 line, context 00630: release deploy installs verified hooks-screen-<triple> to untracked/bin; missing binary surfaced to a person, not only decision.log)
 
 - [00637: coordinator no-value remote branch retire](00637-coordinator-no-value-remote-branch-retire/PLAN.md) - Not Started (child (g) of 00630: logged coordinator retire of an unmerged remote branch on top of branch-reject, owner ruling Q17; depends on 00631)
@@ -226,6 +224,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00640: branch stop guard unpushable branch exit](Completed/00640-branch-stop-guard-unpushable-branch-exit/PLAN.md) - Complete at merge `cf2fdb17a` (PR 255) + the archiving commit (a park follows its branch while the parked commit is an ancestor of the tip, bounded by `max_age_days`; an unpushed-only branch is no longer called abandoned; release note 107)
 
+- [00639: stand-in no-op declines flood the journal](Completed/00639-stand-in-no-op-declines-flood-the-journal/PLAN.md) - Complete at merge `71093289` (PR 267) + the archiving commit (an unchanged repeat stand-in decline is not journalled, and a repeated `[awaiting-human]` stop with no human between schedules its stand-in at twice the gap since the last stop, capped at 23h; release note 110)
+
 - [00620: agent no value branch removal verdict](Completed/00620-agent-no-value-branch-removal-verdict/PLAN.md) - Complete at merge `69e375788` + `662750cf4` + the archiving commit (owner proposal: an Opus sub-agent verdict, bound to the tip, plus a recovery bundle the guard verifies, lets an agent remove unproven work; local delete only; reviews of 8260463ff/09e744603 signed off, main CI green at `61a916143`; release note 014; follow-up Plan 00629, niggle N688)
 
 - [00613: worktree link secret verb](Completed/00613-worktree-link-secret-verb/PLAN.md) - Complete at merge `69e375788` + `2f1c14e80` (live-daemon check) + the archiving commit (a protected file is seeded into a worktree as a link from the committed seed list, by the creation hook or `seed-worktree`; copy refused; reads through the link denied on a live daemon, N683 to N685 open; release notes 009, 019; peer reply drafted, owner to send)
@@ -279,8 +279,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00592: worktree create undo releases initializing lock](Completed/00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - Complete at `fd7e894fa` (merge `c5c9deb82`) + `37d8d31e0` (main CI run 42739985119 success) + the archiving commit (GitHub #173, closed: the failed-add undo releases git's own `initializing` lock and removes the worktree and new branch; another lock is never overridden; leftovers are named in the error; release note 026)
 
 - [00591: claude md auto commit waits for handler sources](Completed/00591-claude-md-auto-commit-waits-for-handler-sources/PLAN.md) - Complete at `7e9a03f28` (merge `a9e0dacdb`; main CI run 42732895459 success) + the archiving commit (GitHub #172, closed: the restart auto-commit of CLAUDE.md is held while a plugin/project handler source is untracked or modified, logging the file; library handlers never hold it; release note 025)
-
-- [00590: daemon dir cd reads only command position](Completed/00590-daemon-dir-cd-reads-only-command-position/PLAN.md) - Complete at `fee5dc457` (merge `46cf5c71a`; main CI run 42724555662 success) + the archiving commit (GitHub #194, closed: R-DAEMON-DIR-CD blanks only `grep`/`rg` search arguments nothing can run, so a search for `"cd "` over a daemon path is allowed; every executing twin still denies; release note 024)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -337,15 +335,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 641 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 528 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 529 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 89 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 88 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 89 + 528 + 13 = **630 folders**, spanning
+- **Folder-to-number reconciliation**: 88 + 529 + 13 = **630 folders**, spanning
   **627 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

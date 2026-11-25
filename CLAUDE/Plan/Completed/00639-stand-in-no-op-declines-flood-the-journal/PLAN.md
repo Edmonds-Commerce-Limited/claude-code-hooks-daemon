@@ -1,6 +1,6 @@
 # Plan 00639: stand-in no-op declines flood the journal
 
-**Status**: In Progress
+**Status**: Complete at merge `71093289` (PR 267)
 **Created**: 2026-11-23
 **Owner**: joseph
 **Type**: Bug
@@ -47,7 +47,7 @@ that task gets a cross-link.
   produce one journal instruction, not two.
 - [x] ✅ **Task 1.3**: Implement the no-op check (compare against the last recorded decline) and the
   backoff; green.
-- [ ] ⬜ **Task 1.4**: Cross-link from Plan 00470 Task 5.2; release note; PR with independent
+- [x] ✅ **Task 1.4**: Cross-link from Plan 00470 Task 5.2; release note; PR with independent
   review and a green full CI run before merge.
 
 ### How it was built
@@ -76,10 +76,10 @@ the base delay until a human message resets it. Plan 00470 Task 5.2 already link
 
 ## Success Criteria
 
-- [ ] A no-op decline after the first writes no journal entry (test-pinned).
-- [ ] A ruling that changes something is still journalled.
-- [ ] Release note filed in the pending-release holding area (R-PLAN-DONE-HOLDING-AREA).
+- [x] A no-op decline after the first writes no journal entry (test-pinned by `test_an_unchanged_repeat_decline_writes_no_new_journal_entry`).
+- [x] A ruling that changes something is still journalled (the same test pins the directive's "changes anything" clause).
+- [x] Release note filed in the pending-release holding area (R-PLAN-DONE-HOLDING-AREA): release note 110 under `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
-- Filed from the Q65 relay. Directive rule and backoff built test-first on branch `plan-00639-stand-in-noop-no-journal`; review and CI pending.
+- Filed from the Q65 relay. Directive rule and backoff built test-first and merged as PR 267 (`71093289`). Two independent reviews: the first found the previous entry was read after this stop had overwritten it (the backoff never fired on the normal path), the second found the backoff cannot tell a repeated question from a new one and that the delay printed unrounded. All applied or stated in the plan; the final state was not re-reviewed. CI also caught the new fail-open handler tripping the `error_hiding` audit, fixed with `log_and_continue`.
