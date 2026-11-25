@@ -11,6 +11,7 @@ the real ``HandlerChain`` with both real handlers.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from claude_code_hooks_daemon.utils.owner_wait_check import (
     OwnerThread,
     ThreadKind,
 )
+from claude_code_hooks_daemon.utils.session_modes import declared_blocked_entry
 from claude_code_hooks_daemon.utils.stand_in_cron import stand_in_prompt
 from claude_code_hooks_daemon.utils.teamchat_seat import (
     ProbeReason,
@@ -151,6 +153,17 @@ def _run(
 
 
 class TestStandInSurvivesTheOwnerWaitDeny:
+    def test_a_repeat_awaiting_stop_asks_for_a_longer_stand_in_delay(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Plan 00639: the guard's own deny backs the stand-in off when no human came between."""
+        previous = declared_blocked_entry("lead", entered_at=time.time() - 3 * 3600)
+        pin_session_modes(monkeypatch, tmp_path / "modes", previous)
+        result = _run(_chain(_Bus(_stale())), tmp_path, [_assistant(AWAITING)])
+        assert result.decision is Decision.DENY
+        assert STAND_IN_HEADLINE in result.reason
+        assert "about 6 hours out" in result.reason
+
     def test_one_awaiting_stop_carries_both_requirements(self, tmp_path: Path) -> None:
         result = _run(_chain(_Bus(_stale())), tmp_path, [_assistant(AWAITING)])
         assert result.decision is Decision.DENY

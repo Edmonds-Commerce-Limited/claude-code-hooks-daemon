@@ -67,7 +67,11 @@ An independent review of the first version found this, and the callers now pass
 `previous_awaiting_human_entered_at(hook_input)` (read before the write) to `stand_in_requirement`. Tests:
 `tests/unit/utils/test_stand_in_backoff.py` (the delay function failed first on its missing import) and
 `TestARepeatedWaitBacksOffTheStandIn` in `tests/unit/handlers/stop/test_auto_continue_stop_stand_in.py`, which
-runs the real stop path from a real earlier entry. Plan 00470 Task 5.2 already links to this plan. Release note
+runs the real stop path from a real earlier entry, and a guard-path test in
+`test_owner_wait_stand_in_cooperation.py`. Known limit, found by the second independent review: the backoff keys
+on "no human message since the previous `[awaiting-human]` stop", not on the question being the same, because the
+daemon cannot read the question; a new question raised after the stand-in let work continue also waits longer than
+the base delay until a human message resets it. Plan 00470 Task 5.2 already links to this plan. Release note
 110 is filed.
 
 ## Success Criteria

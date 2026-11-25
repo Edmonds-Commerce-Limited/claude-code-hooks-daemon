@@ -37,6 +37,10 @@ class TestBackedOffDelayHours:
     def test_a_quick_repeat_never_goes_below_the_configured_delay(self) -> None:
         assert backed_off_delay_hours(3.0, previous_entered_at=_NOW - 0.1 * _HOUR, now=_NOW) == 3.0
 
+    def test_the_backoff_is_rounded_to_a_tenth_of_an_hour_for_the_instruction(self) -> None:
+        delay = backed_off_delay_hours(3.0, previous_entered_at=_NOW - 3.07 * _HOUR, now=_NOW)
+        assert delay == 6.1
+
     def test_the_backoff_stays_inside_the_marker_expiry(self) -> None:
         delay = backed_off_delay_hours(3.0, previous_entered_at=_NOW - 20 * _HOUR, now=_NOW)
         assert 3.0 < delay < MAX_STAND_IN_DELAY_HOURS

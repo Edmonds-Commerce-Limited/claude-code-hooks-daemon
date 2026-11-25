@@ -123,7 +123,7 @@ def backed_off_delay_hours(
     if previous_entered_at is None or previous_entered_at >= now:
         return delay_hours
     gap_hours = (now - previous_entered_at) / _SECONDS_PER_HOUR
-    return min(max(delay_hours, 2 * gap_hours), max(delay_hours, BACKOFF_CEILING_HOURS))
+    return min(max(delay_hours, round(2 * gap_hours, 1)), max(delay_hours, BACKOFF_CEILING_HOURS))
 
 
 def one_off_schedule(now: float, delay_hours: float) -> str:
