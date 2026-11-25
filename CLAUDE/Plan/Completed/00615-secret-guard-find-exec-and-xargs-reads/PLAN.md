@@ -1,6 +1,6 @@
 # Plan 00615: secret guard find exec and xargs reads
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -22,6 +22,13 @@ The secret guard exists so a protected file's contents never reach an agent by
 any route; a command that expands a path set and hands it to a reader is a
 route. This plan closes it test-first and fails closed.
 
+**Outcome**: the work was done under Plan 00618 Task 2.1, in `6301485f7` (red
+tests, `tests/unit/handlers/pre_tool_use/test_secret_file_guard_directory_readers.py`)
+and `d22224dc0` (the fix in `utils/recursive_search.py`, plus the corpus rows),
+and shipped in v3.75.0. This plan was never ticked at the time. Closed after
+re-running that test file on `main` (162 passed) and finding the one item
+missing: the operator-facing release note, now written as UNRELEASED note 111.
+
 ## Goals
 
 - `find ... -exec <reader> {} +`, `find ... -exec <reader> {} \;`,
@@ -39,24 +46,30 @@ route. This plan closes it test-first and fails closed.
 
 ### Phase 1: Defence
 
-- [ ] ⬜ **Task 1.1**: Failing tests for each `find -exec` and `xargs` form on
+- [x] ✅ **Task 1.1**: Failing tests for each `find -exec` and `xargs` form on
   synthetic fixtures only (a dummy protected-named file; never a real secret).
-- [ ] ⬜ **Task 1.2**: Add the forms to the dangerous-invocation corpus so a
-  future regression is caught by the corpus test.
+  Done in `6301485f7`.
+- [x] ✅ **Task 1.2**: Add the forms to the dangerous-invocation corpus. Done in
+  `d22224dc0` (`scripts/qa/dangerous-invocation-corpus.yaml`) for the `-exec +`
+  and `xargs` forms, recorded `UNCOVERED-accepted` there; the unit tests, not
+  the corpus, hold the behaviour, and the `\;`, `-execdir` and `-ok` forms have
+  no corpus row (the independent review of PR 270 found both).
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Treat a reader named as the `-exec` command, or as the
+- [x] ✅ **Task 2.1**: Treat a reader named as the `-exec` command, or as the
   command `xargs` runs, as a reader of every path the search root expands to,
-  and judge the root with the existing recursive-search rules.
-- [ ] ⬜ **Task 2.2**: Release note.
+  and judge the root with the existing recursive-search rules. Done in
+  `d22224dc0`.
+- [x] ✅ **Task 2.2**: Release note. UNRELEASED note 111 (this plan's closing
+  commit); v3.75.0 shipped the fix without one.
 
 ## Success Criteria
 
-- [ ] Each form has a test that failed before its fix.
-- [ ] Every pre-existing deny and allow still holds (the secret-guard suite is green).
-- [ ] Release-bound consequences recorded in the pending release notes.
+- [x] Each form has a test that failed before its fix (red in `6301485f7`, green in `d22224dc0`).
+- [x] Every pre-existing deny and allow still holds (the secret-guard suite is green).
+- [x] Release-bound consequences recorded in the pending release notes (UNRELEASED note 111).
 
 ## Delivery & Milestones
 
-- Found by the 00614 review; no delivery yet.
+- Found by the 00614 review. Fixed and shipped as part of Plan 00618 (v3.75.0); closed at the archiving commit.

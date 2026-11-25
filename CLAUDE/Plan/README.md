@@ -14,8 +14,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
-- [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
-
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
@@ -246,6 +244,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00617: park commit keeps merged branch deletable](Completed/00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - Complete at merge `01a13a600` (CI 43991958722 green) + the archiving commit (a branch left with only empty park commits is classified merged by one shared `branch_park.is_park_residue`; release note 091; peer-team notice left open)
 
+- [00615: secret guard find exec and xargs reads](Completed/00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Complete at the archiving commit (found by the 00614 review: `find -exec <reader>` and `find | xargs <reader>` over a directory holding a protected file are denied; fixed and shipped in v3.75.0 under Plan 00618 (`6301485f7` red tests, `d22224dc0` fix and corpus rows), closed here after re-running the 162 tests; release note 111)
+
 - [00612: secret guard dir glob false allows](Completed/00612-secret-guard-dir-glob-false-allows/PLAN.md) - Complete at merge `245b6d98f` + `fbbf9ca5f` (main CI 43862059384 green) + the archiving commit (POSIX bracket classes, symlinked directories and bare globs no longer let a recursive reader past `secret_file_guard`; release note 088)
 
 - [00609: tracked hook wrappers machine independent](Completed/00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Complete at merge `8ea7c03c6` (CI run 43822592185 green) + the archiving commit (generated wrappers resolve the checkout root at run time and carry no machine-specific path; the daemon publishes an overflowing socket location in a file the wrapper trusts only for its own checkout; an older `init.sh` PID-path boundary defect fixed in the same merge; release note 085)
@@ -277,8 +277,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00593: dependabot security lock bumps](Completed/00593-dependabot-security-lock-bumps/PLAN.md) - Complete at `d1d248e1d` + `cc6ace282` (main CI run 42769393325 green) + the archiving commit (open Dependabot alerts 77 to 18: nltk, anyio, virtualenv, urllib3, cryptography, idna bumped; filelock, mcp, opentelemetry-api held by the latest `safety`/`semgrep` pins; anyio's new `--anyio-mode` added to the full-QA blocker's option table; PR #193 closed)
 
 - [00592: worktree create undo releases initializing lock](Completed/00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - Complete at `fd7e894fa` (merge `c5c9deb82`) + `37d8d31e0` (main CI run 42739985119 success) + the archiving commit (GitHub #173, closed: the failed-add undo releases git's own `initializing` lock and removes the worktree and new branch; another lock is never overridden; leftovers are named in the error; release note 026)
-
-- [00591: claude md auto commit waits for handler sources](Completed/00591-claude-md-auto-commit-waits-for-handler-sources/PLAN.md) - Complete at `7e9a03f28` (merge `a9e0dacdb`; main CI run 42732895459 success) + the archiving commit (GitHub #172, closed: the restart auto-commit of CLAUDE.md is held while a plugin/project handler source is untracked or modified, logging the file; library handlers never hold it; release note 025)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -335,15 +333,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 641 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 529 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 530 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 88 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 87 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 88 + 529 + 13 = **630 folders**, spanning
+- **Folder-to-number reconciliation**: 87 + 530 + 13 = **630 folders**, spanning
   **627 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
