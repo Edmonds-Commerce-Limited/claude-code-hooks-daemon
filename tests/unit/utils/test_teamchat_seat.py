@@ -984,6 +984,6 @@ class TestTheModuleImportsCold:
             text=True,
             env=env,
             check=False,
-            timeout=120,
+            timeout=Timeout.QA_TEST_TIMEOUT,
         )
         assert result.returncode == 0, result.stderr[-2000:]
