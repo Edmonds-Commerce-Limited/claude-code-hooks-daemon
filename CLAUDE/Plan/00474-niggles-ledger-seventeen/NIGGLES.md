@@ -8681,3 +8681,13 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW. The upgrade already moves an existing entry to its new home; only the "you could enable this" suggestion is lost.
 
 **Status**: ⬜ Open. Decide whether the advisory should suggest the relocation target path instead of dropping the entry.
+
+### N743 — the destructive-git guard denies the words of a restore command printed by `printf`
+
+**Source**: Plan 00586, a teamchat report written with `printf '...' | teamchat report` that named the restore command in prose.
+
+**Evidence**: `printf 'Left: D ... and F (git restore of an empty working copy)\n' | teamchat report --team lts-ops` was denied with R-GIT-RESTORE, and the same message reworded to avoid the three words went through. The cause is not yet established. `test_destructive_git_printed_text.py` pins other printed-text shapes (echo, captured or formatted output); whether it covers a `printf` format string with a literal `\n` ahead of the words is for the reproduction to settle.
+
+**Severity**: LOW. It blocks a harmless report; the wording workaround is cheap.
+
+**Status**: ⬜ Open. Reproduce with the exact shape in `test_destructive_git_printed_text.py`, then judge a `printf` format string as printed text.

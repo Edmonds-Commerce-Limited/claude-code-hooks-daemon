@@ -143,9 +143,9 @@ class TestALinkedSelfInstallResolvesToTheProjectRoot:
         stdout = _run_script(linked_self_install_project)
         printed = _printed_manifests_dir(stdout)
         expected = linked_self_install_project / _MANIFESTS_SUBPATH
-        assert printed.resolve() == expected.resolve(), (
-            f"A self-install's manifests live at {expected}, but the script printed {printed}."
-        )
+        assert (
+            printed.resolve() == expected.resolve()
+        ), f"A self-install's manifests live at {expected}, but the script printed {printed}."
         assert printed.is_dir()
         run_state = re.search(r"^- Run state:\s+(?P<path>\S.*)$", stdout, re.MULTILINE)
         assert run_state is not None
