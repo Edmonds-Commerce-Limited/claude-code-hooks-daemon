@@ -46,6 +46,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00636: coordinator conduct advisories and board](00636-coordinator-conduct-advisories-and-board/PLAN.md) - In Progress (child (f) of 00630: B1/B4-B6 guidance and the retrospective's directives register, ask mirroring, ci-state, board, wind-down, carry-over, plus mkplan/find-plan fixes; depends on 00631)
 
+- [00641: release candidate branch lifecycle after release](00641-release-candidate-branch-lifecycle-after-release/PLAN.md) - Not Started (BUG, owner-named process defect: an RC branch is kept after its release on a "client seats may still track it" note no record backs, then blocks new branches; the release procedure names no step that retires it)
+
 - [00639: stand-in no-op declines flood the journal](00639-stand-in-no-op-declines-flood-the-journal/PLAN.md) - Not Started (BUG, owner Q65, next after the v2 PRs: a stand-in that declines with nothing changed must not write a journal entry each tick; evidence relayed, unverified; same defect as Plan 00470 Task 5.2's journal rule)
 
 - [00638: hooks screen install and missing binary surface](00638-hooks-screen-install-and-missing-binary-surface/PLAN.md) - Not Started (child of the 00523 line, context 00630: release deploy installs verified hooks-screen-<triple> to untracked/bin; missing binary surfaced to a person, not only decision.log)
@@ -335,28 +337,28 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 640 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 641 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 527 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 89 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 90 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 89 + 527 + 13 = **629 folders**, spanning
-  **626 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 90 + 527 + 13 = **630 folders**, spanning
+  **627 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **14** of the
-  640 allocated numbers with no folder on main: 00005, 00015, 00036, 00073, 00074,
+  641 allocated numbers with no folder on main: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325, 00611 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work), and 00611,
   filed only on an unmerged work branch (commit `833dcf072`).
-  626 + 14 = 640. ✅
+  627 + 14 = 641. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
