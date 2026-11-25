@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 _DONE_STATES = frozenset(
     {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
 )
+_SECONDS_PER_DAY = 86400
 #: Branches that are never a session's work, whatever the touch record says.
 _NEVER_JUDGED = frozenset({BranchState.EXEMPT, BranchState.BOT_OWNED, BranchState.PROTECTED})
 #: Default and integration lines: judged only with ``include_default``.
@@ -182,13 +183,18 @@ def _unpushed(
     return None if handed is None else not handed
 
 
-def _handed_over_by_park(repo: Path, record: BranchRecord) -> bool:
-    """Whether the tip is the branch's recorded, uncleared park.
+def _handed_over_by_park(
+    repo: Path, record: BranchRecord, config: BranchesConfig, budget: _Budget
+) -> bool:
+    """Whether the branch is parked and its tip is the parked commit or builds on it.
 
     A parked branch has been handed over with a reason, so its tip being on no
-    remote (a sub-agent cannot push, or the park was made with no push) is not
-    abandonment. New work after the park moves the tip off the record, so the
-    branch is judged again. An unreadable record is not a park.
+    remote (a sub-agent cannot push, or the push is refused) is not abandonment.
+    The park follows the branch while later commits land on top of the recorded
+    tip (Plan 00640): the recorded commit must be an ancestor of the current tip.
+    A tip that does not descend from it (rewritten or unrelated history), a park
+    older than the parked pool's ``max_age_days``, an unreadable record and a
+    failed ancestry check are all not a park: the branch is judged again.
     """
     try:
         park = read_park_record(repo, record.name)
@@ -200,7 +206,15 @@ def _handed_over_by_park(repo: Path, record: BranchRecord) -> bool:
             "as if unparked rather than waved through on a git failure",
         )
         return False
-    return park is not None and park.sha == record.local_tip
+    if park is None:
+        return False
+    if park.sha == record.local_tip:
+        return True
+    age_days = (time.time() - park.parked_at) / _SECONDS_PER_DAY
+    if age_days > config.effective_pool_max_age(Pool.PARKED):
+        return False
+    result = budget.git(repo, "merge-base", "--is-ancestor", park.sha, record.local_tip or "")
+    return result is not None and result.returncode == 0
 
 
 def _park_commands(record: BranchRecord) -> tuple[str, ...]:
@@ -371,7 +385,7 @@ def _judge_branch(
             )
         return findings, finished
     mode = config.stop_guard.unpushed_subagent if subagent and full else "block"
-    if mode == "off" or _handed_over_by_park(repo, record):
+    if mode == "off" or _handed_over_by_park(repo, record, config, budget):
         return findings, finished
     unpushed = _unpushed(repo, record, inventory, budget)
     finished = finished and unpushed is not None

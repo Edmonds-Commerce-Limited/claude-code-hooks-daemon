@@ -1,6 +1,6 @@
 # Plan 00640: branch stop guard unpushable branch exit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-25
 **Owner**: dev
 **Priority**: Medium
@@ -30,12 +30,12 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 
 ### Phase 1: Reproduce and decide
 
-- [ ] ⬜ **Task 1.1**: Write a failing unit test in `tests/unit/handlers/stop/test_branch_stop_guard.py` (or the core test for `branch_stop_guard`): a parked branch, then one more commit, then a stop. Today it is denied; the chosen rule says whether it should be.
-- [ ] ⬜ **Task 1.2**: Decide the rule with the owner's constraints in mind: a park that follows the branch (bounded by a recorded reason and a maximum age) versus a park pinned to a tip. Record the decision in the JOURNAL.
+- [x] ✅ **Task 1.1**: Write a failing unit test in `tests/unit/handlers/stop/test_branch_stop_guard.py` (or the core test for `branch_stop_guard`): a parked branch, then one more commit, then a stop. Today it is denied; the chosen rule says whether it should be.
+- [x] ✅ **Task 1.2**: Decide the rule with the owner's constraints in mind: a park that follows the branch (bounded by a recorded reason and a maximum age) versus a park pinned to a tip. Record the decision in the JOURNAL.
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Implement the chosen rule in `core/branch_stop_guard.py` and `core/branch_park.py`, test first.
+- [x] ✅ **Task 2.1**: Implement the chosen rule in `core/branch_stop_guard.py` and `core/branch_park.py`, test first.
 - [ ] ⬜ **Task 2.2**: Make the abandoned record and the deny text say what is true for a branch that only lacks a push.
 - [ ] ⬜ **Task 2.3**: Restart the daemon and verify live with an unpushable branch, then run targeted QA.
 
