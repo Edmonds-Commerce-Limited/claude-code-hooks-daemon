@@ -17,7 +17,8 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 
 ## Goals
 
-- A branch that is parked with a reason, and whose push is refused for access reasons, stays handed over while further commits land on it, until a human clears the park or the push succeeds.
+- A parked branch (the park rule applies to EVERY park, not only one whose push was refused; the motivating case is a push refused for access reasons) stays handed over while further commits land on it. The park ends when the branch is gone, its tip no longer builds on the parked commit (rewritten or unrelated history), a human clears it, or later commits sit on it and the park is older than the parked pool's `max_age_days`. A successful push ends nothing. A branch still AT the parked commit is not ended by age: the parked pool reports it STALE instead.
+- One shared rule (`park_covers_tip` in `core/branch_park.py`) is applied by the stop guard, the branch inventory, the creation pools and `announce_ended_parks`, so the surfaces cannot disagree.
 - The final abandoned record is not written for such a branch, and its wording does not call a branch with commits that only a push is missing "abandoned".
 - A reproduction test exists first and is shown failing.
 
@@ -37,7 +38,7 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 
 - [x] ✅ **Task 2.1**: Implement the chosen rule in `core/branch_stop_guard.py` and `core/branch_park.py`, test first.
 - [x] ✅ **Task 2.2**: Make the abandoned record and the deny text say what is true for a branch that only lacks a push. Also: `announce_ended_parks` follows the same ancestor rule (shared `park_covers_tip` in `core/branch_park.py`); release callout `CLAUDE/UPGRADES/UNRELEASED/release-notes/107-...` (numbered 107 because PR 251 holds 106).
-- [x] ✅ **Task 2.3**: Restart the daemon and verify live with an unpushable branch, then run targeted QA. Daemon restarted on the new code; a park recorded at `1bf547492` with the later commit `1e069f69d` on top was not named by the next stop. Targeted QA: 5109 changed tests passed; `magic_values` flags only literals outside this plan on `main` after the one this plan introduced was replaced; `changed_tests` lists three `[too-broad]` unmapped source files (`core/branch_park.py`, `daemon/cli.py`, `handlers/session_start/branch_sweep.py`) that need `--allow-unmapped` or a map rule.
+- [x] ✅ **Task 2.3**: Restart the daemon and verify live with an unpushable branch, then run targeted QA. Daemon restarted on the new code; a park recorded at `1bf547492` with the later commit `1e069f69d` on top was not named by the next stop. Targeted QA: 5109 changed tests passed; `magic_values` flags only literals outside this plan on `main` after the one this plan introduced was replaced; `changed_tests` lists three `[too-broad]` unmapped source files (`core/branch_park.py`, `daemon/cli.py`, `handlers/session_start/branch_sweep.py`). A map rule cannot clear `too-broad` (`CLAUDE/QA.md`, "The Unmapped and Too-Broad Fallback"); CI already leaves `changed_tests` out and runs the whole suite in the fallback job for such a change.
 
 ## Success Criteria
 
@@ -45,9 +46,9 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 - [x] A parked, unpushable branch with later commits does not produce the three-block cycle or an abandoned record (live check, Task 2.3).
 - [x] An unparked unpushed branch is still denied: `test_unparked_branch_is_still_denied` in `tests/unit/core/test_branch_stop_guard.py` passes; not re-run live.
 - [x] Release-bound consequences: recorded in the pending-release holding area as release note 107.
-- [ ] PR 255 is merged, and the plan is then flipped to Complete and archived in that same step.
+- [ ] PR 255 is merged; the plan is then flipped to Complete and moved to `Completed/` (with its README row) in a separate commit after the merge.
 
 ## Delivery & Milestones
 
 - Defect logged by seat 5 (lts-ops).
-- Implemented and verified on branch `fix-ccy-dockerfile-arm64-dart`, delivered by PR 255 (commits `c5c29e2d6`, `1bf547492`, `c99e7f9fb`). The plan is complete when PR 255 merges: the archive move to `Completed/` ships with that merge.
+- Implemented and verified on branch `fix-ccy-dockerfile-arm64-dart`, delivered by PR 255 (commits `c5c29e2d6`, `1bf547492`, `c99e7f9fb`). The plan is complete when PR 255 merges; the status flip and the archive move to `Completed/` are not in this PR and follow the merge.
