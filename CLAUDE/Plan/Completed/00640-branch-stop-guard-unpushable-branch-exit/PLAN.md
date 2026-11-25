@@ -1,6 +1,6 @@
 # Plan 00640: branch stop guard unpushable branch exit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-25
 **Owner**: dev
 **Priority**: Medium
@@ -46,9 +46,9 @@ The fix must keep what the guard is for: work that is neither pushed nor deliber
 - [x] A parked, unpushable branch with later commits does not produce the three-block cycle or an abandoned record (live check, Task 2.3).
 - [x] An unparked unpushed branch is still denied: `test_unparked_branch_is_still_denied` in `tests/unit/core/test_branch_stop_guard.py` passes; not re-run live.
 - [x] Release-bound consequences: recorded in the pending-release holding area as release note 107.
-- [ ] PR 255 is merged; the plan is then flipped to Complete and moved to `Completed/` (with its README row) in a separate commit after the merge.
+- [x] PR 255 is merged (Complete at merge `cf2fdb17a`); the plan is flipped to Complete and moved to `Completed/` with its README row in the archiving commit.
 
 ## Delivery & Milestones
 
 - Defect logged by seat 5 (lts-ops).
-- Implemented and verified on branch `fix-ccy-dockerfile-arm64-dart`, delivered by PR 255 (commits `c5c29e2d6`, `1bf547492`, `c99e7f9fb`). The plan is complete when PR 255 merges; the status flip and the archive move to `Completed/` are not in this PR and follow the merge.
+- Implemented and verified on branch `fix-ccy-dockerfile-arm64-dart`, delivered by PR 255 (commits `c5c29e2d6`, `1bf547492`, `c99e7f9fb`). PR 255 merged to main as `cf2fdb17a`; the status flip and the move to `Completed/` followed in a separate commit.
