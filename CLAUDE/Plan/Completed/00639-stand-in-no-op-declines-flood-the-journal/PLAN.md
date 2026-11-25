@@ -59,7 +59,7 @@ Task 1.2 became a test on the directive, `test_an_unchanged_repeat_decline_write
 failed first; the directive now says an unchanged repeat decline gets no new entry and a ruling that changes
 anything is always journalled. Task 1.3's backoff is code: `backed_off_delay_hours` schedules the next stand-in
 at twice the gap since the previous `[awaiting-human]` stop while that entry is still live (so no human message
-came between), capped at 23 hours and never below the configured delay. The registry replaces the entry on each
+came between), capped at the larger of 23 hours and the configured delay, and never below the configured delay. The registry replaces the entry on each
 stop, so its `entered_at` is the previous stop's time, which makes the doubling need no stored counter. The
 previous entry must be read BEFORE the stop writes its own: `auto_continue_stop` writes the marker and then asks
 for the stand-in, so a read inside `stand_in_requirement` saw only the entry just written and never backed off.
