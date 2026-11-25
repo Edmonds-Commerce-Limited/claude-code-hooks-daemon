@@ -938,18 +938,15 @@ def _lift_stale_marks_of_kept_branches(repo: Path, records: Mapping[str, BranchR
     # Function-local: branch_creation imports this module at load time.
     from claude_code_hooks_daemon.core.branch_creation import (
         LABELS_RELATIVE_PATH,
-        clear_label_stale_at_tips,
+        clear_label_stale,
     )
 
-    kept_tips = {
-        tip
-        for record in records.values()
-        if record.kept_reason is not None and not record.stale
-        for tip in (record.local_tip, record.remote_tip)
-        if tip is not None
-    }
-    if kept_tips:
-        clear_label_stale_at_tips(repo / LABELS_RELATIVE_PATH, kept_tips)
+    # By name, never by tip: a keep is a note on one tip, and a local and a remote
+    # copy of a branch can sit at different tips, so clearing every label at either
+    # tip would also lift the mark of an unkept branch that merely shares one.
+    for name, record in records.items():
+        if record.kept_reason is not None and not record.stale:
+            clear_label_stale(repo / LABELS_RELATIVE_PATH, name)
 
 
 def clean_sweep(

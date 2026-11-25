@@ -17,8 +17,11 @@ from claude_code_hooks_daemon.core.branch_creation import (
     LABELS_RELATIVE_PATH,
     write_labels,
 )
+from claude_code_hooks_daemon.core.branch_inventory import Pool
 from claude_code_hooks_daemon.core.branch_keep import keep_branch
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_branch_preflight
+
+_SECONDS_PER_DAY = 86_400
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -174,6 +177,61 @@ def test_a_keep_fetched_by_the_sweep_lifts_the_stale_mark_preflight_reads(
         remote=True,
     )
     assert _run(work, "fresh") == 0, capsys.readouterr().out
+
+
+def test_a_lapsed_keep_fetched_by_the_sweep_does_not_lift_the_stale_mark(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A keep older than branches.merged.max_age_days is stale again, so the guard still refuses."""
+    work, other, tip = _clone_with_merged_remote_branch(tmp_path)
+    branches = Config.load_or_default(work / ".claude" / "hooks-daemon.yaml").branches
+    _stale_snapshot(work, tip)
+    max_age_days = branches.effective_pool_max_age(Pool.MERGED)
+    lapsed_at = time.time() - (max_age_days + 1) * _SECONDS_PER_DAY
+    keep_branch(
+        other, [tip], reason="clients ran this rc", remote="origin", user="Tess", now=lapsed_at
+    )
+    clean_sweep(work, branches, dry_run=True, remote=True)
+    assert _run(work, "fresh") == EXIT_CREATION_REFUSED, capsys.readouterr().out
+    assert RuleID.BRANCH_MERGED_POOL in capsys.readouterr().out
+
+
+def test_a_keep_on_one_branch_does_not_lift_the_mark_of_an_unkept_sibling_at_its_old_tip(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A local rc/1.0 behind the remote copy shares its tip with an unkept branch.
+
+    The keep is on the remote tip. Clearing labels by tip would also clear the
+    unkept branch's mark, so the guard would admit a branch the sweep would delete.
+    """
+    work, other, tip = _clone_with_merged_remote_branch(tmp_path)
+    old_tip = _git(work, "rev-parse", "main~1")
+    _git(work, "branch", "rc/1.0", old_tip)
+    _git(work, "branch", "unkept-sibling", old_tip)
+    write_labels(
+        work / LABELS_RELATIVE_PATH,
+        [
+            {
+                "name": name,
+                "group": "merged",
+                "action": "delete",
+                "stale": True,
+                "local_tip": old_tip,
+                "remote_tip": remote_tip,
+            }
+            for name, remote_tip in (("rc/1.0", tip), ("unkept-sibling", None))
+        ],
+    )
+    keep_branch(
+        other, [tip], reason="clients run this rc", remote="origin", user="Tess", now=time.time()
+    )
+    clean_sweep(
+        work,
+        Config.load_or_default(work / ".claude" / "hooks-daemon.yaml").branches,
+        dry_run=True,
+        remote=True,
+    )
+    assert _run(work, "fresh") == EXIT_CREATION_REFUSED, capsys.readouterr().out
 
 
 def test_a_non_git_directory_is_an_error(tmp_path: Path) -> None:
