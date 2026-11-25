@@ -54,8 +54,14 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ### Phase 1: Verify and fix (one task per defect, independent)
 
-- [ ] ⬜ **Task 1.1 (A)**: Reproduce: list every handler `check-config-migrations` can recommend and compare it with
-  the registered handlers. RED test, then fix the source of the recommendation. Check Plan 00420 first
+- [x] ✅ **Task 1.1 (A)**: Reproduced: of 186 handler-key suggestions across the 61 manifests, 7 named a handler
+  the registry no longer has (`plan_completion_advisor`, `task_tdd_advisor`, `hedging_language_detector`,
+  `working_directory`, `current_time`, `upgrade_approval_guard`, `branch_count_advisor`). Plan 00420 is Not Started
+  and does not cover it. RED tests in `test_config_migrations_gone_handlers.py` (3 failed, 4 controls passed);
+  GREEN with `handler_key_is_gone` in `handler_key_audit.py`, applied to `added` and `changed` entries in
+  `generate_migration_advisory`. A name the audit does not classify (retired, relocated, wrong event) stays
+  suggested, since it may be a project handler; `branch_count_advisor` falls in that gap and stays suggested.
+  Release note 113
 
 - [ ] ⬜ **Task 1.2 (B)**: Reproduce with a config holding `daemon.languages: []`. Fact-check: plausibly real, the
   two readers disagree (`core/relevance.py` treats `[]` as an empty set, `core/apply_once.py` treats it as unset).

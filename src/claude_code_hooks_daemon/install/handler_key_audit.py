@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.handlers import (
@@ -223,6 +223,33 @@ def audit_handler_keys(config: dict[str, Any]) -> list[HandlerKeyFinding]:
             if finding is not None:
                 findings.append(finding)
     return findings
+
+
+#: Finding kinds that prove a handler is gone from where a manifest put it. `unknown` is
+#: not one of them: the name may be a project or plugin handler.
+_GONE_KINDS: Final[frozenset[str]] = frozenset({"retired", "relocated", "wrong_event"})
+
+
+def handler_key_is_gone(key: str) -> bool:
+    """Whether a dotted config key sits under a handler the registry has since dropped.
+
+    True for ``handlers.<event>.<name>`` (and anything below it) when ``<name>`` is not
+    registered for that real event and the audit classifies it as retired, relocated or
+    registered under another event. False for every other key: a registered handler, a name
+    the audit does not recognise, a placeholder event, and anything outside ``handlers``.
+
+    Args:
+        key: A dotted config key from a migration manifest.
+    """
+    parts = key.split(".")
+    if len(parts) < 3 or parts[0] != _HANDLERS:
+        return False
+    event, name = parts[1], parts[2]
+    by_event = _registered_keys_by_event()
+    if event not in by_event or name in by_event[event]:
+        return False
+    finding = _classify(event, name, by_event, _pseudo_event_keys())
+    return finding is not None and finding.kind in _GONE_KINDS
 
 
 def format_findings(findings: list[HandlerKeyFinding]) -> list[str]:

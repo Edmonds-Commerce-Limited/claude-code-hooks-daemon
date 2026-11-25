@@ -24,6 +24,7 @@ import yaml
 from claude_code_hooks_daemon.install.handler_key_audit import (
     HandlerKeyFinding,
     audit_handler_keys,
+    handler_key_is_gone,
 )
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.report_offload import (
@@ -622,7 +623,11 @@ def generate_migration_advisory(
                 )
 
         # Added keys: suggest if user doesn't have them yet
+        # A handler a later release retired, relocated or moved to another event is not
+        # recommended: the manifest is history, the registry is the present.
         for added in manifest.config_changes.added:
+            if handler_key_is_gone(added.key):
+                continue
             if not _key_present_in_config(added.key, user_config):
                 suggestions.append(
                     AdvisorySuggestion(
@@ -647,6 +652,8 @@ def generate_migration_advisory(
         # explicit override is worth a nudge. An entry with a maximum (a new
         # upper bound) tells only a config holding a larger number.
         for changed in manifest.config_changes.changed:
+            if handler_key_is_gone(changed.key):
+                continue
             current_value = _get_value_at_key(changed.key, user_config)
             if changed.maximum is not None:
                 if _exceeds(current_value, changed.maximum):
