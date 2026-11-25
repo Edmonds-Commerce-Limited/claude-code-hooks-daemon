@@ -67,6 +67,20 @@ class TestReadProcessCwds:
         reading = read_process_cwds(proc_root=proc, own_pid=999)
         assert reading.unreadable == (52,)
 
+    def test_a_gpg_agent_is_not_an_unreadable_process_either(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        (proc / "61" / "cwd").mkdir(parents=True)
+        (proc / "61" / "comm").write_text("gpg-agent\n", encoding="utf-8")
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.unreadable == ()
+
+    def test_a_pid_with_no_readable_comm_stays_unreadable(self, tmp_path: Path) -> None:
+        """Without a comm to name the process, the fail-closed rule still applies."""
+        proc = tmp_path / "proc"
+        (proc / "71" / "cwd").mkdir(parents=True)  # cwd unreadable, and no comm file at all
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert reading.unreadable == (71,)
+
     def test_skips_its_own_pid(self, tmp_path: Path) -> None:
         proc = tmp_path / "proc"
         (proc / "7").mkdir(parents=True)

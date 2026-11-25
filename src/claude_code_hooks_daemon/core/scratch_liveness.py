@@ -75,9 +75,11 @@ def read_process_cwds(
     """pid -> working directory from ``<proc_root>/<pid>/cwd``, naming each pid that failed.
 
     Unlike ``worktree_reaping.default_process_cwds``, a pid is skipped only when
-    it has exited (its ``cwd`` link is gone); any other failure, permission
-    included, is reported, because an unread process may be sitting in the
-    entry. The link is read, not followed, so a deleted directory still reads.
+    it has exited (its ``cwd`` link is gone) or is a known non-dumpable agent
+    (``NON_DUMPABLE_AGENT_COMMS``) whose ``cwd`` the kernel hides; any other
+    failure, permission included, is reported, because an unread process may
+    be sitting in the entry. The link is read, not followed, so a deleted
+    directory still reads.
     No ``proc_root`` at all (a non-Linux host) reads nothing; the sweep treats
     an empty map as liveness unknown.
     """
@@ -102,11 +104,11 @@ def read_process_cwds(
                 level=logging.DEBUG,
             )
             continue
-        except OSError:
+        except OSError as exc:
             if _is_non_dumpable_agent(entry):
                 log_and_continue(
                     logger,
-                    OSError(pid),
+                    exc,
                     reason=f"process {pid} is a non-dumpable agent whose cwd the kernel hides",
                     level=logging.DEBUG,
                 )
