@@ -49,9 +49,11 @@ missing: the operator-facing release note, now written as UNRELEASED note 111.
 - [x] ✅ **Task 1.1**: Failing tests for each `find -exec` and `xargs` form on
   synthetic fixtures only (a dummy protected-named file; never a real secret).
   Done in `6301485f7`.
-- [x] ✅ **Task 1.2**: Add the forms to the dangerous-invocation corpus so a
-  future regression is caught by the corpus test. Done in `d22224dc0`
-  (`scripts/qa/dangerous-invocation-corpus.yaml`).
+- [x] ✅ **Task 1.2**: Add the forms to the dangerous-invocation corpus. Done in
+  `d22224dc0` (`scripts/qa/dangerous-invocation-corpus.yaml`) for the `-exec +`
+  and `xargs` forms, recorded `UNCOVERED-accepted` there; the unit tests, not
+  the corpus, hold the behaviour, and the `\;`, `-execdir` and `-ok` forms have
+  no corpus row (the independent review of PR 270 found both).
 
 ### Phase 2: Fix
 
