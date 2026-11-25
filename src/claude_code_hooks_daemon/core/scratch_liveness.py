@@ -103,8 +103,32 @@ def read_process_cwds(
             )
             continue
         except OSError:
+            if _is_non_dumpable_agent(entry):
+                log_and_continue(
+                    logger,
+                    OSError(pid),
+                    reason=f"process {pid} is a non-dumpable agent whose cwd the kernel hides",
+                    level=logging.DEBUG,
+                )
+                continue
             unreadable.append(pid)
     return ProcessCwdReading(cwds, tuple(sorted(unreadable)), open_paths)
+
+
+#: Processes that mark themselves non-dumpable, so without CAP_SYS_PTRACE the
+#: kernel refuses even root their ``cwd``, ``fd`` and ``maps``. They are
+#: key-holding daemons that never work inside a scratch entry; one of them
+#: must not leave every sweep and worktree evacuation "incomplete" for ever.
+NON_DUMPABLE_AGENT_COMMS = frozenset({"ssh-agent", "gpg-agent"})
+
+
+def _is_non_dumpable_agent(proc_entry: Path) -> bool:
+    """True when ``<proc>/<pid>/comm`` (world-readable) names a known non-dumpable agent."""
+    try:
+        comm = (proc_entry / "comm").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return comm in NON_DUMPABLE_AGENT_COMMS
 
 
 #: What the kernel appends to a descriptor link whose file has been unlinked.
@@ -239,6 +263,7 @@ def entry_liveness(
 
 __all__ = [
     "COMMAND_KEY",
+    "NON_DUMPABLE_AGENT_COMMS",
     "PROC_ROOT",
     "BackgroundRecords",
     "LivenessInputs",
