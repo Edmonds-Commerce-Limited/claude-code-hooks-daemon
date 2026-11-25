@@ -86,16 +86,15 @@ class RelevanceContext:
             project_root: The repository root the review runs against.
             declared_languages: The project's ``daemon.languages`` config,
                 when set. A declaration is authoritative over detection —
-                that is what the setting exists for.
+                that is what the setting exists for. An empty list is unset,
+                as the handler language filter reads it, so detection applies.
             teams_declared: Whether the project declares teamchat seats
                 (``team_seat.teams_in_use``, Plan 00474). Carried here
                 because the review builds handlers bare, with no config
                 injected.
         """
-        if declared_languages is not None:
-            languages = frozenset(language.lower() for language in declared_languages)
-        else:
-            languages = detect_languages(project_root)
+        declared = frozenset(language.lower() for language in declared_languages or ())
+        languages = declared or detect_languages(project_root)
         return cls(project_root=project_root, languages=languages, teams_declared=teams_declared)
 
     def has_file(self, *parts: str) -> bool:
