@@ -366,7 +366,8 @@ own branch and is merged into the RC under the same push rules.
 
 **Ending an RC.** The next `/release` ships the RC's reviewed content. Once
 that tag is published, every RC seat is told to return to stable, and the RC
-branch is deleted (it is merged, so the remote delete is allowed).
+branch is deleted (it is merged, so the remote delete is allowed): that is
+[Step 15.2](#step-152-retire-the-released-rc-branch).
 
 ## 🚨 Review Early, Never Drop Findings (Plan 00157)
 
@@ -1418,6 +1419,35 @@ merge freeze lifts with it.
 ### Step 15.1: Housekeeping phase, post-release items
 
 Run the post-release list in [Housekeeping Phase](#housekeeping-phase-every-release).
+
+### Step 15.2: Retire the released RC branch
+
+The prose rule is in [Release candidate branches](#release-candidate-branches-beta-testing)
+("Ending an RC"); this step carries it out. If a branch `rc/X.Y.Z` exists for the
+version just released, it is retired now, in one of two ways. A merged RC left
+standing is counted by the branch pools until someone removes it.
+
+```bash
+git ls-remote --heads origin "rc/X.Y.Z"   # empty output: there is no RC, nothing to do
+```
+
+1. **Delete it** (the default). The tag is published, so the RC's content is on the
+   default branch and the proof is "merged". The command prints the restore line:
+
+   ```bash
+   bin/hooks-daemon delete-branch --remote-only rc/X.Y.Z
+   ```
+
+2. **Keep it, with a reason that ends.** Only when the owner says a client seat still
+   tracks it. Record the date or event that ends the keep, because
+   `branches.merged.max_age_days` ages a keep from the day it was written, not from
+   that event:
+
+   ```bash
+   bin/hooks-daemon branch-keep rc/X.Y.Z --reason "seat <name> tracks it until <date>; delete then"
+   ```
+
+Report which of the two was done, and the restore line when it was deleted.
 
 ## Housekeeping Phase (every release)
 
