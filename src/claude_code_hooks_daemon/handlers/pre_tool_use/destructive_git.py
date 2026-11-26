@@ -61,7 +61,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
-from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir, path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -858,7 +858,7 @@ def _restore_loss(run: GitInvocation, cwd: Path) -> str | None:
         if _NOT_A_LITERAL_PATH.search(name):
             return f"`{name}` is not one literal file name"
         target = directory / name
-        if target.is_symlink() or not target.is_file():
+        if target.is_symlink() or not path_is_file(target, unreadable_means=False):
             return f"`{name}` is not a regular file"
         if target.stat().st_size != 0:
             return f"`{name}` holds content that the restore would discard"
