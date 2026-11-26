@@ -9,6 +9,7 @@ One ``git rev-list <tips> --not <holders>`` answers for many tips at once: a tip
 some holder reaches is subtracted, so a tip still printed is held by nothing.
 """
 
+import logging
 import subprocess
 import time
 from collections.abc import Callable, Collection, Sequence
@@ -17,6 +18,8 @@ from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import git_deadline, run_git
+
+logger = logging.getLogger(__name__)
 
 #: Every ref namespace whose refs survive a branch deletion and hold commits.
 ALL_HOLDERS: Final[tuple[str, ...]] = ("refs/heads", "refs/remotes", "refs/tags")
@@ -139,7 +142,11 @@ def patch_held_tips(
                         and remote_branch_proof.holds_net_change(top_level, ref, tip)
                         and remote_branch_proof.gitlink_change_held(top_level, ref, tip)
                     )
-                except (remote_branch_proof.ProofUnavailableError, subprocess.CalledProcessError):
+                except (
+                    remote_branch_proof.ProofUnavailableError,
+                    subprocess.CalledProcessError,
+                ) as error:
+                    logger.warning("patch proof for %s against %s unavailable: %s", tip, ref, error)
                     proven = False
                 if proven and clock() < deadline:
                     held.add(tip)
