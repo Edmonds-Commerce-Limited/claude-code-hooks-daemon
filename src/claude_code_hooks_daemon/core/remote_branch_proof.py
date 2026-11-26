@@ -256,6 +256,12 @@ def _surviving_holder(
         timeout=Timeout.GIT_CONTEXT,
     )
     if held.returncode != 0:
+        logger.warning(
+            "git for-each-ref --contains %s failed (exit %s): no surviving holder is read, so the "
+            "branch is left to the other proof tiers",
+            tip,
+            held.returncode,
+        )
         return None
     for ref in sorted(held.stdout.splitlines()):
         if (
