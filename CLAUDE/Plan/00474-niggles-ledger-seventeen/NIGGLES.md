@@ -8758,3 +8758,13 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Severity**: LOW: renaming the identifier works round it. It makes tests about vault handling awkward to name.
 
 **Status**: ⬜ Open. Same family as N744. Decide with the owner whether an identifier-shaped token (no `/`, no leading `.`) should need to name an existing file before `*vault_pass*` denies it, as `*.secret*` already does.
+
+### N750 — `hooks-daemon delete-branch` refuses a branch that exists only on the remote
+
+**Source**: the fedora-desktop seat, relayed by the coordinator on 2026-11-26 07:41Z. Second-hand: not reproduced here.
+
+**Evidence**: `delete-branch <name>` for a branch with no local ref is refused with "does not resolve to a local branch", so it never measures the branch and cannot prove a remote-only branch empty; every such delete then falls to a human. The R-GIT-PUSH-DELETE-REMOTE guidance names `delete-branch --remote-only <name>` as the route for exactly this case, so the report may be a call without that flag, or the flag path may share the local-resolve step. The exact command and output were not supplied.
+
+**Severity**: LOW to MEDIUM: remote-only branches pile up and only a human can delete them.
+
+**Status**: ⬜ Open, awaiting the seat's exact command and output. Reproduce first with a throwaway pushed branch and `--remote-only`, then fix test-first. No public issue without the owner.
