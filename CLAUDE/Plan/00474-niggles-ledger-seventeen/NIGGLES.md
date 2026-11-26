@@ -8774,3 +8774,39 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Seat detail** (2026-11-26 07:44Z, checked by the seat): on its v3.76.0 daemon, `delete-branch --remote-only --dry-run <names>` fails with "unrecognized arguments: --remote-only" (exit 2) and `--help` lists only `--protected-ref`, `--dry-run` and `--format`; without the flag the command refuses a remote-only branch.
 
 **Status**: ✅ Explained, not a defect on main (2026-11-26). `bin/hooks-daemon delete-branch --help` on main lists `--remote-only` (commit `4a152fd2c`, 2026-11-15, "leased route to a proven remote delete"), and no release tag contains that commit, so the flag is unreleased. The seat's daemon predates it, and without the flag the refusal is the documented local-only behaviour. The remedy is the next release; no code change. The release-readiness question (a user-facing release note for the flag) is for the release owner.
+
+### N751 — a LOCAL branch contained in another surviving ref cannot be deleted by `delete-branch`
+
+**Source**: the fedora-desktop seat, 2026-11-26 08:07Z (checked by the seat, v3.76.0).
+
+**Evidence**: `delete-branch --dry-run --protected-ref origin/v2-smoke <branches>` was refused with "--protected-ref origin/v2-smoke is not the default branch or a declared integration line, so it cannot prove a deletion safe". The branches (v2-smoke-u2 to u9 and an agent branch) are each an ancestor of `origin/v2-smoke`, or differ only by an empty park commit. The proof accepts only the default or a declared integration line, so a long-lived branch the owner would call surviving does not count.
+
+**Severity**: MEDIUM: under the owner's Q14 ruling (any branch contained in a surviving branch is safe to delete) these deletes fall to a human.
+
+**Status**: ⬜ Open. Q14 (PR 283) covers the REMOTE delete proof only. Fix: let the local delete proof accept a named surviving ref that the same command does not delete, ancestry proved by the guard, test first. An integration line declared in config also works today as a stopgap.
+
+### N752 — removing a clean worktree whose detached HEAD is patch-equivalent to a surviving commit is refused, and the guard's way out is closed
+
+**Source**: the fedora-desktop seat, 2026-11-26 08:07Z (checked by the seat, v3.76.0).
+
+**Evidence**: removing the clean worktree `untracked/wt-b6` was denied by R-GIT-WORKTREE-REMOVE-FORCE ("HEAD would lose 1 commit"). Commit 11e53856c is patch-equivalent to one in `origin/v2-smoke` (`git cherry` shows "-"). The guard offers `switch -c <name>`, which R-BRANCH-WIP-CAP refuses at 12 of 12 branches, so no permitted route remains.
+
+**Severity**: MEDIUM: a closed loop between two guards, with no human-free exit.
+
+**Status**: ⬜ Open. Fix: treat a HEAD whose patch is already held by a surviving ref as held (the same patch-equivalence the branch proof uses), test first; and have the deny name a route that the WIP cap does not refuse.
+
+### N753 — `git checkout <commit> -- <path>` is denied as discarding changes when the path does not exist locally
+
+**Source**: the fedora-desktop seat, 2026-11-26 08:47Z (checked by the seat, v3.76.0).
+
+**Evidence**: `git checkout efb4593dc -- <a plan subagent-report path>` was denied by R-GIT-CHECKOUT-DISCARD ("discards local changes") although the path was absent from the working tree and the index, so nothing local could be lost. `git restore --source` is denied by R-GIT-RESTORE, so the guard leaves no git route to bring one file from another commit. The seat worked round it with `git show <commit>:<path>` and the Write tool.
+
+**Severity**: LOW to MEDIUM: a false positive with a clumsy workaround; same family as the empty-file restore allowed in Plan 00586 (PR 276).
+
+**Status**: ⬜ Open. Fix: allow it when every named path is absent from the worktree and the index, or `git diff --quiet -- <paths>` is clean, test first. Shapes to pin: a bypass through a chained command, a path that is a directory, a glob, and a path that exists with changes (must still deny).
+
+### N744 reopened — the secret-file guard's message-body half is a usability defect
+
+**Source**: the coordinator and the laptop host seat, 2026-11-26 08:10Z: a piped chat message that happens to hold a protected-name pattern is denied as a whole, four times that day, and each sender loses the message. The coordinator asked for a reopening; N749 is the same cost from a code file.
+
+**Status**: ⬜ Reopened as a usability defect (supersedes the "as designed" half of N744). Proposal, built as an UNMERGED proposal PR for the owner (it changes a guard documented as deliberately broad, and only a human may lift protection): judge only path-like arguments and redirect targets of a message-sink command (`teamchat` `say`, `reply`, `report`, `thread`, the ask verb, `close`, `retitle`), never the text piped to stdin; apply N749's narrowing to the underscore patterns; keep the deny text naming glob and token and add the token class. Residual risk to state to the owner: a sink that echoes its stdin to a file is not covered (teamchat does not). The coordinator will put one owner question covering this and the release.
