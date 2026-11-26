@@ -27,7 +27,10 @@ from __future__ import annotations
 import logging
 import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
-from collections.abc import Iterator, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
@@ -252,6 +255,33 @@ def _child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
     }
 
 
+#: ``(absolute deadline, clock)`` while a :func:`git_deadline` block is active.
+_DEADLINE: ContextVar[tuple[float, Callable[[], float]] | None] = ContextVar(
+    "git_deadline", default=None
+)
+
+
+@contextmanager
+def git_deadline(until: float, clock: Callable[[], float] = time.monotonic) -> Iterator[None]:
+    """Bound every :func:`run_git` call made inside the block by one wall-clock deadline.
+
+    ``until`` is an absolute reading of ``clock``. Each call's timeout becomes the
+    smaller of its own and the time left; once the time is gone a call spawns nothing
+    and reports ``GIT_TIMED_OUT``, which every caller already reads as "git could not
+    answer" (fail closed). This bounds a proof built from many calls, each with its own
+    limit, that the per-call limits alone do not. A block nested inside another on the
+    same clock keeps the earlier deadline, so an inner block can tighten but never widen.
+    """
+    outer = _DEADLINE.get()
+    if outer is not None and outer[1] is clock and outer[0] < until:
+        until = outer[0]
+    token = _DEADLINE.set((until, clock))
+    try:
+        yield
+    finally:
+        _DEADLINE.reset(token)
+
+
 def run_git(
     cwd: Path,
     *args: str,
@@ -282,6 +312,12 @@ def run_git(
     """
     argv = ["git", "-C", str(cwd), *args]
     child_env = _child_environment(env)
+    active = _DEADLINE.get()
+    if active is not None:
+        remaining = active[0] - active[1]()
+        if remaining <= 0:
+            return subprocess.CompletedProcess(argv, GIT_TIMED_OUT, "", "git deadline exhausted")
+        timeout = min(timeout, remaining)
     try:
         return subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
             argv,

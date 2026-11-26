@@ -8793,7 +8793,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: a closed loop between two guards, with no human-free exit.
 
-**Status**: ⬜ Open. Fix: treat a HEAD whose patch is already held by a surviving ref as held (the same patch-equivalence the branch proof uses), test first; and have the deny name a route that the WIP cap does not refuse.
+**Status**: ✅ Fixed (branch niggle-n752-worktree-head-patch-held). A worktree HEAD no surviving ref reaches is now also checked with `force_removal.patch_held_tips`: some surviving ref (branch, remote-tracking or tag, minus refs the same command deletes) must be `patch_equivalent` to it, hold its net change and pass the gitlink check, else it stays denied. The deny advice now names `git -C <worktree> tag <name>` (a tag is a surviving ref and not a branch, so the WIP cap does not apply) instead of `switch -c`. Tests in `TestWorktreeHeadHeldByPatch` pin the allow, a real unheld commit, a dirty worktree, unregenerable ignored content, and deleting the holder in the same command. Release note 120.
 
 ### N753 — `git checkout <commit> -- <path>` is denied as discarding changes when the path does not exist locally
 
