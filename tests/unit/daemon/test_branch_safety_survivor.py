@@ -77,6 +77,71 @@ def test_a_local_branch_inside_a_pushed_long_lived_branch_is_remote_held(repo: P
     assert verdict.refusal is None
 
 
+def _smoke_with_branch_on_top(repo: Path, name: str, *, empties: int, then_work: bool) -> None:
+    """Push `v2-smoke`; make `name` at its tip plus `empties` empty commits (then real work)."""
+    _git(repo, "checkout", "-q", "-b", "v2-smoke")
+    _commit(repo, "smoke")
+    _git(repo, "push", "--quiet", "origin", "v2-smoke")
+    _git(repo, "checkout", "-q", "-b", name)
+    for index in range(empties):
+        _git(repo, "commit", "--allow-empty", "-m", f"Park branch {index}")
+    if then_work:
+        _commit(repo, "real-work")
+    _git(repo, "checkout", "-q", "main")
+
+
+@pytest.mark.parametrize("empties", [1, 3])
+def test_empty_commits_above_a_pushed_surviving_ref_are_remote_held(
+    repo: Path, empties: int
+) -> None:
+    """The seat's u2, u4 and u7: a tip that is the surviving ref plus only empty commits."""
+    _smoke_with_branch_on_top(repo, "u2", empties=empties, then_work=False)
+    verdict = _classify(repo, "u2")
+    assert verdict.tier == TIER_REMOTE_HELD
+    assert verdict.refusal is None
+
+
+def test_a_run_of_exactly_the_cap_is_still_stripped(repo: Path) -> None:
+    _smoke_with_branch_on_top(repo, "u2", empties=branch_safety._MAX_EMPTY_COMMITS, then_work=False)
+    assert _classify(repo, "u2").tier == TIER_REMOTE_HELD
+
+
+def test_a_run_past_the_cap_is_unproven(repo: Path) -> None:
+    count = branch_safety._MAX_EMPTY_COMMITS + 1
+    _smoke_with_branch_on_top(repo, "u2", empties=count, then_work=False)
+    assert _classify(repo, "u2").tier != TIER_REMOTE_HELD
+
+
+def test_a_real_commit_above_the_empty_ones_is_not_proven(repo: Path) -> None:
+    """Work above a surviving ref is unique work: the empty-commit rule must not hide it."""
+    _smoke_with_branch_on_top(repo, "u2", empties=1, then_work=True)
+    verdict = _classify(repo, "u2")
+    assert verdict.tier != TIER_REMOTE_HELD
+
+
+def test_empty_commits_above_a_ref_no_remote_holds_are_not_proven(repo: Path) -> None:
+    _git(repo, "checkout", "-q", "-b", "local-only")
+    _commit(repo, "local-only")
+    _git(repo, "commit", "--allow-empty", "-m", "Park branch")
+    _git(repo, "checkout", "-q", "main")
+    verdict = _classify(repo, "local-only")
+    assert verdict.tier != TIER_REMOTE_HELD
+
+
+def test_a_merge_commit_with_an_unchanged_tree_is_not_treated_as_empty(repo: Path) -> None:
+    """Only one-parent commits count as empty: a merge can bring in a second history."""
+    _git(repo, "checkout", "-q", "-b", "v2-smoke")
+    _commit(repo, "smoke")
+    _git(repo, "push", "--quiet", "origin", "v2-smoke")
+    _git(repo, "checkout", "-q", "-b", "side", "main")
+    _commit(repo, "side")
+    _git(repo, "checkout", "-q", "-b", "u2", "v2-smoke")
+    _git(repo, "merge", "--no-ff", "-q", "-s", "ours", "-m", "Merge side", "side")
+    _git(repo, "checkout", "-q", "main")
+    verdict = _classify(repo, "u2")
+    assert verdict.tier != TIER_REMOTE_HELD
+
+
 def test_a_local_branch_nothing_remote_holds_is_not_proven(repo: Path) -> None:
     _git(repo, "checkout", "-q", "-b", "solo")
     _commit(repo, "solo")

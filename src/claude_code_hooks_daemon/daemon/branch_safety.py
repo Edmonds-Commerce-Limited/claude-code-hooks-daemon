@@ -56,7 +56,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import branch_reject
-from claude_code_hooks_daemon.core.branch_park import walk_park_range
+from claude_code_hooks_daemon.core.branch_park import is_content_free, walk_park_range
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
@@ -751,6 +751,37 @@ def _net_change_held(repo: Path, bases: Sequence[str], tip_ref: str) -> tuple[bo
     )
 
 
+#: Most empty commits stripped from a tip when looking for the commit beneath them.
+_MAX_EMPTY_COMMITS: int = 50
+
+
+def _below_empty_commits(repo: Path, tip: str) -> str | None:
+    """The commit under the run of EMPTY commits at the top of ``tip``, else None.
+
+    An empty commit has exactly one parent and its parent's tree. A merge never
+    counts (it can bring in a second history), and a tip that is not empty has
+    nothing stripped, so None. Any git failure, or a run longer than
+    ``_MAX_EMPTY_COMMITS``, is None: unproven, the safe direction.
+    """
+    current = tip
+    for _ in range(_MAX_EMPTY_COMMITS + 1):
+        shown = _git(
+            repo, "rev-list", "--parents", "--max-count=1", current, check=False
+        ).stdout.split()
+        if len(shown) != 2:  # `<sha> <parent>`: a root or a merge is not empty
+            break
+        parent = shown[1]
+        trees = _git(
+            repo, "rev-parse", f"{current}^{{tree}}", f"{parent}^{{tree}}", check=False
+        ).stdout.split()
+        if len(trees) != 2 or trees[0] != trees[1]:
+            break
+        current = parent
+    else:
+        return None
+    return current if current != tip else None
+
+
 def classify_branch(
     repo: Path,
     name: str,
@@ -899,6 +930,14 @@ def classify_branch(
     listing = resolve_source(remote_listing) if remote_listing is not None else None
     if listing is not None:
         held = holder_of(repo, listing, tip)
+        if held is None:
+            # A tip that is only EMPTY commits above a commit a remote ref holds has
+            # nothing of its own to lose (the park-commit residual of ledger N751).
+            # The walk only NAMES the candidate; the hardened rule (commit-graph off,
+            # trees and parents read from the stored objects) decides it is empty.
+            below_empties = _below_empty_commits(repo, tip)
+            if below_empties is not None and is_content_free(repo, tip, below_empties) is True:
+                held = holder_of(repo, listing, below_empties)
         if held is not None:
             held_by = f"{listing.remote}: {held}"
             return BranchClassification(
