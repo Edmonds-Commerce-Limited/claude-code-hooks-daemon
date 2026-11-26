@@ -8738,3 +8738,13 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Severity**: LOW to MEDIUM: a false deny of an in-repo write; the absolute-path workaround is cheap.
 
 **Status**: ⬜ Open. Reproduce with `cd sub && echo x > ../../untracked/f` against the handler, then fix test-first.
+
+### N748 — Ansible lint reports a missing vault password file as a failure of the edited play
+
+**Source**: the fedora-desktop seat, 2026-11-26 04:05Z, checked by that seat (reproduced on its play `playbooks/imports/optional/common/play-unifi-controller.yml`, commit `fed3f8411` on its `v2-smoke` branch).
+
+**Evidence**: in a ccy container where the vault password file named by `ansible.cfg` (`DEFAULT_VAULT_PASSWORD_FILE`) is absent, `lint_on_edit` runs `ansible-playbook --syntax-check <play>` and denies with R-LINT-FAILURE; the whole output is "The vault password file ... was not found". `git commit` then prints "STAGED LINT GATE: a syntax check FAILED" for the same play. Ansible stops on the missing file before it parses the play, so the play is not at fault: an environment gap is reported as a lint failure of the edit. `src/claude_code_hooks_daemon/strategies/lint/ansible_strategy.py` has no handling for it, while `go_strategy.py` already declares `is_tool_unavailable_output` for the same class (`go vet` outside a module).
+
+**Severity**: MEDIUM: every edit of every play is denied in such a container, and the gate blocks the commit's lint step.
+
+**Status**: ⬜ Open. Test first: output "The vault password file ... was not found" is recognised as tool-unavailable (advisory, never a deny) for both `lint_on_edit` and the staged-lint gate, while a real syntax error still denies.
