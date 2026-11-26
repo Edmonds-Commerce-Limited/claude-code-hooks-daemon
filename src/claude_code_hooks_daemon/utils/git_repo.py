@@ -269,8 +269,12 @@ def git_deadline(until: float, clock: Callable[[], float] = time.monotonic) -> I
     smaller of its own and the time left; once the time is gone a call spawns nothing
     and reports ``GIT_TIMED_OUT``, which every caller already reads as "git could not
     answer" (fail closed). This bounds a proof built from many calls, each with its own
-    limit, that the per-call limits alone do not.
+    limit, that the per-call limits alone do not. A block nested inside another on the
+    same clock keeps the earlier deadline, so an inner block can tighten but never widen.
     """
+    outer = _DEADLINE.get()
+    if outer is not None and outer[1] is clock and outer[0] < until:
+        until = outer[0]
     token = _DEADLINE.set((until, clock))
     try:
         yield

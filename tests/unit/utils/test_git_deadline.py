@@ -41,6 +41,43 @@ class TestGitDeadline:
         run.assert_not_called()
         assert result.returncode == GIT_TIMED_OUT
 
+    def test_a_nested_deadline_never_widens_the_outer_one(self, tmp_path: Path) -> None:
+        """An inner block asking for more time keeps the outer, earlier deadline."""
+
+        def clock() -> float:
+            return 1.5
+
+        with (
+            mock.patch("subprocess.run", return_value=_ok()) as run,
+            git_deadline(2.0, clock=clock),
+            git_deadline(60.0, clock=clock),
+        ):
+            run_git(tmp_path, "status", timeout=5)
+        assert run.call_args.kwargs["timeout"] == 0.5
+
+    def test_a_nested_deadline_may_tighten_the_outer_one(self, tmp_path: Path) -> None:
+        def clock() -> float:
+            return 0.0
+
+        with (
+            mock.patch("subprocess.run", return_value=_ok()) as run,
+            git_deadline(60.0, clock=clock),
+            git_deadline(1.0, clock=clock),
+        ):
+            run_git(tmp_path, "status", timeout=5)
+        assert run.call_args.kwargs["timeout"] == 1.0
+
+    def test_the_outer_deadline_returns_after_an_inner_block_ends(self, tmp_path: Path) -> None:
+        def clock() -> float:
+            return 0.0
+
+        with git_deadline(3.0, clock=clock):
+            with git_deadline(1.0, clock=clock):
+                pass
+            with mock.patch("subprocess.run", return_value=_ok()) as run:
+                run_git(tmp_path, "status", timeout=5)
+        assert run.call_args.kwargs["timeout"] == 3.0
+
     def test_the_deadline_ends_with_the_block(self, tmp_path: Path) -> None:
         with git_deadline(2.0, clock=lambda: 0.0):
             pass
