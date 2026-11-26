@@ -109,10 +109,15 @@ _PLAYBOOK_NAME_PREFIXES: Final[tuple[str, ...]] = ("play-", "playbook-")
 # no parser will accept.
 _PLAY_SIGNAL: Final = re.compile(r"^\s*-\s*(hosts|import_playbook)\s*:", re.MULTILINE)
 
-#: Ansible prefixes each fatal diagnostic with this.
-_ERROR_PREFIX: Final = "ERROR!"
+#: Ansible prefixes each fatal diagnostic with one of these (the second is the
+#: ansible-core 2.19 form).
+_ERROR_PREFIXES: Final[tuple[str, ...]] = ("ERROR!", "[ERROR]:")
 #: The configured vault key file does not exist (see ``is_tool_unavailable_output``).
-_VAULT_FILE_MISSING: Final = re.compile(r"^ERROR! The vault password file .+ was not found\s*$")
+_VAULT_FILE_MISSING: Final = re.compile(
+    r"^(?:ERROR!|\[ERROR\]:) The vault password file .+ was not found\s*$"
+)
+#: Colour codes, which ``ANSIBLE_FORCE_COLOR`` puts in front of the prefix.
+_ANSI_ESCAPE: Final = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class AnsibleLintStrategy:
@@ -183,7 +188,8 @@ class AnsibleLintStrategy:
         error reported beside it means the play was parsed and the finding is
         real, so it still denies.
         """
-        errors = [line for line in output.splitlines() if line.startswith(_ERROR_PREFIX)]
+        lines = _ANSI_ESCAPE.sub("", output).splitlines()
+        errors = [line for line in lines if line.startswith(_ERROR_PREFIXES)]
         return bool(errors) and all(_VAULT_FILE_MISSING.match(line) for line in errors)
 
     def command_values(self, file_path: str) -> dict[str, str]:

@@ -441,6 +441,8 @@ class TestMissingVaultKeyFileIsAnEnvironmentGap:
         [
             "ERROR! The vault password file /etc/ansible/pw.txt was not found\n",
             "[WARNING]: x\nERROR! The vault password file ./pw.txt was not found\n",
+            "[ERROR]: The vault password file /etc/ansible/pw.txt was not found\n",
+            "\x1b[0;31mERROR! The vault password file ./pw.txt was not found\x1b[0m\n",
         ],
     )
     def test_a_missing_key_file_is_tool_unavailable(
