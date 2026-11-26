@@ -768,11 +768,19 @@ class _ForceRemovalJudge:
                     for h in held
                     if h.tip in stranded and h.rule_id == RuleID.GIT_WORKTREE_REMOVE_FORCE
                 ]
-                stranded -= patch_held_tips(held[0].directory, head_tips, excluded, self._namespaces)
+                patch_held = patch_held_tips(
+                    held[0].directory, head_tips, excluded, self._namespaces
+                )
             except ContainmentUnknown as exc:
                 labels = ", ".join(h.label for h in held)
                 raise _Unverifiable(f"what holds {labels} could not be read ({exc})") from exc
-            self._unheld.extend(h for h in held if h.tip in stranded)
+            # Per entry, not per hash: a branch delete sharing the HEAD's tip keeps its own proof.
+            self._unheld.extend(
+                h
+                for h in held
+                if h.tip in stranded
+                and not (h.rule_id == RuleID.GIT_WORKTREE_REMOVE_FORCE and h.tip in patch_held)
+            )
 
     def _describe(self, held: _HeldTip) -> str:
         if held.tip is None:

@@ -316,6 +316,61 @@ class TestWorktreeHeadHeldByPatch:
         assert _allowed(handler, f"git worktree remove {wt}", repo)
 
 
+class TestPatchHeldProofIsBounded:
+    """The patch proof runs under one wall-clock budget and fails closed (N752 review)."""
+
+    def _picked(self, repo: Path, wt: Path) -> str:
+        """Detach `wt` on `pick`; return its sha. Branch `other` holds the same patch."""
+        _git(wt, "checkout", "--detach", "main")
+        _commit(wt, "pick")
+        picked = _git(wt, "rev-parse", "HEAD")
+        _git(repo, "checkout", "-b", "other", "main")
+        _commit(repo, "other-extra")
+        _git(repo, "cherry-pick", picked)
+        _git(repo, "checkout", "main")
+        return picked
+
+    def test_a_ref_found_within_the_budget_holds_the_tip(self, repo: Path, wt: Path) -> None:
+        picked = self._picked(repo, wt)
+        held = force_removal.patch_held_tips(repo, [picked], set(), clock=lambda: 0.0)
+        assert held == {picked}
+
+    def test_an_exhausted_budget_is_not_held(self, repo: Path, wt: Path) -> None:
+        picked = self._picked(repo, wt)
+        ticks = iter([0.0] + [force_removal.PATCH_PROOF_BUDGET_SECONDS + 1.0] * 100)
+        held = force_removal.patch_held_tips(repo, [picked], set(), clock=lambda: next(ticks))
+        assert held == frozenset()
+
+    def test_the_proof_runs_from_the_top_level_when_given_a_subdirectory(
+        self, repo: Path, wt: Path
+    ) -> None:
+        picked = self._picked(repo, wt)
+        sub = wt / "nested"
+        sub.mkdir()
+        assert force_removal.patch_held_tips(sub, [picked], set()) == {picked}
+
+    def test_a_merge_commit_in_the_head_range_is_still_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        self._picked(repo, wt)
+        _git(repo, "branch", "m1", "main")
+        _git(repo, "checkout", "m1")
+        _commit(repo, "m1")
+        _git(repo, "checkout", "main")
+        _git(wt, "merge", "--no-ff", "-m", "merge m1", "m1")
+        rule, _reason = _deny(handler, f"git worktree remove -f {wt}", repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+
+    def test_clearing_a_worktree_head_does_not_clear_a_branch_delete_of_the_same_tip(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        picked = self._picked(repo, wt)
+        _git(repo, "branch", "foo", picked)
+        rule, reason = _deny(handler, f"git worktree remove {wt} && git branch -D foo", repo)
+        assert rule == RuleID.GIT_BRANCH_FORCE_DELETE
+        assert "`foo`" in reason
+
+
 class TestWorktreeRemoveIgnoredContent:
     def test_unforced_removal_with_scratch_notes_is_denied(
         self, handler: DestructiveGitHandler, repo: Path, wt: Path

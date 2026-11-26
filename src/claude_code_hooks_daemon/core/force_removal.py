@@ -9,7 +9,8 @@ One ``git rev-list <tips> --not <holders>`` answers for many tips at once: a tip
 some holder reaches is subtracted, so a tip still printed is held by nothing.
 """
 
-from collections.abc import Collection, Sequence
+import time
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import Final
 
@@ -20,6 +21,11 @@ from claude_code_hooks_daemon.utils.git_repo import run_git
 ALL_HOLDERS: Final[tuple[str, ...]] = ("refs/heads", "refs/remotes", "refs/tags")
 #: Only remote-tracking refs: what ``branches.force_removal.mode: off`` trusts.
 REMOTE_HOLDERS: Final[tuple[str, ...]] = ("refs/remotes",)
+
+
+#: Wall-clock seconds the whole patch-equivalence search may take. The hook relay gives up
+#: at 30 s and may then let the command through, so this stays well under it.
+PATCH_PROOF_BUDGET_SECONDS: Final[float] = 6.0
 
 
 class ContainmentUnknown(Exception):
@@ -85,8 +91,14 @@ def patch_held_tips(
     tips: Sequence[str],
     excluded_refs: Collection[str],
     namespaces: Sequence[str] = ALL_HOLDERS,
+    *,
+    budget: float = PATCH_PROOF_BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> frozenset[str]:
     """The ``tips`` whose every patch some surviving ref already holds (N752).
+
+    The whole search shares one wall-clock ``budget``; a tip not proven when it runs
+    out is not held (the per-git-call limits alone do not bound the loop).
 
     A commit reachable from no surviving ref is still lost-free when a surviving
     ref carries the same patch (a cherry-pick, a rebase): the same patch-equivalence
@@ -106,14 +118,21 @@ def patch_held_tips(
     if top.returncode != 0 or not top.stdout.strip():
         return frozenset()
     top_level = Path(top.stdout.strip())
-    refs = _surviving_refs(repo, excluded_refs, namespaces)
+    refs = _surviving_refs(top_level, excluded_refs, namespaces)
+    deadline = clock() + budget
     held: set[str] = set()
     for tip in tips:
         for ref in refs:
+            if clock() >= deadline:
+                # Out of time is not held: the hook relay would otherwise time out and
+                # fail open, so the removal is refused instead.
+                return frozenset(held)
+            if not _shares_history(top_level, ref, tip):
+                continue
             try:
                 proven = (
-                    patch_equivalent(repo, ref, tip) == (True, 0)
-                    and remote_branch_proof.holds_net_change(repo, ref, tip)
+                    patch_equivalent(top_level, ref, tip) == (True, 0)
+                    and remote_branch_proof.holds_net_change(top_level, ref, tip)
                     and remote_branch_proof.gitlink_change_held(top_level, ref, tip)
                 )
             except remote_branch_proof.ProofUnavailableError:
@@ -122,6 +141,15 @@ def patch_held_tips(
                 held.add(tip)
                 break
     return frozenset(held)
+
+
+def _shares_history(repo: Path, ref: str, tip: str) -> bool:
+    """Whether ``ref`` and ``tip`` have a merge base: the cheap pre-filter for the patch proof.
+
+    With none, ``git cherry`` matches against the whole history and the net-change
+    proof has no base, so such a ref can never prove a tip.
+    """
+    return run_git(repo, "merge-base", ref, tip, timeout=Timeout.GIT_CONTEXT).returncode == 0
 
 
 def lost_commit_count(
