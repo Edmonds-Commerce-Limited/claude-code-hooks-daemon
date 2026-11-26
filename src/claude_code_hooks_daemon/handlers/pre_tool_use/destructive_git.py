@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core.force_removal import (
     REMOTE_HOLDERS,
     ContainmentUnknown,
     lost_commit_count,
+    patch_held_tips,
     uncontained_tips,
 )
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -748,7 +749,9 @@ class _ForceRemovalJudge:
                 rule_id=RuleID.GIT_WORKTREE_REMOVE_FORCE,
                 directory=path,
                 tip=_commit_of(path, "HEAD"),
-                advice=f"commit it to a branch: `git -C {path} switch -c <name>`, then push",
+                # A tag, not a branch: the branch WIP cap refuses `switch -c`, and a tag is a
+                # surviving ref this proof counts.
+                advice=f"hold it with a tag: `git -C {path} tag <name>`, then push the tag",
             )
         )
 
@@ -759,6 +762,13 @@ class _ForceRemovalJudge:
             tips = [h.tip for h in held if h.tip is not None]
             try:
                 stranded = uncontained_tips(held[0].directory, tips, excluded, self._namespaces)
+                # A worktree HEAD whose patch a surviving ref holds loses nothing (N752).
+                head_tips = [
+                    h.tip
+                    for h in held
+                    if h.tip in stranded and h.rule_id == RuleID.GIT_WORKTREE_REMOVE_FORCE
+                ]
+                stranded -= patch_held_tips(held[0].directory, head_tips, excluded, self._namespaces)
             except ContainmentUnknown as exc:
                 labels = ", ".join(h.label for h in held)
                 raise _Unverifiable(f"what holds {labels} could not be read ({exc})") from exc

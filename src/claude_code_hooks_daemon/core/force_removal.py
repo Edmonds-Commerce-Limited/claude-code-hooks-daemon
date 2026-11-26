@@ -68,6 +68,62 @@ def uncontained_tips(
     return frozenset(tip for tip in tips if tip in printed)
 
 
+def _surviving_refs(
+    repo: Path, excluded_refs: Collection[str], namespaces: Sequence[str]
+) -> list[str]:
+    """Full names of every ref in ``namespaces`` the command does not delete."""
+    listing = run_git(
+        repo, "for-each-ref", "--format=%(refname)", *namespaces, timeout=Timeout.GIT_CONTEXT
+    )
+    if listing.returncode != 0:
+        raise ContainmentUnknown(f"git for-each-ref failed: {listing.stderr.strip()}")
+    return [ref for ref in listing.stdout.split() if ref not in excluded_refs]
+
+
+def patch_held_tips(
+    repo: Path,
+    tips: Sequence[str],
+    excluded_refs: Collection[str],
+    namespaces: Sequence[str] = ALL_HOLDERS,
+) -> frozenset[str]:
+    """The ``tips`` whose every patch some surviving ref already holds (N752).
+
+    A commit reachable from no surviving ref is still lost-free when a surviving
+    ref carries the same patch (a cherry-pick, a rebase): the same patch-equivalence
+    ``branch_safety`` uses for a branch, and as there it is never trusted alone. The
+    surviving ref's history must also hold the tip's net change, and no submodule
+    pointer may be left to a patch-id that cannot see it. Anything git cannot answer
+    is not held (fails closed).
+
+    Raises:
+        ContainmentUnknown: When the surviving refs cannot be listed.
+    """
+    # Imported here: remote_branch_proof imports branch_safety, which imports this package.
+    from claude_code_hooks_daemon.core import remote_branch_proof
+    from claude_code_hooks_daemon.daemon.branch_safety import patch_equivalent
+
+    top = run_git(repo, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+    if top.returncode != 0 or not top.stdout.strip():
+        return frozenset()
+    top_level = Path(top.stdout.strip())
+    refs = _surviving_refs(repo, excluded_refs, namespaces)
+    held: set[str] = set()
+    for tip in tips:
+        for ref in refs:
+            try:
+                proven = (
+                    patch_equivalent(repo, ref, tip) == (True, 0)
+                    and remote_branch_proof.holds_net_change(repo, ref, tip)
+                    and remote_branch_proof.gitlink_change_held(top_level, ref, tip)
+                )
+            except remote_branch_proof.ProofUnavailableError:
+                proven = False
+            if proven:
+                held.add(tip)
+                break
+    return frozenset(held)
+
+
 def lost_commit_count(
     repo: Path,
     tip: str,

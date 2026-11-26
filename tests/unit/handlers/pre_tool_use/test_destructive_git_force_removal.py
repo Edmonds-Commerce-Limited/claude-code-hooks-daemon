@@ -238,6 +238,84 @@ class TestWorktreeRemoveForce:
         )
 
 
+class TestWorktreeHeadHeldByPatch:
+    """N752: a detached HEAD whose patch a surviving ref already holds loses nothing."""
+
+    def _detached_pick(self, repo: Path, wt: Path) -> None:
+        """`wt` detached on a commit `pick`; branch `other` holds the same patch.
+
+        `other` has an extra commit first so the cherry-picked commit is a different
+        object: only patch-equivalence, not reachability, can hold it.
+        """
+        _git(wt, "checkout", "--detach", "main")
+        _commit(wt, "pick")
+        picked = _git(wt, "rev-parse", "HEAD")
+        _git(repo, "checkout", "-b", "other", "main")
+        _commit(repo, "other-extra")
+        _git(repo, "cherry-pick", picked)
+        _git(repo, "checkout", "main")
+        assert _git(repo, "rev-parse", "other") != picked
+
+    @pytest.mark.parametrize("flags", ["", "-f"])
+    def test_a_head_whose_patch_a_branch_holds_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path, flags: str
+    ) -> None:
+        self._detached_pick(repo, wt)
+        assert _allowed(handler, f"git worktree remove {flags} {wt}", repo)
+
+    def test_a_head_with_a_commit_no_ref_holds_by_patch_is_still_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        self._detached_pick(repo, wt)
+        _commit(wt, "real-new-work")
+        rule, reason = _deny(handler, f"git worktree remove -f {wt}", repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "would lose" in reason
+
+    def test_a_patch_equivalent_head_with_a_dirty_worktree_is_still_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        self._detached_pick(repo, wt)
+        (wt / "notes.txt").write_text("work")
+        rule, reason = _deny(handler, f"git worktree remove -f {wt}", repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "notes.txt" in reason
+
+    def test_a_patch_equivalent_head_with_unregenerable_ignored_content_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        self._detached_pick(repo, wt)
+        (wt / "untracked" / "scratch").mkdir(parents=True)
+        (wt / "untracked" / "scratch" / "plan.md").write_text("notes")
+        rule, reason = _deny(handler, f"git worktree remove {wt}", repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "untracked/scratch/" in reason
+
+    def test_deleting_the_only_patch_holder_in_the_same_command_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        self._detached_pick(repo, wt)
+        rule, _reason = _deny(handler, f"git worktree remove {wt} && git branch -D other", repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+
+    def test_the_deny_names_a_route_the_branch_cap_does_not_refuse(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        _git(wt, "checkout", "--detach", "main")
+        _commit(wt, "orphan")
+        _rule, reason = _deny(handler, f"git worktree remove {wt}", repo)
+        assert "switch -c" not in reason
+        assert f"git -C {wt} tag <name>" in reason
+
+    def test_the_named_tag_route_makes_the_removal_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        _git(wt, "checkout", "--detach", "main")
+        _commit(wt, "orphan")
+        _git(wt, "tag", "keep-orphan")
+        assert _allowed(handler, f"git worktree remove {wt}", repo)
+
+
 class TestWorktreeRemoveIgnoredContent:
     def test_unforced_removal_with_scratch_notes_is_denied(
         self, handler: DestructiveGitHandler, repo: Path, wt: Path
