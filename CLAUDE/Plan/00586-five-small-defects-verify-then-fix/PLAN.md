@@ -85,9 +85,12 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   release gate only (a fail-fast input to the shared `test-shards.yml`, default unchanged for `qa.yml`), keeping the
   final aggregate job's verdict
 
-- [ ] ⬜ **Task 1.6 (F)**: RED test: a restore of a tracked file whose working copy is zero bytes is allowed, and a
+- [x] ✅ **Task 1.6 (F)**: RED test: a restore of a tracked file whose working copy is zero bytes is allowed, and a
   restore of a non-empty modified file is still denied. GREEN in `destructive_git`, alongside its other
-  lossless-removal judgements
+  lossless-removal judgements. Done: `GIT_RESTORE` joined `_LOSSLESS_WHEN_PROVEN`; `_restore_note` allows a restore
+  only when every named path is a literal, tracked, regular, zero-byte file (globs, directories, symlinks,
+  `--source`, `-p`, substitutions and anything with content stay denied). Tests
+  `test_destructive_git_restore_empty.py`; release note 115
 
 - [x] ✅ **Task 1.5 (E)**: Does not reproduce; closed with the evidence and no change. The original command was
   never recorded, so 19 shapes were run through `PlanNumberHelperHandler.matches` on main: an `ls` of a plan

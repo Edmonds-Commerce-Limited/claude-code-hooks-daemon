@@ -440,7 +440,7 @@ _VERBOSE_OVERRIDES: Final[dict[str, str]] = {
 
 #: Rules with a lossless case: allowed when the containment proof passes (section 11).
 _LOSSLESS_WHEN_PROVEN: Final[frozenset[str]] = frozenset(
-    {RuleID.GIT_BRANCH_FORCE_DELETE, RuleID.GIT_WORKTREE_REMOVE_FORCE}
+    {RuleID.GIT_BRANCH_FORCE_DELETE, RuleID.GIT_WORKTREE_REMOVE_FORCE, RuleID.GIT_RESTORE}
 )
 _MODE_OFF: Final[str] = "off"
 _MODE_WARN: Final[str] = "warn"
@@ -812,6 +812,76 @@ def _force_removal_note(
         return _ForceRemovalJudge(cwd, branches).judge(command)
     except _Unverifiable as exc:
         return fallback_rule, _with_principle(_unverified(str(exc)))
+
+
+_RESTORE: Final[str] = "restore"
+# Flags a restore may carry without changing WHICH files it overwrites. Anything else
+# (`--source`, `-p`, `--pathspec-from-file`, `--staged`, `--ours`...) is unverifiable.
+_RESTORE_FLAGS: Final[frozenset[str]] = frozenset({"--worktree", "-W", "--quiet", "-q"})
+# A path word that is not one literal file name: a glob, a pathspec magic prefix, a
+# variable, or an escape. `.` and `..` name a directory.
+_NOT_A_LITERAL_PATH: Final[re.Pattern[str]] = re.compile(r"[*?\[\]$\\]|^:|^\.{1,2}$")
+
+
+def _restore_loss(run: GitInvocation, cwd: Path) -> str | None:
+    """Why ``run`` (one ``git restore``) may lose content, or None when it loses none.
+
+    It loses none when every path it names is a tracked, regular, zero-byte file: the
+    restore then replaces nothing but emptiness.
+    """
+    problem = placement_problem(run, cwd)
+    if problem is not None:
+        return problem
+    directory = invocation_directory(run, cwd)
+    if not path_is_dir(directory, unreadable_means=False):
+        return f"`{directory}` is not a directory"
+    paths: list[str] = []
+    options_ended = False
+    for word in run.arguments:
+        if options_ended:
+            paths.append(word)
+        elif word == _OPTIONS_END:
+            options_ended = True
+        elif word.startswith("-"):
+            if word not in _RESTORE_FLAGS:
+                return f"`{word}` changes what `git restore` overwrites"
+        else:
+            paths.append(word)
+    if not paths:
+        return "it names no file"
+    for name in paths:
+        if _NOT_A_LITERAL_PATH.search(name):
+            return f"`{name}` is not one literal file name"
+        target = directory / name
+        if target.is_symlink() or not target.is_file():
+            return f"`{name}` is not a regular file"
+        if target.stat().st_size != 0:
+            return f"`{name}` holds content that the restore would discard"
+        tracked = run_git(
+            directory, "ls-files", "--error-unmatch", "--", name, timeout=Timeout.GIT_CONTEXT
+        )
+        if tracked.returncode != 0:
+            return f"`{name}` is not tracked, so there is nothing to restore it from"
+    return None
+
+
+def _restore_note(command: str, cwd: Path) -> tuple[str, str] | None:
+    """None when every ``git restore`` in ``command`` only fills empty files, else (rule, why)."""
+    if _SUBSTITUTION.search(command):
+        return RuleID.GIT_RESTORE, _with_principle(
+            _unverified("a command or process substitution can run a restore this reading misses")
+        )
+    for run in git_invocations(command):
+        if run.subcommand != _RESTORE:
+            continue
+        loss = _restore_loss(run, cwd)
+        if loss is not None:
+            return RuleID.GIT_RESTORE, _with_principle(
+                f"Not restored: {loss}. Only a restore whose every named file is a tracked, "
+                "zero-byte file is allowed, since that discards no content. Ask the user to "
+                "run any other restore."
+            )
+    return None
 
 
 _PUSH: Final[str] = "push"
@@ -1398,6 +1468,17 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
 
         verdicts: list[tuple[str, str]] = []
         lossless = [matched for matched in rule_ids if matched in _LOSSLESS_WHEN_PROVEN]
+        if RuleID.GIT_RESTORE in lossless:
+            lossless.remove(RuleID.GIT_RESTORE)
+            try:
+                restore = _restore_note(command, self._cwd(hook_input))
+            except RuntimeError as exc:
+                logger.warning("destructive_git: restore not verified: %s", exc)
+                restore = RuleID.GIT_RESTORE, _with_principle(
+                    _unverified("the directory the command runs in is unknown")
+                )
+            if restore is not None:
+                verdicts.append(restore)
         if lossless:
             try:
                 judged = _force_removal_note(command, self._cwd(hook_input), branches, lossless[0])
@@ -1447,7 +1528,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git clean -f` | Permanently deletes untracked files (a dry run `git clean -nd` is allowed) |\n"
             "| `git checkout -- <file>` | Discards all local changes to that file |\n"
             "| `git restore <file>` | Discards local changes (`--staged` alone, with or without "
-            "`--source`, is allowed; `--staged --worktree` is not) |\n"
+            "`--source`, is allowed; `--staged --worktree` is not. A restore whose every "
+            "named file is a tracked, regular, zero-byte file is allowed too: it discards no content) |\n"
             "| `git stash drop` | Permanently destroys stashed changes |\n"
             "| `git stash clear` | Permanently destroys all stashes |\n"
             "| `git push --force` / `git push <remote> +<refspec>` "
