@@ -242,8 +242,8 @@ lint failure. Cause confirmed by reading: `GoLintStrategy.skip_paths` (`strategi
 (`staged_lint_gate`), so one fix in the strategy should close both. Severity: Medium (a correct write is reported as a
 lint failure on every fixture edit).
 
-**Status**: ⬜ open. TDD fix: red test that `matches_skip_path("pkg/x/testdata/rule/src/a/a.go", GoLintStrategy().skip_paths)`
-is true and a sibling `pkg/x/a.go` is false, then add `testdata/` to the Go strategy's `skip_paths`.
+**Status**: ✅ Fixed 2026-11-26 with N745 (same defect, reported again by the fedora-desktop seat): `testdata/` is now in
+`GoLintStrategy.skip_paths`; tests in `test_go_strategy.py`; release note 116.
 
 ### N594 — `lint_on_edit` reports "ruff not found" while ruff is on the session's PATH
 
@@ -7255,8 +7255,11 @@ go tool ignores every `testdata/` directory, and analysistest loads those fixtur
 GOPATH, so their imports never resolve as module code. The commit still went through, but a
 message that says FAILED on a correct commit teaches the reader to ignore the gate.
 
-**Status**: ⬜ Open. The Go tier skips any path with a `testdata` component, as `go build` does,
-with a test using a GOPATH-layout fixture.
+**Status**: ✅ Fixed 2026-11-26 with N745 (same defect): the Go lint strategy skips any path with a `testdata`
+directory segment, as the Go tool does; tests in `test_go_strategy.py`; release note 116. Residual, from the review of
+the fix: matching runs on the absolute path, so a repository checked out under a folder named `testdata` gets no Go
+lint (the common `build/` entries behave the same way), and the literal `testdata/` is also held by
+`strategies/tdd/go_strategy.py`.
 
 ### N602 — review_round_advisor counts any dispatch that says "review" and names a plan, fact-checks included
 
