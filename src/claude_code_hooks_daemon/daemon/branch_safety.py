@@ -935,9 +935,9 @@ def classify_branch(
             # nothing of its own to lose (the park-commit residual of ledger N751).
             # The walk only NAMES the candidate; the hardened rule (commit-graph off,
             # trees and parents read from the stored objects) decides it is empty.
-            base = _below_empty_commits(repo, tip)
-            if base is not None and is_content_free(repo, tip, base) is True:
-                held = holder_of(repo, listing, base)
+            below_empties = _below_empty_commits(repo, tip)
+            if below_empties is not None and is_content_free(repo, tip, below_empties) is True:
+                held = holder_of(repo, listing, below_empties)
         if held is not None:
             held_by = f"{listing.remote}: {held}"
             return BranchClassification(
