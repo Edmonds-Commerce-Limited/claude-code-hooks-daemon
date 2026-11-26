@@ -8810,3 +8810,33 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Source**: the coordinator and the laptop host seat, 2026-11-26 08:10Z: a piped chat message that happens to hold a protected-name pattern is denied as a whole, four times that day, and each sender loses the message. The coordinator asked for a reopening; N749 is the same cost from a code file.
 
 **Status**: ⬜ Reopened as a usability defect (supersedes the "as designed" half of N744). Proposal, built as an UNMERGED proposal PR for the owner (it changes a guard documented as deliberately broad, and only a human may lift protection): judge only path-like arguments and redirect targets of a message-sink command (`teamchat` `say`, `reply`, `report`, `thread`, the ask verb, `close`, `retitle`), never the text piped to stdin; apply N749's narrowing to the underscore patterns; keep the deny text naming glob and token and add the token class. Residual risk to state to the owner: a sink that echoes its stdin to a file is not covered (teamchat does not). The coordinator will put one owner question covering this and the release.
+
+### N754 — a Bash call that reads a file the same batch tried to Write runs on the old content when the Write is refused
+
+**Source**: the fedora-desktop seat, 2026-11-26 09:08Z (checked by the seat, v3.76.0).
+
+**Evidence**: twice R-WRITE-CLOBBER refused a Write to a reused message file under `untracked/scratch/`, and the `teamchat` send reading that file in the same parallel batch still ran, sending a stale message. The block text warns that batched calls "may already have run", which is accurate, but the stale send was out by the time it was read.
+
+**Severity**: LOW to MEDIUM: a wrong message sent; the seat now uses a fresh file name per message and sends in a later step.
+
+**Status**: ⬜ Open as an idea. Feasibility: each call is judged as it arrives and a batch can run in parallel, so a rule can only help when the refusal is recorded before the reading call arrives and cannot stop one already run. The ordering-safe shape: record each refused write path for the turn and deny a later Bash call reading it (`< P`, `cat P`, `-F P`, `--file P`). Narrow first step: only `-F` and `<` inputs under `untracked/scratch/`.
+
+### N755 — R-PLAN-TIME-ESTIMATE flags a behaviour parameter in minutes as a schedule estimate
+
+**Source**: the fedora-desktop seat, 2026-11-26 09:08Z (checked by the seat, v3.76.0).
+
+**Evidence**: three plan edits stating the owner's rule "a usage-limited session switches sign-in after a fuzzy cooldown of 8 minutes plus jitter" (Plan 00146 Task 2.4, its research file, a register row) were denied. The phrase says what the code must do, not when work will be done. The seat's workaround "about 480 s" passed, so the rule keys on the word, not the meaning.
+
+**Severity**: LOW: a false positive with a workaround that hides the real wording.
+
+**Status**: ⬜ Open. Fix, test first: flag a duration only next to effort or schedule words (takes, will take, effort, estimate, ETA, days of work, by a date); pass one governed by timeout, cooldown, window, interval, TTL, delay or limit. Fixtures: the seat's three refused edits (pass) and a genuine "this will take 3 days" (still flags).
+
+### N756 — no route for an owner-approved in-place redaction of a journal entry
+
+**Source**: the fedora-desktop seat, 2026-11-26 09:13Z (checked by the seat).
+
+**Evidence**: the owner approved replacing a leaked private name in one existing journal entry with a placeholder, as a past plan did before the guard existed. Every Edit, Write or Bash change to the entry is denied by R-JOURNAL-HAND-WRITTEN-ENTRY; `explain-rule` gives no exception and no verb exists. The name is already pushed in tracked files and history; the owner decided (Q21) to fix forward with no history rewrite.
+
+**Severity**: LOW to MEDIUM: only a human edit can remove it today.
+
+**Status**: ⬜ Open as an idea, agreed shape (seat and coordinator, 09:13Z): a verb (for example `hooks-daemon journal-redact <entry> --term-file <file> --placeholder <text>`) that VERIFIES the approval itself (`teamchat verify` on a human event in the questions room, kind human) and refuses otherwise, replaces only whole-word matches, keeps the heading and stamp, prints only counts (never the term) and records the approval id through a normal journal entry. An agent-supplied approval reference is never accepted. Needs the owner's yes before it is built.
