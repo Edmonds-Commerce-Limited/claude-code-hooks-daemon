@@ -8783,7 +8783,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: under the owner's Q14 ruling (any branch contained in a surviving branch is safe to delete) these deletes fall to a human.
 
-**Status**: ⬜ Open. Q14 (PR 283) covers the REMOTE delete proof only. Fix: let the local delete proof accept a named surviving ref that the same command does not delete, ancestry proved by the guard, test first. An integration line declared in config also works today as a stopgap.
+**Status**: 🟡 Half settled (2026-11-26). The contained case is already provable and was a usage mistake: `delete-branch` without `--protected-ref` classifies a local branch contained in a pushed surviving branch as `remote-held` (a live remote ref at or above the tip, `holder_of`), and `tests/unit/daemon/test_branch_safety_survivor.py` pins it (and pins that a branch nothing remote holds is not proven). `--protected-ref` is for naming the DEFAULT or a declared integration line, which is why `origin/v2-smoke` was refused. OPEN residual: a branch that differs from the surviving ref only by an EMPTY park commit has a tip no remote ref holds, and the park and empty-commit tiers are judged against the default only, so it stays unproven; fix by judging those tiers against a surviving remote ref too, test first.
 
 ### N752 — removing a clean worktree whose detached HEAD is patch-equivalent to a surviving commit is refused, and the guard's way out is closed
 
