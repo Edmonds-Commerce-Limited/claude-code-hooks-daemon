@@ -71,8 +71,15 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   `test_an_empty_declaration_is_unset_so_detection_applies` failed with `frozenset()`, green after the fix; release
   note 112
 
-- [ ] ⬜ **Task 1.3 (C)**: Run the optimise procedure in this self-install checkout and record each wrong path. RED
-  test, then fix through the existing install-mode path resolution
+- [x] ✅ **Task 1.3 (C)**: Ran the script in this self-install checkout: `Manifests` and `Run state` printed
+  `.claude/hooks-daemon/CLAUDE/UPGRADES/config-changes` and `.claude/hooks-daemon/untracked/...`, neither of which
+  exists. Cause: `.claude/hooks-daemon/bin/hooks-daemon` is a link to the project's own wrapper, so the script's
+  client-install probe matched first. RED test `TestALinkedSelfInstallResolvesToTheProjectRoot` (a fixture with that
+  link, which the existing self-install fixture lacked) failed; GREEN by testing first whether the client-path wrapper
+  resolves to the project's own. `optimise.md`'s three reference paths (the config-changes manifests and two
+  `docs/guides/` references, which named a client-only `.claude/hooks-daemon/` tree) now name the printed daemon
+  directory. Deployed skill copies synced
+  (34 related tests pass). Release note 114
 
 - [ ] ⬜ **Task 1.4 (D)**: Confirm on a failed release-gate run that the other shards ran to the end. Fix in the
   release gate only (a fail-fast input to the shared `test-shards.yml`, default unchanged for `qa.yml`), keeping the

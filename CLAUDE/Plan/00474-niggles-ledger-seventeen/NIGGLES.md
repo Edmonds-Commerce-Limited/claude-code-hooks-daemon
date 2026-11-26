@@ -8661,3 +8661,33 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW. It changes what an advisory reports, never what is enforced.
 
 **Status**: ⬜ Open. Decide whether the checker should read the declared languages the way the optimise checklist does.
+
+### N741 — the plan-number guard lets some plan-root discovery through
+
+**Source**: Plan 00586 Task 1.5 (E), independent review of PR 273 (observation, not a claimed defect).
+
+**Evidence**: `PlanNumberHelperHandler.matches` allows `ls -1 CLAUDE/Plan | awk '/^[0-9]+-/'` and `ls -d CLAUDE/Plan/005* | awk ...`, which both read plan-folder names off the root, while it denies `ls CLAUDE/Plan | awk -F- '{print $1}' | sort | tail -1`. The guard keys on a sort-and-take-last idiom, so an `awk`-only listing of the root slips past it.
+
+**Severity**: LOW. The guard exists to stop a number being guessed from a folder scan; a listing alone picks no number.
+
+**Status**: ⬜ Open. Decide whether a plain listing of the plan root should be advised or stay allowed.
+
+### N742 — a relocated or moved handler's manifest suggestion is dropped, not redirected
+
+**Source**: Plan 00586 Task 1.1 (A), independent review of PR 274.
+
+**Evidence**: `handler_key_is_gone` (`install/handler_key_audit.py`) drops a manifest `added` or `changed` entry whose handler is retired, relocated or registered under another event. For a relocated handler the new home is known (`RELOCATED_HANDLERS`, `target_path`), and no manifest has an entry under `pseudo_events.*`, so a client upgrading across the move is told nothing about the handler's current key; before the change they were pointed at a dead key.
+
+**Severity**: LOW. The upgrade already moves an existing entry to its new home; only the "you could enable this" suggestion is lost.
+
+**Status**: ⬜ Open. Decide whether the advisory should suggest the relocation target path instead of dropping the entry.
+
+### N743 — the destructive-git guard denies the words of a restore command printed by `printf`
+
+**Source**: Plan 00586, a teamchat report written with `printf '...' | teamchat report` that named the restore command in prose.
+
+**Evidence**: `printf 'Left: D ... and F (git restore of an empty working copy)\n' | teamchat report --team lts-ops` was denied with R-GIT-RESTORE, and the same message reworded to avoid the three words went through. The cause is not yet established. `test_destructive_git_printed_text.py` pins other printed-text shapes (echo, captured or formatted output); whether it covers a `printf` format string with a literal `\n` ahead of the words is for the reproduction to settle.
+
+**Severity**: LOW. It blocks a harmless report; the wording workaround is cheap.
+
+**Status**: ⬜ Open. Reproduce with the exact shape in `test_destructive_git_printed_text.py`, then judge a `printf` format string as printed text.
