@@ -341,6 +341,24 @@ class TestPatchHeldProofIsBounded:
         held = force_removal.patch_held_tips(repo, [picked], set(), clock=lambda: next(ticks))
         assert held == frozenset()
 
+    def test_one_ref_proof_that_overruns_the_budget_midway_is_not_held(
+        self, repo: Path, wt: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The budget bounds the git calls INSIDE one ref's proof, not just the loop."""
+        from claude_code_hooks_daemon.core import remote_branch_proof
+
+        picked = self._picked(repo, wt)
+        now = [0.0]
+        real = remote_branch_proof.holds_net_change
+
+        def slow(*args: Any, **kwargs: Any) -> bool:
+            now[0] = force_removal.PATCH_PROOF_BUDGET_SECONDS + 1.0  # the proof ran long
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(remote_branch_proof, "holds_net_change", slow)
+        held = force_removal.patch_held_tips(repo, [picked], set(), clock=lambda: now[0])
+        assert held == frozenset()
+
     def test_the_proof_runs_from_the_top_level_when_given_a_subdirectory(
         self, repo: Path, wt: Path
     ) -> None:

@@ -9,13 +9,14 @@ One ``git rev-list <tips> --not <holders>`` answers for many tips at once: a tip
 some holder reaches is subtracted, so a tip still printed is held by nothing.
 """
 
+import subprocess
 import time
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import git_deadline, run_git
 
 #: Every ref namespace whose refs survive a branch deletion and hold commits.
 ALL_HOLDERS: Final[tuple[str, ...]] = ("refs/heads", "refs/remotes", "refs/tags")
@@ -121,25 +122,28 @@ def patch_held_tips(
     refs = _surviving_refs(top_level, excluded_refs, namespaces)
     deadline = clock() + budget
     held: set[str] = set()
-    for tip in tips:
-        for ref in refs:
-            if clock() >= deadline:
-                # Out of time is not held: the hook relay would otherwise time out and
-                # fail open, so the removal is refused instead.
-                return frozenset(held)
-            if not _shares_history(top_level, ref, tip):
-                continue
-            try:
-                proven = (
-                    patch_equivalent(top_level, ref, tip) == (True, 0)
-                    and remote_branch_proof.holds_net_change(top_level, ref, tip)
-                    and remote_branch_proof.gitlink_change_held(top_level, ref, tip)
-                )
-            except remote_branch_proof.ProofUnavailableError:
-                proven = False
-            if proven:
-                held.add(tip)
-                break
+    # Every git call below shares the deadline, so one slow ref cannot outlast it: a call
+    # past it reports a timeout, which each proof reads as "not held".
+    with git_deadline(deadline, clock):
+        for tip in tips:
+            for ref in refs:
+                if clock() >= deadline:
+                    # Out of time is not held: the hook relay would otherwise time out and
+                    # fail open, so the removal is refused instead.
+                    return frozenset(held)
+                if not _shares_history(top_level, ref, tip):
+                    continue
+                try:
+                    proven = (
+                        patch_equivalent(top_level, ref, tip) == (True, 0)
+                        and remote_branch_proof.holds_net_change(top_level, ref, tip)
+                        and remote_branch_proof.gitlink_change_held(top_level, ref, tip)
+                    )
+                except (remote_branch_proof.ProofUnavailableError, subprocess.CalledProcessError):
+                    proven = False
+                if proven and clock() < deadline:
+                    held.add(tip)
+                    break
     return frozenset(held)
 
 
