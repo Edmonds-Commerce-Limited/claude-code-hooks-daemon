@@ -791,17 +791,6 @@ def _merged_tracking_tips(
                 anchored_by[ref] = target
             proven |= merged
         evidence = {name: TIER_MERGED for name in tips if tracking[name] in proven}
-        doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
-        # Contained in another branch that survives this command (Q14): every commit
-        # is held there, so the delete loses nothing. Never for an integration line.
-        for name in sorted(feature_names):
-            if tracking[name] in proven:
-                continue
-            holder = _surviving_holder(directory, tips[name], tracking[name], refs, remote, doomed)
-            if holder is not None:
-                proven.add(tracking[name])
-                evidence[name] = TIER_MERGED
-                anchored_by[tracking[name]] = holder
         # An integration line is never judged by patch-id or tree: only by ancestry.
         pending = {
             tracking[name]: tips[name]
@@ -835,6 +824,18 @@ def _merged_tracking_tips(
         # Every holder is a remote-tracking ref (Plan 00626); each one relied on, and the
         # default that sets the merge base, is confirmed live by `_live_tip_problems`
         # through the anchors.
+        doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
+        # Contained in another branch that survives this command (Q14): every commit
+        # is held there, so the delete loses nothing. Tried after the cheaper history
+        # tiers (so their evidence is the one cached) and never for an integration line.
+        for name in sorted(feature_names):
+            if tracking[name] in proven:
+                continue
+            holder = _surviving_holder(directory, tips[name], tracking[name], refs, remote, doomed)
+            if holder is not None:
+                proven.add(tracking[name])
+                evidence[name] = TIER_MERGED
+                anchored_by[tracking[name]] = holder
         holders = [
             target
             for target in _proof_targets(remote, default, branches, refs)
