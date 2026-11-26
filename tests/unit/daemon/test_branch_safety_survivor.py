@@ -101,6 +101,17 @@ def test_empty_commits_above_a_pushed_surviving_ref_are_remote_held(
     assert verdict.refusal is None
 
 
+def test_a_run_of_exactly_the_cap_is_still_stripped(repo: Path) -> None:
+    _smoke_with_branch_on_top(repo, "u2", empties=branch_safety._MAX_EMPTY_COMMITS, then_work=False)
+    assert _classify(repo, "u2").tier == TIER_REMOTE_HELD
+
+
+def test_a_run_past_the_cap_is_unproven(repo: Path) -> None:
+    count = branch_safety._MAX_EMPTY_COMMITS + 1
+    _smoke_with_branch_on_top(repo, "u2", empties=count, then_work=False)
+    assert _classify(repo, "u2").tier != TIER_REMOTE_HELD
+
+
 def test_a_real_commit_above_the_empty_ones_is_not_proven(repo: Path) -> None:
     """Work above a surviving ref is unique work: the empty-commit rule must not hide it."""
     _smoke_with_branch_on_top(repo, "u2", empties=1, then_work=True)

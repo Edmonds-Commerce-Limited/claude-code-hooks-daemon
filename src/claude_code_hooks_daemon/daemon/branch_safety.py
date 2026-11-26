@@ -56,7 +56,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import branch_reject
-from claude_code_hooks_daemon.core.branch_park import walk_park_range
+from claude_code_hooks_daemon.core.branch_park import is_content_free, walk_park_range
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
@@ -764,7 +764,7 @@ def _below_empty_commits(repo: Path, tip: str) -> str | None:
     ``_MAX_EMPTY_COMMITS``, is None: unproven, the safe direction.
     """
     current = tip
-    for _ in range(_MAX_EMPTY_COMMITS):
+    for _ in range(_MAX_EMPTY_COMMITS + 1):
         shown = _git(
             repo, "rev-list", "--parents", "--max-count=1", current, check=False
         ).stdout.split()
@@ -933,8 +933,10 @@ def classify_branch(
         if held is None:
             # A tip that is only EMPTY commits above a commit a remote ref holds has
             # nothing of its own to lose (the park-commit residual of ledger N751).
+            # The walk only NAMES the candidate; the hardened rule (commit-graph off,
+            # trees and parents read from the stored objects) decides it is empty.
             base = _below_empty_commits(repo, tip)
-            if base is not None:
+            if base is not None and is_content_free(repo, tip, base) is True:
                 held = holder_of(repo, listing, base)
         if held is not None:
             held_by = f"{listing.remote}: {held}"
