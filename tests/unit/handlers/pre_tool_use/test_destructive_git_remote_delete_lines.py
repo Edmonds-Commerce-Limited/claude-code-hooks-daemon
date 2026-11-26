@@ -74,8 +74,57 @@ def test_a_branch_merged_only_into_an_integration_line_is_allowed(clone: Path) -
     assert result.decision == "allow"
 
 
-def test_without_the_line_configured_the_same_branch_is_unmerged(clone: Path) -> None:
+def test_without_the_line_configured_a_branch_held_by_surviving_branches_is_allowed(
+    clone: Path,
+) -> None:
+    """Q14: `feature` sits at the tip of `release/x`, `keep/me` and `develop`, all of
+    which survive, so deleting it loses nothing whether or not a line is configured."""
     result = _handler(BranchesConfig()).handle(_input("git push origin --delete feature", clone))
+    assert result.decision == "allow"
+
+
+def _stack(clone: Path) -> None:
+    """`inner` and `outer` (inner plus one commit), neither merged to main or a line."""
+    run_git(clone, "checkout", "-b", "inner", "main")
+    commit_content(clone, "inner work")
+    run_git(clone, "push", "origin", "inner")
+    run_git(clone, "checkout", "-b", "outer")
+    commit_content(clone, "outer work")
+    run_git(clone, "push", "origin", "outer")
+    run_git(clone, "checkout", "main")
+    run_git(clone, "fetch", "origin")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin --delete inner outer",
+        "git push origin --delete inner refs/heads/outer",
+        "git push origin --delete inner && git push origin :outer",
+    ],
+)
+def test_a_survivor_deleted_by_the_same_command_does_not_vouch(clone: Path, command: str) -> None:
+    """Q14: `inner` is held by `outer`, but not when `outer` goes in the same command."""
+    _stack(clone)
+    result = _handler().handle(_input(command, clone))
+    assert result.decision == "deny"
+
+
+def test_a_branch_held_by_a_surviving_branch_is_allowed_alone(clone: Path) -> None:
+    _stack(clone)
+    result = _handler().handle(_input("git push origin --delete inner", clone))
+    assert result.decision == "allow"
+
+
+def test_a_branch_that_is_the_only_holder_of_its_commit_is_denied_as_not_merged(
+    clone: Path,
+) -> None:
+    run_git(clone, "checkout", "-b", "solo")
+    commit_content(clone, "only on solo")
+    run_git(clone, "push", "origin", "solo")
+    run_git(clone, "checkout", "main")
+    run_git(clone, "fetch", "origin")
+    result = _handler(BranchesConfig()).handle(_input("git push origin --delete solo", clone))
     assert result.decision == "deny"
     assert "not merged" in (result.reason or "")
 
