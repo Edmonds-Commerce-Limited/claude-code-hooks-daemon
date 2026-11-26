@@ -49,7 +49,11 @@ from claude_code_hooks_daemon.utils.command_position import (
     command_position_segments,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
+from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    GitInvocation,
+    git_invocations,
+    simple_commands,
+)
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
     placement_problem,
@@ -815,6 +819,7 @@ def _force_removal_note(
 
 
 _RESTORE: Final[str] = "restore"
+_DIRECTORY_CHANGES: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 # Flags a restore may carry without changing WHICH files it overwrites. Anything else
 # (`--source`, `-p`, `--pathspec-from-file`, `--staged`, `--ours`...) is unverifiable.
 _RESTORE_FLAGS: Final[frozenset[str]] = frozenset({"--worktree", "-W", "--quiet", "-q"})
@@ -871,16 +876,40 @@ def _restore_note(command: str, cwd: Path) -> tuple[str, str] | None:
         return RuleID.GIT_RESTORE, _with_principle(
             _unverified("a command or process substitution can run a restore this reading misses")
         )
-    for run in git_invocations(command):
-        if run.subcommand != _RESTORE:
-            continue
-        loss = _restore_loss(run, cwd)
+    loss = _restore_command_loss(command, cwd)
+    if loss is None:
+        return None
+    return RuleID.GIT_RESTORE, _with_principle(
+        f"Not restored: {loss}. Only a command made of plain `git restore` runs (and `cd`) "
+        "whose every named file is a tracked, zero-byte file is allowed, since that discards "
+        "no content. Ask the user to run any other restore."
+    )
+
+
+def _restore_command_loss(command: str, cwd: Path) -> str | None:
+    """Why ``command`` as a whole may lose content, or None when it only fills empty files.
+
+    Every simple command must be a ``git restore`` or a ``cd``: any other command (``mv``
+    that fills the file first, ``xargs`` that adds paths, ``export`` that moves the
+    repository, ``bash`` running text this reading cannot see) is a way for the restore
+    to do more than the paths this reading checks.
+    """
+    restores = 0
+    for simple in simple_commands(command):
+        if simple.git is None:
+            if simple.words and simple.words[0] in _DIRECTORY_CHANGES:
+                continue
+            return "the command runs something other than `git restore` and `cd`"
+        if simple.git.subcommand != _RESTORE:
+            return "the command runs a git command other than `git restore`"
+        if simple.words[0] != "git":
+            return "the restore is run through a wrapper"
+        loss = _restore_loss(simple.git, cwd)
         if loss is not None:
-            return RuleID.GIT_RESTORE, _with_principle(
-                f"Not restored: {loss}. Only a restore whose every named file is a tracked, "
-                "zero-byte file is allowed, since that discards no content. Ask the user to "
-                "run any other restore."
-            )
+            return loss
+        restores += 1
+    if restores == 0:
+        return "no `git restore` in the command could be read"
     return None
 
 
@@ -1430,8 +1459,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         # Both matches() and handle() consume the same ordered mapping, so they
         # can never drift on which pattern matched first.
         rule_ids = self._match_rule_ids(command)
-        # A forced branch delete is the ONLY destructive rule with a safe case: when
-        # every named tip is on a remote nothing can be lost. It is judged only when
+        # A forced branch delete, a worktree removal and a restore of empty files have a
+        # safe case: when nothing can be lost they are allowed. They are judged only when
         # no other rule matched too, so a compound command cannot ride the allowance,
         # and the denial then names the rule that actually blocks it.
         others = [matched for matched in rule_ids if matched not in _LOSSLESS_WHEN_PROVEN]

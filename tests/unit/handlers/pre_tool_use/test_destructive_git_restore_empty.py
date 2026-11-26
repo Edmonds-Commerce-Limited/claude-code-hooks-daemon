@@ -145,7 +145,6 @@ class TestShapesThatReachBeyondTheNamedFilesStayDenied:
             "git restore -p a.txt",
             "git restore --pathspec-from-file=list.txt",
             "git restore $(echo a.txt)",
-            "git restore a.txt && git restore b.txt",
         ],
     )
     def test_is_denied_even_when_the_named_file_is_empty(
@@ -154,6 +153,47 @@ class TestShapesThatReachBeyondTheNamedFilesStayDenied:
         _empty(repo, "a.txt")
         decision, _ = _verdict(handler, command, repo)
         assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bash <<'EOF'\ngit restore b.txt\nEOF",
+            "echo 'git restore b.txt' | bash",
+            "echo b.txt | xargs git restore a.txt",
+            "mv b.txt a.txt && git restore a.txt",
+            "export GIT_WORK_TREE=../other; git restore a.txt",
+            "GIT_WORK_TREE=../other git restore a.txt",
+            "git --work-tree=../other restore a.txt",
+            "env git restore a.txt",
+            "git restore a.txt; git checkout -- b.txt",
+        ],
+    )
+    def test_a_command_that_does_more_than_restore_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        """Review of PR 276: each of these was allowed while ``a.txt`` was empty.
+
+        ``b.txt`` holds unsaved work in every case, so a denial is the only safe verdict.
+        """
+        _empty(repo, "a.txt")
+        (repo / "b.txt").write_text("my unsaved edit\n")
+        decision, _ = _verdict(handler, command, repo)
+        assert decision == Decision.DENY
+
+    def test_a_cd_then_restore_of_an_empty_file_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        _empty(repo, "sub/c.txt")
+        decision, _ = _verdict(handler, "cd sub && git restore c.txt", repo)
+        assert decision == Decision.ALLOW
+
+    def test_two_chained_restores_of_empty_files_are_allowed(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        _empty(repo, "a.txt")
+        _empty(repo, "b.txt")
+        decision, _ = _verdict(handler, "git restore a.txt && git restore b.txt", repo)
+        assert decision == Decision.ALLOW
 
     def test_a_symlink_to_an_empty_file_is_denied(
         self, handler: DestructiveGitHandler, repo: Path
