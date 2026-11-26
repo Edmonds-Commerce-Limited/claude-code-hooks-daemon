@@ -8757,6 +8757,8 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW: renaming the identifier works round it. It makes tests about vault handling awkward to name.
 
+**Corroboration** (2026-11-26 07:42Z, relayed by the coordinator, second-hand): a builder on the coordinator's host hit the same class twice that day, a Write denied by the guard whose only match was the token `python3`. That token is not a vault key name, so it points at a broader identifier-or-word match than the `*vault_pass*` case, and the reporter's guard options and deny text are needed to place it.
+
 **Status**: ⬜ Open. Same family as N744. Decide with the owner whether an identifier-shaped token (no `/`, no leading `.`) should need to name an existing file before `*vault_pass*` denies it, as `*.secret*` already does.
 
 ### N750 — `hooks-daemon delete-branch` refuses a branch that exists only on the remote
