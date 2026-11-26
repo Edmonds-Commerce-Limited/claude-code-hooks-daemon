@@ -10,14 +10,14 @@ some holder reaches is subtracted, so a tip still printed is held by nothing.
 """
 
 import logging
-import subprocess
 import time
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import git_deadline, run_git
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.git_repo import GIT_COMMAND_ERRORS, git_deadline, run_git
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,10 @@ def patch_held_tips(
     refs = _surviving_refs(top_level, excluded_refs, namespaces)
     deadline = clock() + budget
     held: set[str] = set()
+    proof_errors: tuple[type[BaseException], ...] = (
+        remote_branch_proof.ProofUnavailableError,
+        *GIT_COMMAND_ERRORS,
+    )
     # Every git call below shares the deadline, so one slow ref cannot outlast it: a call
     # past it reports a timeout, which each proof reads as "not held".
     with git_deadline(deadline, clock):
@@ -142,11 +146,12 @@ def patch_held_tips(
                         and remote_branch_proof.holds_net_change(top_level, ref, tip)
                         and remote_branch_proof.gitlink_change_held(top_level, ref, tip)
                     )
-                except (
-                    remote_branch_proof.ProofUnavailableError,
-                    subprocess.CalledProcessError,
-                ) as error:
-                    logger.warning("patch proof for %s against %s unavailable: %s", tip, ref, error)
+                except proof_errors as error:
+                    log_and_continue(
+                        logger,
+                        error,
+                        reason=f"patch proof of {tip} against {ref} unavailable, so not held",
+                    )
                     proven = False
                 if proven and clock() < deadline:
                     held.add(tip)
