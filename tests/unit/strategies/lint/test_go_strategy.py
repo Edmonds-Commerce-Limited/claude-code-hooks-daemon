@@ -2,6 +2,7 @@
 
 import pytest
 
+from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.go_strategy import GoLintStrategy
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 
@@ -31,6 +32,29 @@ class TestProperties:
 
     def test_skip_paths_is_tuple(self, strategy: GoLintStrategy) -> None:
         assert isinstance(strategy.skip_paths, tuple)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/p/src-go/qa/rules/testdata/tempexclusive/src/fix/internal/badtemp/bad.go",
+            "/p/pkg/analyzer/testdata/src/a/a.go",
+            "/p/testdata/x.go",
+        ],
+    )
+    def test_testdata_fixtures_are_skipped(self, strategy: GoLintStrategy, path: str) -> None:
+        """N745: the Go tool ignores `testdata` directories, so a linter must too.
+
+        An analysistest fixture imports GOPATH-style packages (`fix/internal/...`)
+        that exist only inside its own `testdata/src` tree, so `go vet` on it
+        reports an unresolved import for code that is correct.
+        """
+        assert matches_skip_path(path, strategy.skip_paths) is True
+
+    @pytest.mark.parametrize(
+        "path", ["/p/internal/testdata_helpers/x.go", "/p/pkg/a.go", "/p/cmd/testdatax/main.go"]
+    )
+    def test_ordinary_go_paths_are_not_skipped(self, strategy: GoLintStrategy, path: str) -> None:
+        assert matches_skip_path(path, strategy.skip_paths) is False
 
 
 class TestToolUnavailableDetection:

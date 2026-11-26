@@ -8702,7 +8702,7 @@ Follow-up from the seat (checked by the seat, 2026-11-26): a `teamchat reply` wh
 
 **Severity**: MEDIUM if confirmed: a guard that fires on an ordinary tool name blocks real work with no secret involved.
 
-**Status**: ⬜ Open. Ask the seat for the exact content and pattern, reproduce against `secret_file_guard`, then test-first fix.
+**Status**: 🟡 Half settled, 2026-11-26. The message-body half is the guard working as documented, not a defect: `explain-handler secret_file_guard` states that any Bash text naming a protected path is denied with no echo or message exemption, and that `*.secret*` is "intentionally broad (a deliberate project decision)". It reproduced here unasked: a `grep` whose pattern held the `*.secret*` glob text was denied (R-SECRET-BASH-MENTION). Loosening it for printed text would be a security-policy change for the owner, so it is not made here; the workaround is to describe the pattern in words that do not contain the glob. The "shellcheck" Write half is NOT explained: none of the default globs (`*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`, `id_rsa`, `id_ed25519`) matches that word, so the seat's project config must add a glob, or the Write named another file. Open until the seat's `secret_file_guard` options and the deny text arrive.
 
 ### N745 — the staged-lint gate reports false failures on Go analysistest GOPATH fixtures
 
@@ -8714,7 +8714,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW (advisory), but noisy on every such commit.
 
-**Status**: ⬜ Open. Ask the seat for a sample fixture path, then exclude `testdata` GOPATH trees from the Go staged check.
+**Status**: ✅ Fixed, 2026-11-26. `GoLintStrategy.skip_paths` now includes `testdata/` (the Go tool ignores those directories), which both `lint_on_edit` and the staged-lint gate read. Tests in `test_go_strategy.py` (RED before the change); release note 116.
 
 ### N746 — the ccy supervisor script and the provision script rename pid-named temporaries without an exclusive create
 
