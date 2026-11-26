@@ -242,8 +242,8 @@ lint failure. Cause confirmed by reading: `GoLintStrategy.skip_paths` (`strategi
 (`staged_lint_gate`), so one fix in the strategy should close both. Severity: Medium (a correct write is reported as a
 lint failure on every fixture edit).
 
-**Status**: ⬜ open. TDD fix: red test that `matches_skip_path("pkg/x/testdata/rule/src/a/a.go", GoLintStrategy().skip_paths)`
-is true and a sibling `pkg/x/a.go` is false, then add `testdata/` to the Go strategy's `skip_paths`.
+**Status**: ✅ Fixed 2026-11-26 with N745 (same defect, reported again by the fedora-desktop seat): `testdata/` is now in
+`GoLintStrategy.skip_paths`; tests in `test_go_strategy.py`; release note 116.
 
 ### N594 — `lint_on_edit` reports "ruff not found" while ruff is on the session's PATH
 
@@ -7255,8 +7255,11 @@ go tool ignores every `testdata/` directory, and analysistest loads those fixtur
 GOPATH, so their imports never resolve as module code. The commit still went through, but a
 message that says FAILED on a correct commit teaches the reader to ignore the gate.
 
-**Status**: ⬜ Open. The Go tier skips any path with a `testdata` component, as `go build` does,
-with a test using a GOPATH-layout fixture.
+**Status**: ✅ Fixed 2026-11-26 with N745 (same defect): the Go lint strategy skips any path with a `testdata`
+directory segment, as the Go tool does; tests in `test_go_strategy.py`; release note 116. Residual, from the review of
+the fix: matching runs on the absolute path, so a repository checked out under a folder named `testdata` gets no Go
+lint (the common `build/` entries behave the same way), and the literal `testdata/` is also held by
+`strategies/tdd/go_strategy.py`.
 
 ### N602 — review_round_advisor counts any dispatch that says "review" and names a plan, fact-checks included
 
@@ -8702,7 +8705,7 @@ Follow-up from the seat (checked by the seat, 2026-11-26): a `teamchat reply` wh
 
 **Severity**: MEDIUM if confirmed: a guard that fires on an ordinary tool name blocks real work with no secret involved.
 
-**Status**: ⬜ Open. Ask the seat for the exact content and pattern, reproduce against `secret_file_guard`, then test-first fix.
+**Status**: 🟡 Half settled, 2026-11-26. The message-body half is the guard working as documented, not a defect: `explain-handler secret_file_guard` states that any Bash text naming a protected path is denied with no echo or message exemption, and that `*.secret*` is "intentionally broad (a deliberate project decision)". It reproduced here unasked: a `grep` whose pattern held the `*.secret*` glob text was denied (R-SECRET-BASH-MENTION). Loosening it for printed text would be a security-policy change for the owner, so it is not made here; the workaround is to describe the pattern in words that do not contain the glob. The "shellcheck" Write half is NOT explained: none of the default globs (`*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`, `id_rsa`, `id_ed25519`) matches that word, so the seat's project config must add a glob, or the Write named another file. Open until the seat's `secret_file_guard` options and the deny text arrive.
 
 ### N745 — the staged-lint gate reports false failures on Go analysistest GOPATH fixtures
 
@@ -8714,7 +8717,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW (advisory), but noisy on every such commit.
 
-**Status**: ⬜ Open. Ask the seat for a sample fixture path, then exclude `testdata` GOPATH trees from the Go staged check.
+**Status**: ✅ Fixed, 2026-11-26. `GoLintStrategy.skip_paths` now includes `testdata/` (the Go tool ignores those directories), which both `lint_on_edit` and the staged-lint gate read. Tests in `test_go_strategy.py` (RED before the change); release note 116.
 
 ### N746 — the ccy supervisor script and the provision script rename pid-named temporaries without an exclusive create
 
@@ -8735,3 +8738,13 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Severity**: LOW to MEDIUM: a false deny of an in-repo write; the absolute-path workaround is cheap.
 
 **Status**: ⬜ Open. Reproduce with `cd sub && echo x > ../../untracked/f` against the handler, then fix test-first.
+
+### N748 — Ansible lint reports a missing vault password file as a failure of the edited play
+
+**Source**: the fedora-desktop seat, 2026-11-26 04:05Z, checked by that seat (reproduced on its play `playbooks/imports/optional/common/play-unifi-controller.yml`, commit `fed3f8411` on its `v2-smoke` branch).
+
+**Evidence**: in a ccy container where the vault password file named by `ansible.cfg` (`DEFAULT_VAULT_PASSWORD_FILE`) is absent, `lint_on_edit` runs `ansible-playbook --syntax-check <play>` and denies with R-LINT-FAILURE; the whole output is "The vault password file ... was not found". `git commit` then prints "STAGED LINT GATE: a syntax check FAILED" for the same play. Ansible stops on the missing file before it parses the play, so the play is not at fault: an environment gap is reported as a lint failure of the edit. `src/claude_code_hooks_daemon/strategies/lint/ansible_strategy.py` has no handling for it, while `go_strategy.py` already declares `is_tool_unavailable_output` for the same class (`go vet` outside a module).
+
+**Severity**: MEDIUM: every edit of every play is denied in such a container, and the gate blocks the commit's lint step.
+
+**Status**: ⬜ Open. Test first: output "The vault password file ... was not found" is recognised as tool-unavailable (advisory, never a deny) for both `lint_on_edit` and the staged-lint gate, while a real syntax error still denies.

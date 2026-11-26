@@ -11,6 +11,11 @@ from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 # Language-specific constants
 _LANGUAGE_NAME = "Go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
+#: The Go tool ignores every `testdata` directory when it expands a package
+#: pattern. An `analysistest` fixture under one imports GOPATH-style packages
+#: (`fix/internal/...`) that exist only inside its own `testdata/src` tree, so
+#: `go vet` on the file reports an unresolved import for correct code.
+_TESTDATA_DIR = "testdata/"
 _DEFAULT_LINT_COMMAND = "go vet {file}"
 _EXTENDED_LINT_COMMAND = "golangci-lint run {file}"
 #: Acceptance-test fixture directory, below the gitignored acceptance root.
@@ -83,7 +88,7 @@ class GoLintStrategy:
 
     @property
     def skip_paths(self) -> tuple[str, ...]:
-        return COMMON_SKIP_PATHS
+        return (*COMMON_SKIP_PATHS, _TESTDATA_DIR)
 
     @property
     def precheck_lint_commands(self) -> tuple[str, ...]:
