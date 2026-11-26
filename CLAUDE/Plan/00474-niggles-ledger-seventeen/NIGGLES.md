@@ -8691,3 +8691,47 @@ Kept in its own section at the end so it merges trivially beside PR 249's edits 
 **Severity**: LOW. It blocks a harmless report; the wording workaround is cheap.
 
 **Status**: ⬜ Open. Reproduce with the exact shape in `test_destructive_git_printed_text.py`, then judge a `printf` format string as printed text.
+
+### N744 — the secret-file guard refused a Write because the word "shellcheck" matched a protected-name pattern
+
+**Source**: the fedora-desktop seat, relayed by the coordinator on 2026-11-26. Second-hand: not reproduced here.
+
+**Evidence**: a Write was refused because the word "shellcheck" in its content matched one of the guard's protected-name patterns; the same guard also fired on a chat message that quoted the pattern. Which pattern, and whether the match is on a whole word or a substring, is not established.
+
+Follow-up from the seat (checked by the seat, 2026-11-26): a `teamchat reply` whose message text named a protected glob in prose (the star-dot-secret-star shape) was denied by R-SECRET-BASH-MENTION, "a Bash command whose text mentions a protected path", though it named no file. The first case was a sub-agent's Write of `scripts/qa-temp-exclusive.bash` denied on the token "shellcheck"; the deny text and the matching line were not kept. Same family as N743: a guard reading the words of a message body as if they were a command's operands.
+
+**Severity**: MEDIUM if confirmed: a guard that fires on an ordinary tool name blocks real work with no secret involved.
+
+**Status**: ⬜ Open. Ask the seat for the exact content and pattern, reproduce against `secret_file_guard`, then test-first fix.
+
+### N745 — the staged-lint gate reports false failures on Go analysistest GOPATH fixtures
+
+**Source**: the same relay. Second-hand: not reproduced here.
+
+**Evidence**: at commit, the staged-lint gate reports failures on Go `analysistest` fixtures laid out as a GOPATH tree (`testdata/src/...`), which are not meant to build as ordinary packages. The report says it is advisory only.
+
+Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusive/src/fix/internal/badtemp/bad.go` and `goodtemp/good.go` (commit 748d76986 on the seat's `v2-smoke` branch); their GOPATH-style imports (`fix/internal/...`) are not in the standard library, so a compile check cannot resolve them. The exact printed line was lost. Separately, the seat notes that ad hoc `semgrep` skips `tests/` through its default ignore list, so a repository sweep misses test files unless the list is overridden; the gates are unaffected (an external tool's behaviour, recorded for context).
+
+**Severity**: LOW (advisory), but noisy on every such commit.
+
+**Status**: ⬜ Open. Ask the seat for a sample fixture path, then exclude `testdata` GOPATH trees from the Go staged check.
+
+### N746 — the ccy supervisor script and the provision script rename pid-named temporaries without an exclusive create
+
+**Source**: the same relay. Second-hand: not checked here.
+
+**Evidence**: the seat counts 6 pid-named and 1 fixed-suffix temporaries in the ccy supervisor script and 2 in the provision script, both shipped under `.claude/`, each renamed into place without an exclusive create (it added a semgrep rule, `temp-not-exclusive`, for its own copies). The sources are daemon-owned files an upgrade overwrites.
+
+**Severity**: LOW to MEDIUM: a predictable temporary name in a shared directory can be pre-created by another local user.
+
+**Status**: ⬜ Open. Verify the counts in `.claude/ccy/claude-supervise*` and `provision.sh`, then switch to `mktemp` (exclusive create) test-first. No public issue without the owner.
+
+### N747 — `project_containment` resolved a relative redirect against the session directory, not the directory the command had changed into
+
+**Source**: the fedora-desktop seat's sub-agent, relayed by that seat on 2026-11-26. Second-hand: not reproduced.
+
+**Evidence**: a command that changed into a subdirectory and then redirected to `../../untracked/...` was denied as a write outside the repository: the guard resolved the target from `/workspace`, the session directory, instead of the subdirectory the `cd` reached. The exact command and deny text were not kept; the sub-agent worked round it with an absolute path. `test_project_containment.py` pins several `cd` shapes (Plan 00586 Task 1.8); whether a `cd` in an `&&` chain followed by a relative `..` redirect is among them is for the reproduction to settle.
+
+**Severity**: LOW to MEDIUM: a false deny of an in-repo write; the absolute-path workaround is cheap.
+
+**Status**: ⬜ Open. Reproduce with `cd sub && echo x > ../../untracked/f` against the handler, then fix test-first.

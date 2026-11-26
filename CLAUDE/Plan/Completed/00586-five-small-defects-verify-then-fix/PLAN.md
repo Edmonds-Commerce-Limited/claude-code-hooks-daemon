@@ -1,6 +1,6 @@
 # Plan 00586: five small defects, verify then fix
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -81,9 +81,14 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   directory. Deployed skill copies synced
   (34 related tests pass). Release note 114
 
-- [ ] ⬜ **Task 1.4 (D)**: Confirm on a failed release-gate run that the other shards ran to the end. Fix in the
-  release gate only (a fail-fast input to the shared `test-shards.yml`, default unchanged for `qa.yml`), keeping the
-  final aggregate job's verdict
+- [x] ✅ **Task 1.4 (D)**: Closed as designed, no change. Confirmed: the last 30 `release-gate.yml` runs were all
+  skipped (none was a release pull request), so no gate run has failed to read; the same shared `test-shards.yml`
+  ran as the full-suite fallback of PR 276's CI (run 45739790836), where the integration shard failed at 12 minutes
+  and the unit and integration-slow legs ran on regardless, which is `fail-fast: false` doing what `qa.yml` says it
+  is for. Decision against a fail-fast input: it would cancel only the sibling legs of the `tests` job, never the
+  separate `checks` and `perf-sweep` jobs, so it saves part of the runner minutes; and a release run takes about 40
+  minutes, so a failure hidden by the cancel costs a whole further cycle to find. Reopen if a release run is seen
+  burning runners after the gate is already red and the saving is worth the hidden failures
 
 - [x] ✅ **Task 1.6 (F)**: RED test: a restore of a tracked file whose working copy is zero bytes is allowed, and a
   restore of a non-empty modified file is still denied. GREEN in `destructive_git`, alongside its other
@@ -115,15 +120,18 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA per task, merge each to main, verify CI
+- [x] ✅ **Task 2.1**: targeted QA per task, merge each to main, verify CI. Merged: B PR 271, H PR 272, G PR 273,
+  A PR 274, C PR 275, F PR 276 (each with an independent review); D and E closed without a change
 
 ## Success Criteria
 
-- [ ] Each of A to G: a test that failed before the fix and passes after it, or recorded evidence that it does not
-  reproduce
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` for each
-  user-visible fix (A, B, C, E, F); D and G change CI only and have no release-bound consequence
+- [x] Each of A to H: a test that failed before the fix and passes after it, or recorded evidence that it does not
+  reproduce (E and D are the recorded-evidence cases)
+- [x] Release-bound consequence recorded: callouts in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` 112 (B), 113 (A),
+  114 (C) and 115 (F); E and D changed nothing, and G, H changed CI mapping and tests only, so they have no
+  release-bound consequence
 
 ## Delivery & Milestones
 
-- (pending)
+- 2026-11-26: all tasks complete; merge commits `b491a422e` (B), `1c66dfd6d` (H), `eb5e9784a` (G), `97886819a` (A),
+  `068009f7f` (C), `60fcb2678` (F)
