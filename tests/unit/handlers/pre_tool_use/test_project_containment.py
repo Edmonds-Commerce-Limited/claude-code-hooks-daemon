@@ -1587,6 +1587,20 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
     @pytest.mark.parametrize(
         "command",
         [
+            "cd sub/deep && echo x > ../../untracked/f",
+            "cd sub && cd deep && echo x > ../../untracked/f",
+        ],
+    )
+    def test_a_deep_cd_then_a_relative_redirect_back_into_the_repository_is_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        """N747: `../..` from two levels down lands back at the repository root."""
+        (repo / "sub" / "deep").mkdir()
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             "cd /tmp && echo x > x",
             "cd .. && cd .. && echo x > x",
             "cd .. && echo x > x",

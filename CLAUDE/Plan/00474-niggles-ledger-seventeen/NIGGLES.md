@@ -8737,7 +8737,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: a false deny of an in-repo write; the absolute-path workaround is cheap.
 
-**Status**: ⬜ Open. Reproduce with `cd sub && echo x > ../../untracked/f` against the handler, then fix test-first.
+**Status**: ⬜ Not reproduced (2026-11-26). `cd sub/deep && echo x > ../../untracked/f` and `cd sub && cd deep && echo x > ../../untracked/f` are both allowed by the handler (`TestARedirectIsJudgedWhereTheChainsCdLandsIt`, now pinned), so a relative redirect after an `&&` chain of `cd` moves is joined to where the chain lands. A `;`-joined `cd` is deliberately read both ways (the `cd` may fail), which denies `cd sub; echo x > ../x`; that is the likeliest source of the report. Reopen if the fedora-desktop seat supplies the exact command and the hook `cwd` it ran from.
 
 ### N748 — Ansible lint reports a missing vault password file as a failure of the edited play
 
