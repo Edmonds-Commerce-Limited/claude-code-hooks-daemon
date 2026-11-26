@@ -8747,4 +8747,14 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: every edit of every play is denied in such a container, and the gate blocks the commit's lint step.
 
-**Status**: ⬜ Open. Test first: output "The vault password file ... was not found" is recognised as tool-unavailable (advisory, never a deny) for both `lint_on_edit` and the staged-lint gate, while a real syntax error still denies.
+**Status**: ✅ Fixed (2026-11-26). `AnsibleLintStrategy.is_tool_unavailable_output` recognises the output when every `ERROR!` line is the missing-key-file line, so `lint_on_edit` and the staged-lint gate (both read the `ClassifiesToolUnavailable` protocol) degrade to an advisory allow; a syntax error beside it still denies. Release note 117.
+
+### N749 — `secret_file_guard` denied a Python identifier because it contains `vault_pass`
+
+**Source**: observed by this seat, 2026-11-26, while writing the N748 tests.
+
+**Evidence**: an `Edit` of `tests/unit/strategies/lint/test_ansible_strategy.py` was denied with R-SECRET-SCRIPT-AUTHOR, "Matched protected glob: `*vault_pass*`", on the token `test_a_missing_vault_password_file_is_tool_unavailable`, a test method name and not a path. An earlier Bash heredoc naming `/workspace/` plus the dot-prefixed key-file glob was denied by R-SECRET-BASH-MENTION, which is the documented behaviour. The identifier case is the dotted-bare-word class the guidance narrows for `*.secret*` (a bare word counts only when it names an existing file, is indexed, or is the operand of a file-opening command), but `*vault_pass*` has no such narrowing for an underscore identifier in authored source.
+
+**Severity**: LOW: renaming the identifier works round it. It makes tests about vault handling awkward to name.
+
+**Status**: ⬜ Open. Same family as N744. Decide with the owner whether an identifier-shaped token (no `/`, no leading `.`) should need to name an existing file before `*vault_pass*` denies it, as `*.secret*` already does.

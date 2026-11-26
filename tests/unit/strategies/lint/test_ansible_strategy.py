@@ -422,3 +422,52 @@ class TestSyntaxCheckAgainstRealAnsible:
         path = _write(tmp_path, "playbooks/broken.yml", _BROKEN_PLAYBOOK)
         result = self._check(path, tmp_path)
         assert result.returncode != 0
+
+
+class TestMissingVaultKeyFileIsAnEnvironmentGap:
+    """N748: Ansible stops on a missing vault key file BEFORE it parses the play.
+
+    The whole output is that one line, so it says nothing about the edited
+    file. It must degrade to an advisory allow (as `go vet` outside a module
+    does), while a real syntax error still denies.
+    """
+
+    @pytest.fixture()
+    def strategy(self) -> AnsibleLintStrategy:
+        return AnsibleLintStrategy()
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "ERROR! The vault password file /etc/ansible/pw.txt was not found\n",
+            "[WARNING]: x\nERROR! The vault password file ./pw.txt was not found\n",
+        ],
+    )
+    def test_a_missing_key_file_is_tool_unavailable(
+        self, strategy: AnsibleLintStrategy, output: str
+    ) -> None:
+        assert strategy.is_tool_unavailable_output(output) is True
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "ERROR! We were unable to read either as JSON nor YAML, these are the errors:\n",
+            "ERROR! 'foo' is not a valid attribute for a Play\n",
+            "ERROR! Syntax Error while loading YAML.\n  found unexpected end of stream\n",
+            "",
+        ],
+    )
+    def test_a_real_syntax_error_is_not_tool_unavailable(
+        self, strategy: AnsibleLintStrategy, output: str
+    ) -> None:
+        assert strategy.is_tool_unavailable_output(output) is False
+
+    def test_a_syntax_error_alongside_the_key_line_still_denies(
+        self, strategy: AnsibleLintStrategy
+    ) -> None:
+        """Both in one output: the play DID get parsed, so the finding is real."""
+        output = (
+            "ERROR! The vault password file /etc/ansible/pw.txt was not found\n"
+            "ERROR! Syntax Error while loading YAML.\n"
+        )
+        assert strategy.is_tool_unavailable_output(output) is False

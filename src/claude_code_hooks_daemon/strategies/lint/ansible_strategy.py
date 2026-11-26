@@ -109,6 +109,11 @@ _PLAYBOOK_NAME_PREFIXES: Final[tuple[str, ...]] = ("play-", "playbook-")
 # no parser will accept.
 _PLAY_SIGNAL: Final = re.compile(r"^\s*-\s*(hosts|import_playbook)\s*:", re.MULTILINE)
 
+#: Ansible prefixes each fatal diagnostic with this.
+_ERROR_PREFIX: Final = "ERROR!"
+#: The configured vault key file does not exist (see ``is_tool_unavailable_output``).
+_VAULT_FILE_MISSING: Final = re.compile(r"^ERROR! The vault password file .+ was not found\s*$")
+
 
 class AnsibleLintStrategy:
     """Lint enforcement strategy for Ansible playbooks and task files.
@@ -165,6 +170,21 @@ class AnsibleLintStrategy:
             return False
 
         return bool(_PLAY_SIGNAL.search(content))
+
+    def is_tool_unavailable_output(self, output: str) -> bool:
+        """Recognise Ansible stopping on a missing vault key file, not on the play.
+
+        Ansible reads the key file named by its configuration BEFORE it parses
+        the play, so in an environment where that file is absent every play
+        fails with the one line and the output says nothing about the edited
+        file. That is an environment gap, so it degrades to an advisory allow.
+
+        The output counts only when EVERY ``ERROR!`` line is that one: a syntax
+        error reported beside it means the play was parsed and the finding is
+        real, so it still denies.
+        """
+        errors = [line for line in output.splitlines() if line.startswith(_ERROR_PREFIX)]
+        return bool(errors) and all(_VAULT_FILE_MISSING.match(line) for line in errors)
 
     def command_values(self, file_path: str) -> dict[str, str]:
         """The file the syntax check is pointed at (the ``{playbook}`` placeholder).
