@@ -8727,7 +8727,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: a predictable temporary name in a shared directory can be pre-created by another local user.
 
-**Status**: ⬜ Open. Verify the counts in `.claude/ccy/claude-supervise*` and `provision.sh`, then switch to `mktemp` (exclusive create) test-first. No public issue without the owner.
+**Status**: ◐ Verified, not changed (2026-11-26). Counts hold: `provision.sh` has 2 pid-named temporaries (state record and the killed-sync rewrite); `.claude/ccy/claude-supervise.py` has 5 pid-named, 1 pid-plus-thread-id (`_STATUS_MESSAGE_FILENAME`) and 2 fixed-suffix ones. Every one sits under the project's own `untracked/` (`SYNC_STATE_DIR="$DAEMON_DIR/untracked/..."`; the supervisor writes beside `untracked_dir`), a directory the project owner owns (mode 755), not a shared one, so no other local user can pre-create the name; the stated exposure needs a project directory writable by others. The change is eight edits in an 11k-line supervisor whose atomic writes work today, so it is left until the owner decides the shared-directory case matters or wants the `temp-not-exclusive` rule satisfied. Not a public issue.
 
 ### N747 — `project_containment` resolved a relative redirect against the session directory, not the directory the command had changed into
 
