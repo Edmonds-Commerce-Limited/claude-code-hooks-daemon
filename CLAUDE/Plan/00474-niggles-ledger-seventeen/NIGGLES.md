@@ -8840,3 +8840,33 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Severity**: LOW to MEDIUM: only a human edit can remove it today.
 
 **Status**: ⬜ Open as an idea, agreed shape (seat and coordinator, 09:13Z): a verb (for example `hooks-daemon journal-redact <entry> --term-file <file> --placeholder <text>`) that VERIFIES the approval itself (`teamchat verify` on a human event in the questions room, kind human) and refuses otherwise, replaces only whole-word matches, keeps the heading and stamp, prints only counts (never the term) and records the approval id through a normal journal entry. An agent-supplied approval reference is never accepted. Needs the owner's yes before it is built.
+
+### N757 — secret_file_guard matches protected-path globs in message and script TEXT that only quotes them
+
+**Source**: the laptop host seat (09:19Z, relayed by the coordinator and the fedora-desktop seat), the fedora-desktop seat's sub-agent (10:14Z), and this seat's own reply (09:24Z). Unchecked by the reporters; reproduced here once.
+
+**Evidence**: (1) a teamchat send quoting a Claude Code permission rule (a Bash deny with single stars around an app id, inside backticks, plus a path ending in a bare double star outside them) was denied. (2) A script written with Write whose text held the word `shellcheck`, and another holding a bare star, were denied as a mention of a protected path, against the secret-file glob. (3) This seat's reply to the peer, which named the secret-file glob in prose, was denied by R-SECRET-BASH-MENTION in the same way. The deny gives the matched glob but the sender cannot tell which token of the text matched.
+
+**Severity**: MEDIUM: legitimate messages and scripts cannot be sent as written, and the plan-script bootstrap was blocked; the workaround (copy from an existing script, or rephrase) hides the cause. Same family as N556 and the ledger line on the secret-file glob matching a jq field path.
+
+**Status**: ⬜ Open. Fix, test first: (a) a glob inside backticks or a quoted permission rule is not a path mention; (b) a glob must be path-shaped (contain a separator or name an existing path) to count; (c) the deny names the matched TOKEN's position and the pattern class, never the pattern text. Fixtures: the shapes above (all pass) and a real read of a protected path (still denies). Check whether `shellcheck` really matches or the cause was another token of the same text.
+
+### N758 — the branch stop guard records a branch as abandoned while a live sub-agent holds its dirty files
+
+**Source**: the fedora-desktop seat, 2026-11-26 10:17Z (checked by the seat: about 15 times in one session on one branch).
+
+**Evidence**: the lead stops while a background sub-agent is mid-edit on the shared worktree. After three blocks the guard writes "Branches abandoned at stop after 3 blocks: <branch>". Its suggested fix, add everything and commit, would sweep the sub-agent's half-done files into the lead's commit. Sub-agents hit the same guard and correctly refuse that suggestion.
+
+**Severity**: MEDIUM: a false abandoned record, and advice that would mix another agent's unfinished work into a commit.
+
+**Status**: ⬜ Open. Fix, test first: when a live background agent of the session holds the dirty paths, name that agent and record "in flight", never "abandoned", and never suggest staging everything while another agent of the session is live.
+
+### N759 — a Bash denial names a token as matching a secret glob when the real cause was too many directories entered
+
+**Source**: the fedora-desktop seat's sub-agent, 2026-11-26 10:21Z (unchecked; plan 00268 report `subagent-reports/261126-ci-analyzer-fixes.md`).
+
+**Evidence**: a denial named the token `go` as matching the secret file glob. The real cause was the command entering too many directories. The wrong reason sent the agent after the wrong fix.
+
+**Severity**: LOW to MEDIUM: a misleading deny reason costs a wrong fix attempt.
+
+**Status**: ⬜ Open. Fix, test first: reproduce the command shape, find which rule really fires (likely the containment or directory-walk cap), and make the deny report that rule. Check whether the secret-glob line is a leftover from an earlier rule in the same deny text.
