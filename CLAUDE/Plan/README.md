@@ -68,8 +68,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00584: pull requests start as drafts](00584-pull-requests-start-as-drafts/PLAN.md) - Not Started (owner request: every PR is created with a `[DRAFT]` title prefix everywhere, plus `--draft` where GitHub offers native drafts; leaving draft removes the prefix in the same step, `gh pr ready --undo` re-adds it; the release flows comply)
 
-- [00586: five small defects, verify then fix](00586-five-small-defects-verify-then-fix/PLAN.md) - In Progress, Medium (Task 1.2 (B) fixed, empty `daemon.languages` is unset in the relevance review; five defects noticed in passing: each task reproduces the defect first and closes with evidence and no change if it does not reproduce)
-
 - [00448: plan completion gate has no commit time backstop](00448-plan-completion-gate-has-no-commit-time-backstop/PLAN.md) - Not Started (the Complete-flip gate keys on Write/Edit only, so a `PLAN.md` written through Bash escapes it — as Plan 00437 did)
 
 - [00410: gitignore swallows deployed assets](00410-gitignore-swallows-deployed-assets/PLAN.md) - Not Started (an unanchored `hooks-daemon/` ignore pattern matches at every depth, so it hides the deployed `.claude/skills/hooks-daemon/` tree as well as the intended clone; this repo is already anchored, but nothing DETECTS the mistake, and an ignored file cannot drift visibly. Owner-reported from a client project)
@@ -333,9 +331,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 641 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 530 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 531 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 87 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 86 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
