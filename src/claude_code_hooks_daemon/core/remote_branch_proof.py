@@ -229,6 +229,45 @@ def _proof_targets(
     return targets
 
 
+def _surviving_holder(
+    directory: Path,
+    tip: str,
+    own_ref: str,
+    refs: dict[str, tuple[str, str]],
+    remote: str,
+    doomed: Collection[str],
+) -> str | None:
+    """A remote-tracking ref that still exists and contains ``tip``, else None.
+
+    The owner's rule (Q14): a branch whose every commit is an ancestor of another
+    branch that survives the command loses nothing when it goes. One
+    ``for-each-ref --contains`` lists the refs holding the tip; ``doomed`` (every
+    branch the same command deletes) and the branch itself never count, and the
+    ``HEAD`` alias is not a branch. The first holder by name is returned so the
+    answer is stable, and the caller anchors it so the remote's live tip is confirmed.
+    """
+    prefix = f"{REMOTES_PREFIX}{remote}/"
+    held = run_git(
+        directory,
+        "for-each-ref",
+        f"--contains={tip}",
+        "--format=%(refname)",
+        prefix,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if held.returncode != 0:
+        return None
+    for ref in sorted(held.stdout.splitlines()):
+        if (
+            ref != own_ref
+            and ref not in doomed
+            and ref != f"{prefix}HEAD"
+            and refs.get(ref, ("", ""))[1] == "commit"
+        ):
+            return ref
+    return None
+
+
 class ProofUnavailableError(RuntimeError):
     """Git failed while judging a branch, so its answer is unknown and must not be cached."""
 
@@ -746,6 +785,17 @@ def _merged_tracking_tips(
                 anchored_by[ref] = target
             proven |= merged
         evidence = {name: TIER_MERGED for name in tips if tracking[name] in proven}
+        doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
+        # Contained in another branch that survives this command (Q14): every commit
+        # is held there, so the delete loses nothing. Never for an integration line.
+        for name in sorted(feature_names):
+            if tracking[name] in proven:
+                continue
+            holder = _surviving_holder(directory, tips[name], tracking[name], refs, remote, doomed)
+            if holder is not None:
+                proven.add(tracking[name])
+                evidence[name] = TIER_MERGED
+                anchored_by[tracking[name]] = holder
         # An integration line is never judged by patch-id or tree: only by ancestry.
         pending = {
             tracking[name]: tips[name]
@@ -779,7 +829,6 @@ def _merged_tracking_tips(
         # Every holder is a remote-tracking ref (Plan 00626); each one relied on, and the
         # default that sets the merge base, is confirmed live by `_live_tip_problems`
         # through the anchors.
-        doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
         holders = [
             target
             for target in _proof_targets(remote, default, branches, refs)
