@@ -783,3 +783,59 @@ class TestJournalDayFilesAreExempt:
             },
         }
         assert handler.matches(hook_input) is True
+
+
+_PLAN_PATH = "/workspace/CLAUDE/Plan/00146-x/PLAN.md"
+
+
+def _write(content: str) -> dict[str, Any]:
+    return {"tool_name": "Write", "tool_input": {"file_path": _PLAN_PATH, "content": content}}
+
+
+class TestBehaviourParameterDurations:
+    """N755: a duration is flagged by the words around it, not by its unit."""
+
+    @pytest.fixture
+    def handler(self) -> PlanTimeEstimatesHandler:
+        """Create handler instance."""
+        return PlanTimeEstimatesHandler()
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "a usage-limited session switches sign-in after a fuzzy cooldown of 8 minutes plus jitter",
+            "Task 2.4: switch sign-in after a fuzzy cooldown of about 8 minutes plus jitter",
+            "the sign-in switch needs about 8 minutes of cooldown",
+            "the cache TTL is 30 minutes",
+            "retry with a 5 second backoff",
+            "the window is 2 hours",
+            "poll every 10 minutes",
+            "the heartbeat interval needs about 30 seconds, the grace period is 2 minutes",
+        ],
+    )
+    def test_behaviour_parameter_passes(
+        self, handler: PlanTimeEstimatesHandler, sentence: str
+    ) -> None:
+        """A duration governed by a parameter word is not a schedule estimate."""
+        assert handler.matches(_write(sentence)) is False
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "this will take 3 days",
+            "estimated effort: 2 weeks",
+            "ETA: 5 days",
+            "Phase 2 takes about 4 hours",
+            "the cooldown work takes about 4 hours",
+            "cooldown of 8 minutes, and the rest needs about 3 days",
+        ],
+    )
+    def test_effort_estimate_still_flags(
+        self, handler: PlanTimeEstimatesHandler, sentence: str
+    ) -> None:
+        """A duration beside effort words, or outside any parameter clause, still blocks."""
+        assert handler.matches(_write(sentence)) is True
+
+    def test_target_completion_date_still_flags(self, handler: PlanTimeEstimatesHandler) -> None:
+        """A bare date carries no duration and is never a parameter."""
+        assert handler.matches(_write("Target Completion: 2026-06-30 (cooldown)")) is True

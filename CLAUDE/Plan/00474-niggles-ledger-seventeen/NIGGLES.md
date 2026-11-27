@@ -8831,7 +8831,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW: a false positive with a workaround that hides the real wording.
 
-**Status**: ⬜ Open. Fix, test first: flag a duration only next to effort or schedule words (takes, will take, effort, estimate, ETA, days of work, by a date); pass one governed by timeout, cooldown, window, interval, TTL, delay or limit. Fixtures: the seat's three refused edits (pass) and a genuine "this will take 3 days" (still flags).
+**Status**: ✅ Fixed on branch niggle-n755-time-estimate-behaviour-parameter. Each duration is judged by its own clause: a parameter word (cooldown, window, interval, TTL, backoff, ...) without an effort or schedule word passes; effort wording and dated targets still block. Tests: `TestBehaviourParameterDurations`. Release note 123.
 
 ### N756 — no route for an owner-approved in-place redaction of a journal entry
 

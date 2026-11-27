@@ -84,6 +84,24 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         r"\brate\s+limit",
     ]
 
+    #: A duration figure; the unit alone never decides, its clause's words do.
+    _DURATION_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"\b\d+(?:-\d+)?\s*(?:hour|hr|minute|min|second|sec|day|week|month)s?\b", re.IGNORECASE
+    )
+    #: Words that make a duration an effort or schedule statement.
+    _EFFORT_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"\b(?:takes?|estimates?|estimated|effort|ETA|deadline|sprint|due|"
+        r"(?:days?|hours?|weeks?)\s+of\s+work|of\s+(?:work|implementation|development))\b",
+        re.IGNORECASE,
+    )
+    #: Words that make a duration a behaviour parameter of the thing being built.
+    _PARAMETER_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"\b(?:timeouts?|cooldowns?|windows?|intervals?|TTL|delays?|limits?|expiry|expires?|"
+        r"retry|retries|backoff|periods?|debounce|grace|heartbeats?|jitter|poll(?:s|ing)?)\b",
+        re.IGNORECASE,
+    )
+    _CLAUSE_BOUNDARY_RE: ClassVar[re.Pattern[str]] = re.compile(r"[;,]|\.\s")
+
     defect_class: ClassVar[DefectClass | None] = DefectClass.PLAN_TIME_ESTIMATE
 
     def __init__(self) -> None:
@@ -157,9 +175,40 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         for line in content.splitlines():
             if not self._line_has_estimate(line):
                 continue
-            if not self._line_has_technical_term(line):
+            if self._line_has_technical_term(line):
+                continue
+            if not self._all_durations_are_parameters(line):
                 return True
         return False
+
+    def _all_durations_are_parameters(self, line: str) -> bool:
+        """Return True when every duration on the line states a behaviour parameter.
+
+        A duration is a parameter when its own clause carries a parameter word
+        (cooldown, interval, backoff, ...) and no effort or schedule word.
+        A matched line with no duration at all (a bare date) is never one.
+        """
+        durations = list(self._DURATION_RE.finditer(line))
+        if not durations:
+            return False
+        for duration in durations:
+            clause = self._clause_around(line, duration.start())
+            if self._EFFORT_RE.search(clause) or not self._PARAMETER_RE.search(clause):
+                return False
+        return True
+
+    @classmethod
+    def _clause_around(cls, line: str, position: int) -> str:
+        """Return the clause of ``line`` (split on ; , and sentence stops) holding ``position``."""
+        start = 0
+        end = len(line)
+        for boundary in cls._CLAUSE_BOUNDARY_RE.finditer(line):
+            if boundary.end() <= position:
+                start = boundary.end()
+            else:
+                end = boundary.start()
+                break
+        return line[start:end]
 
     def _line_has_estimate(self, line: str) -> bool:
         """Return True if the line matches any blocked estimate pattern."""
