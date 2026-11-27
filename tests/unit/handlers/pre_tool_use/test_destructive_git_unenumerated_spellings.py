@@ -21,6 +21,9 @@ the objection that kept these unwritten.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -85,15 +88,38 @@ class TestWorkingTreeDestruction:
             "git checkout -t origin/main",
         ],
     )
-    def test_ordinary_checkout_is_untouched(self, handler, command: str) -> None:
+    def test_ordinary_checkout_is_untouched(self, handler, command: str, tmp_path: Path) -> None:
         """The controls.
 
         `feature-fix` and `feature-work` both contain an `f`, and `-b`/`-t`
         are ordinary branch operations. A pattern that keyed on the letter
         rather than on a flag token would deny all four, and switching
-        branches is the single most routine git operation there is.
+        branches is the single most routine git operation there is. A one-operand
+        checkout is a switch only when git says the operand is a commit or no path
+        (N764), so the event names a throwaway repository to ask.
         """
-        assert not _denied(handler, command)
+        repo = tmp_path / "repo"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "base",
+            ],
+            cwd=repo,
+            check=True,
+        )
+        hook_input = {**_input(command), "cwd": str(repo)}
+        assert not handler.matches(hook_input) or (
+            handler.handle(hook_input).decision is Decision.ALLOW
+        )
 
     @pytest.mark.parametrize(
         "command",

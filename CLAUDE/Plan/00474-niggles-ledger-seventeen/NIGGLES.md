@@ -8923,7 +8923,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: a discard route the guard never saw; predates PR 293.
 
-**Status**: ⬜ Open. Fix, test first: when the second operand is not a known ref, treat the undashed form as the path form and apply the same proof as the dashed form (PR 293); keep a real branch switch allowed.
+**Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. The guard reads the undashed form as git does: `git checkout <rev> <paths>` gets the dashed form's proof when `<rev>` is one literal revision that resolves to a tree and names no path in the working tree or the index (also a path: git refuses it as ambiguous; unresolved: git restores every operand from the index; both denied). One operand is a switch, and allowed, when it is a commit or names no path; when it names a path it is a restore from the index and is denied, as `git checkout -- <path>` is. An option a switch does not use, a repository that cannot be placed, or any git failure denies. Quoted and inlined spellings (`git check""out`, `env -S "..."`, `bash -c`) are read too. Also fixed alongside: `git checkout-index -f` matched no rule and is now denied under R-GIT-CHECKOUT-FORCE. Pinned in `tests/unit/handlers/pre_tool_use/test_destructive_git_checkout_undashed.py`; release note 125.
 
 ### N765 — an `xargs` run that adds paths after a trailing `--` reaches the checkout restore unjudged
 
@@ -8933,7 +8933,17 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: needs a pipe into xargs; predates PR 293.
 
-**Status**: ⬜ Open. Fix, test first: deny a checkout or restore with a trailing `--` and no path when its input comes from xargs or any pipe.
+**Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. A `git checkout` or `git restore` run by `xargs`, `parallel`, `find`/`fd`, or any prefix that is not a plain wrapper (`sudo`, `env`, `command`, `nice`, `nohup`, `time`, `timeout`, `stdbuf`, `exec`, `builtin`), or fed by a pipe or an input redirect, is denied whatever its form: no git call can see the paths it will be given, so no proof is attempted. That includes a plain switch such as `echo main | xargs git checkout` (fail closed). Pinned in the same test file as N764.
+
+### N769 — three discard and over-deny shapes the N764/N765 work found and did not fix
+
+**Source**: the N764/N765 developer agent, 2026-11-27, while reviewing the code it touched.
+
+**Evidence**: (1) a git alias (`git -c alias.co=checkout co HEAD~1 a.txt`, or an alias in the repository config) names a subcommand no rule pattern knows, so every destructive-git rule, not only the checkout ones, is reached under another name. (2) `git read-tree -u --reset <tree>` and `git read-tree -m -u` rewrite the working tree from a tree, and match no rule. (3) The `git checkout -f` pattern reads an `f` anywhere in a short cluster, so `git checkout -bfeature side` (a branch named `feature` from `side`, attached) is denied as a force; an over-deny only, as `-b feature` works.
+
+**Severity**: MEDIUM for (1) and (2), which are discard routes the guard never sees; LOW for (3).
+
+**Status**: ⬜ Open. Fix, test first: resolve an alias (from `-c alias.*` and the repository's config) before matching, or deny an unknown subcommand that an alias defines; add a `read-tree -u` rule; and read `-b`/`-B` as taking the rest of the cluster in the checkout force pattern.
 
 ### N766 — a subcommand's own `--project-root` can stand in front of the wrapper's global root
 

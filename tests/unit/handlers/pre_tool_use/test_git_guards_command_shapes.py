@@ -31,7 +31,7 @@ def _denied(command: str) -> bool:
 ORDINARY = [
     "git clean -nd build-final/",
     "git clean -n && rm -f foo.txt",
-    "git checkout main && git log -- src/x.py",
+    "git checkout -b topic && git log -- src/x.py",
     "git restore --source=HEAD~1 --staged src/x.py",
     "git restore src/x.py --staged",
     "git restore -S src/x.py",
