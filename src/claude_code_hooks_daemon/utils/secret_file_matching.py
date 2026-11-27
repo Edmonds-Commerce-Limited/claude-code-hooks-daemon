@@ -153,6 +153,28 @@ DEFAULT_PROTECTED_PATTERNS: Final[tuple[str, ...]] = (
     "id_ed25519",
 )
 
+#: What each shipped default protects, so a deny names the CLASS and never the
+#: glob itself (ledger 00474 N757 c): an echoed glob is repeated by the reader
+#: in their next message, which is a mention of its own.
+_SECRET_NAMED_CLASS: Final[str] = "a secret-named file"
+_VAULT_PASSWORD_CLASS: Final[str] = "a vault password file"
+_SSH_KEY_CLASS: Final[str] = "an SSH private key"
+DEFAULT_PATTERN_CLASSES: Final[dict[str, str]] = dict(
+    zip(
+        DEFAULT_PROTECTED_PATTERNS,
+        (
+            _SECRET_NAMED_CLASS,
+            _VAULT_PASSWORD_CLASS,
+            _VAULT_PASSWORD_CLASS,
+            _VAULT_PASSWORD_CLASS,
+            _SSH_KEY_CLASS,
+            _SSH_KEY_CLASS,
+        ),
+        strict=True,
+    )
+)
+CONFIGURED_PATTERN_CLASS: Final[str] = "a project-configured protected path"
+
 # Delimiters that end a shell WORD for mention-detection purposes. Quotes are
 # included so `open('.vault-pass')` and `"$HOME/.vault-pass"` both yield a
 # clean path token; `=` so `P=.vault-pass` yields the assigned value.
@@ -1993,6 +2015,13 @@ def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, in
             head, spans = _segment_text_operands(segment, offset + region_start + start)
             if head == _FIND_HEAD and not _only_text_consumers_follow(region, segments, position):
                 spans = []
+            # N757: echo/printf operands ARE their output, so piped to a shell or
+            # written to a script (`echo 'cat d/*' | bash`) they may still be run.
+            if head in _ECHO_HEADS and (
+                _opens_a_redirection(region, start, end)
+                or not _only_text_consumers_follow(region, segments, position)
+            ):
+                spans = []
             operands.update(dict.fromkeys(spans, head))
             program = _shell_dash_c_program_span(segment, head)
             if program is not None:
@@ -2134,6 +2163,137 @@ def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[i
     ]
 
 
+#: Heads that only PRINT or SEND a quoted argument as words (ledger 00474 N757):
+#: they open no file it names and run none of it. ``teamchat`` posts a message.
+_TEAMCHAT_HEAD: Final[str] = "teamchat"
+_SENDER_HEADS: Final[frozenset[str]] = _ECHO_HEADS | frozenset({_TEAMCHAT_HEAD})
+#: ``git`` subcommands whose ``-m``/``--message`` value is prose. ``-F`` is absent: it reads a file.
+_GIT_MESSAGE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"commit", "tag", "merge"})
+_GIT_MESSAGE_FLAGS: Final[frozenset[str]] = frozenset({"-m", "--message"})
+#: Redirections that open no file: a descriptor duplicate and the null device.
+_INERT_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*[<>]&\d+|\d*>>?\s*/dev/null\b")
+_REDIRECTION_CHARS: Final[str] = "<>"
+_AMPERSAND_REDIRECT: Final[str] = "&>"
+_SENT_TEXT_PLACEHOLDER: Final[str] = "SENT_TEXT"
+
+
+def _is_flag_value(word: str, previous: str, flags: frozenset[str]) -> bool:
+    """Whether ``word`` is the value of one of ``flags``, separate or ``--flag=value``."""
+    return previous in flags or word.partition("=")[0] in flags
+
+
+def _segment_sent_text_spans(segment: str) -> list[tuple[int, int]]:
+    """``(start, end)`` within ``segment`` of each quoted argument it only sends as text.
+
+    An echo/printf/teamchat argument, a git commit/tag/merge ``-m`` message and a
+    gh body or title. Each must be a literal quoted word (:func:`_is_literal_quoted_word`):
+    bash expands nothing in it and runs no substitution. A teamchat option's value
+    may name a file, so only its positional words count.
+    """
+    head = segment_command_word(segment) or ""
+    spans = shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
+    found: list[tuple[int, int]] = []
+    if head in _SENDER_HEADS:
+        for index, word in enumerate(words):
+            previous = words[index - 1] if index else ""
+            if word.startswith("-") or not _is_literal_quoted_word(word):
+                continue
+            if head == _TEAMCHAT_HEAD and previous.startswith("-"):
+                continue
+            found.append(spans[index])
+        return found
+    if head == _GIT_HEAD:
+        git_index = next(
+            (index for index, word in enumerate(words) if word.rsplit("/", 1)[-1] == _GIT_HEAD),
+            None,
+        )
+        subcommand = None if git_index is None else git_subcommand_index(words, git_index)
+        if subcommand is None or words[subcommand] not in _GIT_MESSAGE_SUBCOMMANDS:
+            return []
+        flags = _GIT_MESSAGE_FLAGS
+        first = subcommand + 1
+    elif head == _GH_HEAD:
+        flags = _GH_TEXT_FLAGS
+        first = 1
+    else:
+        return []
+    for index in range(first, len(words)):
+        if words[index] == _END_OF_OPTIONS:
+            break
+        word = words[index]
+        if _is_flag_value(word, words[index - 1], flags) and _is_literal_quoted_word(word):
+            found.append(spans[index])
+    return found
+
+
+def _opens_a_redirection(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]`` redirects from or into a file (not ``2>&1`` or /dev/null).
+
+    The segment splitter cuts at ``&``, so the boundary is read too: a segment
+    ending in ``>`` right before ``&`` is a descriptor duplicate (``>&2``), and
+    one followed by ``&>`` writes its output to the file the next piece names.
+    """
+    if text.startswith(_AMPERSAND_REDIRECT, end):
+        return True
+    segment = text[start:end]
+    if text.startswith("&", end) and segment.endswith(">"):
+        segment = segment[:-1]
+    unquoted = _INERT_REDIRECTION.sub(" ", mask_quoted(segment, keep_double=False))
+    return any(char in unquoted for char in _REDIRECTION_CHARS)
+
+
+def _sent_text_spans(command: str) -> list[tuple[int, int]]:
+    """Absolute spans of the quoted text a top-level sender only prints or posts (N757).
+
+    A segment is relaxed only when its output reaches nothing that may run or open
+    it (no pipe, or only text consumers after it), it has no file redirection, and
+    the span lies outside every substitution. A command whose substitutions cannot
+    be placed relaxes nothing.
+    """
+    try:
+        inner_regions = substitution_inner_spans(command)
+    except UnplaceableSubstitutionError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a substitution that cannot be placed could hold any sender, so no quoted text is relaxed and every word stays judged (fail closed)",
+            level=logging.DEBUG,
+        )
+        return []
+    segments = split_unquoted_spans(command, _SEGMENT_SEPARATORS)
+    found: list[tuple[int, int]] = []
+    for position, (start, end) in enumerate(segments):
+        segment = command[start:end]
+        if _opens_a_redirection(command, start, end):
+            continue
+        if not _only_text_consumers_follow(command, segments, position):
+            continue
+        for span_start, span_end in _segment_sent_text_spans(segment):
+            absolute = (start + span_start, start + span_end)
+            if not any(
+                inner_start <= absolute[0] < inner_end for inner_start, inner_end in inner_regions
+            ):
+                found.append(absolute)
+    return found
+
+
+def _without_sent_text(command: str) -> str:
+    """``command`` with every span :func:`_sent_text_spans` finds replaced by a placeholder."""
+    if "'" not in command and '"' not in command:
+        return command
+    pieces: list[str] = []
+    copied_to = 0
+    for span_start, span_end in sorted(_sent_text_spans(command)):
+        if span_start < copied_to:
+            continue
+        pieces.append(command[copied_to:span_start])
+        pieces.append(_SENT_TEXT_PLACEHOLDER)
+        copied_to = span_end
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
+
+
 class _GlobExpansionGate:
     """Whether a token's text is something bash can glob-expand.
 
@@ -2150,6 +2310,21 @@ class _GlobExpansionGate:
         self._tokenise = tokenise
         self._expandable: set[str] | None = None
         self._resolved = False
+        self._unsent: set[str] | None = None
+        self._sent_resolved = False
+
+    def is_sent_text(self, token: str) -> bool:
+        """True only when ``token`` occurs solely inside text a sender prints or posts (N757).
+
+        Such text is not opened, expanded or run, so a glob's own spelling there
+        names no file. A token also present outside that text stays judged.
+        """
+        if not self._sent_resolved:
+            view = _without_sent_text(self._command)
+            if view != self._command:
+                self._unsent = set(self._tokenise(view))
+            self._sent_resolved = True
+        return self._unsent is not None and token not in self._unsent
 
     def expands(self, token: str) -> bool:
         """False only when ``token`` occurs solely inside text operands."""
@@ -3046,6 +3221,10 @@ def iter_protected_mentions(
 
     def judge(word: str) -> str | None:
         """The pattern ``word`` mentions once the bare-dotted gate has judged it."""
+        # N757: a GLOB in text a sender only prints or posts is not a mention.
+        # A literal name there still is (Plan 00272 Decision 9 c).
+        if context == "bash" and _is_glob_shaped(word) and glob_gate.is_sent_text(word):
+            return None
         found = _token_mention(
             word,
             patterns,
