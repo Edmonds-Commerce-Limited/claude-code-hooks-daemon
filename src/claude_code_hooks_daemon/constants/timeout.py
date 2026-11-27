@@ -254,6 +254,11 @@ class Timeout:
     # cover the inventory pass and every other Stop handler.
     GIT_STOP_GUARD_BUDGET = 8.0
 
+    # Plan 00474 N753: one wall-clock bound on every git call of the proof that a
+    # `git checkout <commit> -- <paths>` has nothing local to lose. Past it the
+    # checkout is denied (fails closed), so a wedged git cannot stall the guard.
+    GIT_CHECKOUT_RESTORE_PROOF = GIT_CONTEXT
+
     # Plan 00512 (issue #82): WorktreeCreate and WorktreeRemove are not guards.
     # They run git and report a path, and their git call (GIT_WORKTREE) is longer
     # than the guard chain deadline, so a slow `git worktree add` finished after
