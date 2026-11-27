@@ -1703,14 +1703,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         # that stopped matching once fed stripped words) -- so each
         # consumer decodes separately for correctness, same as before.
         shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
-        # A bare dotted word, or an underscore identifier (N749), is a mention
-        # only when it names an existing or indexed file, so such a command
-        # needs the index too.
-        needs_index = (
-            _MAY_GLOB.search(command)
-            or sfm.has_bare_dotted_word(command)
-            or sfm.may_hold_underscore_identifier_mention(command, patterns)
-        )
+        # A bare dotted word is a mention only when it names an existing or
+        # indexed file, so such a command needs the index too.
+        needs_index = _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command)
         index = self._index(patterns) if needs_index else None
         # A glob is expanded against the index of protected files; with none
         # it goes unjudged, and the agent is told so (never a silent allow).
@@ -2178,12 +2173,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "when it names a file that exists, is in the protected-file "
             "index, or is the operand of a file-opening command or call "
             "(`cat`, `cp`, `source`, a redirect target, `open(...)`, "
-            "`Path(...)`). The same holds for an IDENTIFIER (no dot, slash or "
-            "leading dot, such as a Python test name) matched by a wildcard "
-            "pattern holding an underscore (`*vault_pass*`); an exact name "
-            "such as `id_rsa` is judged as before, and so is an identifier "
-            "read after a `cd` whose landing place is computed or found "
-            "through CDPATH. A quoted multi-word argument whose WHOLE text "
+            "`Path(...)`). A word with no dot (an underscore identifier such "
+            "as a test name) gets no such narrowing: it is judged by the "
+            "pattern alone. A quoted multi-word argument whose WHOLE text "
             "names a file that is there or indexed always counts. "
             "Recorded residual risk: a file that does not exist, "
             "is not indexed and is read by a command outside the opening list "

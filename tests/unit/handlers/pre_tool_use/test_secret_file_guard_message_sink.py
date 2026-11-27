@@ -215,23 +215,72 @@ class TestEverythingElseIsJudgedAsBefore:
         assert _write(project.root / "send.bash", content).decision == Decision.DENY
 
 
-class TestUnderscoreIdentifierNarrowing:
-    """N749: an identifier-shaped word counts for an underscore pattern only when it is a file."""
+#: A directory change hidden where the guard cannot follow it (review 2 finding 1).
+_HIDDEN_MOVES: tuple[str, ...] = (
+    "source ./go.sh && ",
+    ". ./go.sh; ",
+    'eval "$(cat go.sh)" && ',
+    "function f { cd ../ext; }; f; ",
+    "source <(echo cd ../ext); ",
+    "shopt -s expand_aliases; alias go='cd ../ext'\ngo\n",
+    'cd "$(echo ../ext)" && ',
+    "CDPATH=.. cd ext && ",
+    'cd "$D" && ',
+    "cd - && ",
+)
 
-    def test_python_test_name_is_allowed_in_authored_source(self, project: Project) -> None:
-        content = f"def {_IDENTIFIER}() -> None:\n    assert True\n"
-        assert _write(project.root / "test_x.py", content).decision == Decision.ALLOW
+
+class TestUnderscoreNamesAreJudgedAsOnMain:
+    """N749 stays open: the narrowing was built, leaked twice under review, and was withdrawn.
+
+    A word matching an underscore pattern is judged by the pattern alone, exactly as
+    on main, wherever it sits and however the command moves first.
+    """
+
+    @pytest.fixture
+    def outside(self, project: Project) -> Path:
+        outside = project.root.parent / "ext"
+        outside.mkdir(exist_ok=True)
+        (outside / ("ext_" + _VAULT_STEM)).write_bytes(b"DUMMY\n")
+        (project.root / "go.sh").write_text("cd ../ext\n", encoding="utf-8")
+        return outside
+
+    @pytest.mark.parametrize("move", ["", *_HIDDEN_MOVES])
+    def test_a_bare_underscore_name_is_denied(
+        self, project: Project, outside: Path, move: str
+    ) -> None:
+        command = f"{move}pr ext_{_VAULT_STEM}"
+        assert _bash(command, project.root).decision == Decision.DENY
 
     @pytest.mark.parametrize(
         "command",
-        [f"echo add {_IDENTIFIER}", f"echo 'add {_IDENTIFIER} now'", f"echo {_IDENTIFIER}"],
+        [f"echo add {_IDENTIFIER}", f"echo 'add {_IDENTIFIER} now'", f"echo 'add {_IDENTIFIER}'"],
     )
-    def test_identifier_printed_by_echo_is_allowed(self, project: Project, command: str) -> None:
-        assert _bash(command, project.root).decision == Decision.ALLOW
+    def test_an_identifier_printed_by_echo_is_denied(self, project: Project, command: str) -> None:
+        assert _bash(command, project.root).decision == Decision.DENY
 
-    def test_the_last_word_of_a_quoted_string_still_counts(self, project: Project) -> None:
-        """Review blocker 1: that word may end a spaced file NAME, so it is not relaxed."""
-        assert _bash(f"echo 'add {_IDENTIFIER}'", project.root).decision == Decision.DENY
+    @pytest.mark.parametrize(
+        ("relative", "content"),
+        [
+            ("w10.sh", f"#!/usr/bin/env bash\npr ext_{_VAULT_STEM}\n"),
+            ("w9.sh", f"#!/usr/bin/env bash\npr gone_{_VAULT_STEM}\n"),
+            ("Makefile", f"all:\n\tpr ext_{_VAULT_STEM}\n"),
+            ("test_x.py", f"def {_IDENTIFIER}() -> None:\n    assert True\n"),
+        ],
+    )
+    def test_an_authored_file_naming_one_is_denied(
+        self, project: Project, relative: str, content: str
+    ) -> None:
+        assert _write(project.root / relative, content).decision == Decision.DENY
+
+    def test_find_by_that_name_then_exec_is_denied(self, project: Project, outside: Path) -> None:
+        """Review 2 minor 3: pinned on its own, not only through another check."""
+        command = f"find .. -name ext_{_VAULT_STEM} -exec pr {{}} +"
+        assert _bash(command, project.root).decision == Decision.DENY
+
+
+class TestASpacedProtectedNameIsAMention:
+    """Review 1 blocker 1: the WHOLE quoted word names a file, whatever its single words do."""
 
     @pytest.mark.parametrize(
         "name",
@@ -248,70 +297,11 @@ class TestUnderscoreIdentifierNarrowing:
     def test_a_spaced_protected_name_that_exists_is_denied(
         self, project: Project, name: str, reader: str, quote: str
     ) -> None:
-        """Review blocker 1: the WHOLE quoted word names a file, whatever its words do."""
         (project.root / name).write_bytes(b"DUMMY\n")
         command = f"{reader} {quote}{name}{quote}"
         assert _bash(command, project.root).decision == Decision.DENY
 
-    @pytest.mark.parametrize(
-        "move",
-        ['cd "$(echo ../ext)"', "CDPATH=.. cd ext", 'cd "$D"', "cd -", "cd"],
-    )
-    def test_an_identifier_after_an_unplaced_cd_is_denied(
-        self, project: Project, move: str
-    ) -> None:
-        """Review important 2: where the word is read from is not known, so it counts."""
-        outside = project.root.parent / "ext"
-        outside.mkdir(exist_ok=True)
-        (outside / ("ext_" + _VAULT_STEM)).write_bytes(b"DUMMY\n")
-        command = f"{move} && pr ext_{_VAULT_STEM}"
-        assert _bash(command, project.root).decision == Decision.DENY
-
-    def test_an_identifier_after_a_literal_cd_is_still_gated(self, project: Project) -> None:
-        assert _bash(f"cd vault && pr ext_{_VAULT_STEM}", project.root).decision == (Decision.ALLOW)
-
-    def test_identifier_as_a_commit_message_is_still_judged_as_a_pathspec(
-        self, project: Project
-    ) -> None:
-        """As for a bare dotted word, git is a file-opening head (its pathspecs)."""
-        command = f"git commit -m 'add {_IDENTIFIER}'"
-        assert _bash(command, project.root).decision == Decision.DENY
-
-    def test_an_existing_file_of_that_name_still_denies(self, project: Project) -> None:
-        assert _bash(f"ls {_EXISTING_IDENT}", project.root).decision == Decision.DENY
-
-    def test_an_opened_identifier_still_denies(self, project: Project) -> None:
-        assert _bash(f"cat other_{_VAULT_STEM}", project.root).decision == Decision.DENY
-
-    def test_an_identifier_passed_to_open_still_denies(self, project: Project) -> None:
-        content = f"data = open('other_{_VAULT_STEM}').read()\n"
-        assert _write(project.root / "reader.py", content).decision == Decision.DENY
-
-    @pytest.mark.parametrize("prefix", ["./", "/", "~/", "."])
-    def test_a_path_shaped_word_is_judged_by_the_pattern_alone(
-        self, project: Project, prefix: str
-    ) -> None:
-        command = f"echo {prefix}other_{_VAULT_STEM}"
-        assert _bash(command, project.root).decision == Decision.DENY
-
-
-#: An exact-name pattern holding an underscore, assembled.
-_KEY_NAME = "id_" + "rs" + "a"
-
-
-class TestTheIndexIsBuiltOnlyWhenAnIdentifierCouldMatch:
-    """Review minor 5: an underscore alone does not cost an index build."""
-
-    @pytest.mark.parametrize("command", ["ls -la my_dir", "FOO_BAR=1 make", "echo $HOME_X"])
-    def test_no_underscore_pattern_stem_needs_no_index(self, command: str) -> None:
-        patterns = SecretFileGuardHandler()._patterns()
-        assert sfm.may_hold_underscore_identifier_mention(command, patterns) is False
-
-    @pytest.mark.parametrize("command", [f"echo {_IDENTIFIER}", f"pr x_{_VAULT_STEM}"])
-    def test_an_underscore_pattern_stem_needs_the_index(self, command: str) -> None:
-        patterns = SecretFileGuardHandler()._patterns()
-        assert sfm.may_hold_underscore_identifier_mention(command, patterns) is True
-
-    def test_an_exact_name_pattern_never_asks_for_it(self) -> None:
-        command = "echo " + _KEY_NAME
-        assert sfm.may_hold_underscore_identifier_mention(command, (_KEY_NAME,)) is False
+    def test_a_dotted_word_in_the_middle_of_prose_is_still_gated(self, project: Project) -> None:
+        """No such file exists, so the whole-name check adds nothing to plain prose."""
+        dotted = "cfg" + _SUFFIX + ".key"
+        assert _bash(f"echo 'see {dotted} now'", project.root).decision == Decision.ALLOW
