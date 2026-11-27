@@ -8833,6 +8833,8 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Status**: ⬜ Open. Fix, test first: flag a duration only next to effort or schedule words (takes, will take, effort, estimate, ETA, days of work, by a date); pass one governed by timeout, cooldown, window, interval, TTL, delay or limit. Fixtures: the seat's three refused edits (pass) and a genuine "this will take 3 days" (still flags).
 
+**Attempt PR 294, closed unmerged (this session)**: NOT reproduced as reported. The seat's sentence about a fuzzy cooldown already passes on main, so the refused text must have been another wording; asked the seat for the exact line (no answer yet). Two real variants do flag on main (a cooldown stated with "of about" and a short figure, and "needs about" a short figure "of cooldown"). A first fix let two thirds of the adversarial estimates through; a narrowed second (parameter words excuse only the short units) still let most of 79 new adversarial sentences through (an effort that names a parameter feature, such as a backoff refactor that requires a short figure), because needs, requires and will take were not effort words and my own brief contradicted itself on needs. Lessons for the next attempt: (a) get the exact refused text first; (b) treat needs, requires, will take and "of work" as effort words; (c) a parameter word excuses a figure only when the clause is a statement ABOUT the parameter (the parameter is the subject), not a task named after it; (d) a date or day-scale field on the same line is never excused; (e) compute clauses once per line (a per-duration rescan was hundreds of times slower on a 200 KB line); (f) text inside a fenced or backticked span should not count at all. The reviewer corpora are under untracked/scratch/n755rev/ and n755r2/ and are worth filing with the next attempt. The branch tip is `7a7ae005f` (remote `niggle-n755-time-estimate-behaviour-parameter`, local copy removed, see N763).
+
 ### N756 — no route for an owner-approved in-place redaction of a journal entry
 
 **Source**: the fedora-desktop seat, 2026-11-26 09:13Z (checked by the seat).
@@ -8902,3 +8904,33 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Severity**: LOW to MEDIUM: the budget keeps the proof well under the chain deadline, but the fail-open question applies to every slow guard.
 
 **Status**: ⬜ Open. Confirm the relay's timeout behaviour by a probe test (a handler that sleeps past the limit) and record the answer; add a test that fails without `git_deadline` (assert no git spawn after the deadline).
+
+### N763 — no agent route removes the remote copy of an unmerged branch whose work was judged to have no value
+
+**Source**: this seat, 2026-11-27, after closing PR 294 unmerged.
+
+**Evidence**: the local branch was removable (the guard proved it remote-held), but the remote branch `niggle-n755-time-estimate-behaviour-parameter` (tip `7a7ae005f`) holds unmerged work that two reviews judged unmergeable. `branch-reject request` refuses a branch the remote holds ("proven (remote-held); nothing needs a review") and refuses a remote ref name ("does not resolve to a local branch"); `delete-branch --remote-only` needs the branch merged or contained. So the owner's rule that a branch with no value is removed has no agent route for a closed PR's remote branch, and it stays "kept".
+
+**Severity**: MEDIUM: it is exactly the pile-up the owner ruled against.
+
+**Status**: ⬜ Open. Fix, test first: let `branch-reject request` accept a remote-only or remote-held branch whose PR is closed unmerged, with the same independent reviewer gate and prompt, and let a no-value verdict unlock `delete-branch --remote-only` with the lease on the proven tip and the restore line. Until then the branch stays on the remote and is listed here.
+
+### N764 — `git checkout <commit> <path>` without the double dash matches no rule
+
+**Source**: the N753 developer agent, 2026-11-27 (checked with a direct handler call).
+
+**Evidence**: R-GIT-CHECKOUT-DISCARD keys on the `--` separator, so `git checkout <commit> <path>`, which restores the path from the commit exactly as the dashed form does when the name is not a branch, is allowed even with unsaved local changes on the path.
+
+**Severity**: MEDIUM: a discard route the guard never saw; predates PR 293.
+
+**Status**: ⬜ Open. Fix, test first: when the second operand is not a known ref, treat the undashed form as the path form and apply the same proof as the dashed form (PR 293); keep a real branch switch allowed.
+
+### N765 — an `xargs` run that adds paths after a trailing `--` reaches the checkout restore unjudged
+
+**Source**: the N753 developer agent, 2026-11-27.
+
+**Evidence**: `... | xargs git checkout <commit> --` supplies the paths on stdin, so the guard sees no path to judge and allows it, even with unsaved local changes on the named paths.
+
+**Severity**: LOW to MEDIUM: needs a pipe into xargs; predates PR 293.
+
+**Status**: ⬜ Open. Fix, test first: deny a checkout or restore with a trailing `--` and no path when its input comes from xargs or any pipe.
