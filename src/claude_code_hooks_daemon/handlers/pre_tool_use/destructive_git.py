@@ -267,9 +267,9 @@ _GIT_PUSH_DELETE_PATTERN = (
 # list prevents the pattern source from drifting between the two methods.
 _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     (
-        rf"{_GIT_INVOCATION}reset\s+.*(?:{_long_option('hard')}|{_long_option('merge')}"
-        rf"|{_long_option('keep')})",
-        "git reset --hard/--merge/--keep rewrites the working tree and can destroy "
+        # `--keep` is allowed by owner ruling A6 (Plan 00483), so it is not listed here.
+        rf"{_GIT_INVOCATION}reset\s+.*(?:{_long_option('hard')}|{_long_option('merge')})",
+        "git reset --hard/--merge rewrites the working tree and can destroy "
         "uncommitted changes and ignored files permanently",
     ),
     (
@@ -2052,7 +2052,7 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
 _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     (
         RuleID.GIT_RESET_HARD,
-        "`git reset --hard`",
+        "`git reset --hard` / `git reset --merge`",
         "Permanently destroys all uncommitted changes",
         "Ask the user to run it manually",
     ),

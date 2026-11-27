@@ -8958,6 +8958,7 @@ The review's harmless main gaps are recorded as N771.
 - (4) `git read-tree -u --reset <tree>` and `git read-tree -m -u` rewrite the working tree, and match no rule.
 - (5) A branch switch overwrites an ignored file that the target branch tracks. Examples: `git checkout feat` with a local ignored `ign.txt` that `feat` tracks; `nohup git checkout -qm HEAD~1`.
 - (6) Over-deny only: the `git checkout -f` pattern reads an `f` anywhere in a short cluster, so `git checkout -bfeature side` (attached branch name) is denied as a force.
+- (7) `git reset --merge` and `git reset --keep` (and every prefix, `--mer`, `--kee`) rewrite the working tree and match no rule: the second review's fuzz lost an ignored file to `--mer HEAD~1` and a staged edit to `--kee HEAD~1`.
 
 **Severity**:
 
@@ -8989,7 +8990,7 @@ The review's harmless main gaps are recorded as N771.
 
     A name that is no commit but names a path is a restore from the index and denied, as before.
 
-  - (7) `git reset --merge` and `git reset --keep` (and every prefix, `--mer`, `--kee`) rewrite the working tree: the review's fuzz lost an ignored file to `--mer HEAD~1` and a staged edit to `--kee HEAD~1`. Both now deny under R-GIT-RESET-HARD with `--hard`, with no proof attempted (fail closed); a reset that touches nothing is rare enough that the over-deny is accepted.
+  - (7), the `--merge` half: `git reset --merge` and every prefix (`--mer`) now deny under R-GIT-RESET-HARD with `--hard`, with no proof attempted (fail closed). A reset that touches nothing is rare enough that the over-deny is accepted. `--keep` is NOT denied: owner ruling A6 (Plan 00483, `OWNER-RULINGS-261005.md`) allows it, and only the owner can change that (see the open item below).
 
   - Over-deny: `-c core.quotepath=<value>` only changes how paths are printed, and a switch carrying it is allowed again. `-c core.autocrlf=...` still denies (it changes what a checkout writes), as does `env -i` (the reading cannot see what the cleared environment does).
 - Open, fix test first:
@@ -8999,6 +9000,7 @@ The review's harmless main gaps are recorded as N771.
   - (5) for `git switch`, which is not read at all: `git switch feat` and `git switch remote-only` lose an ignored file the target tracks, on main and on this branch (confirmed by the second review). `git checkout -b <new> <start>` is not open: it is read as a switch to `<start>` and gets the switch check (`git checkout -b nb feat` in a clean repository is allowed).
   - Raw bytes a filter hides: a CRLF file that `core.autocrlf` normalises reads as clean to git, and a switch rewrites it. The restore proof hashes raw bytes; the switch check does not. Confirmed by the second review on main and this branch.
   - (6): read `-b`/`-B` as taking the rest of the cluster.
+  - (7), the `--keep` half: OWNER DECISION NEEDED, not an agent fix. Ruling A6 allows `git reset --keep` on the understanding that git refuses a reset over local changes. That holds for unstaged edits on paths the reset changes, but the review's fuzz shows `--keep HEAD~1` dropping a staged edit (a version that exists only in the index; its blob survives only as a dangling object). Options for the owner: keep the ruling (accept that case), or let the guard deny `--keep` when the index differs from `HEAD` on a path the reset rewrites.
   - Performance, backtick chains: `` : `git checkout main` `` repeated N times grows by about 3x per doubling of N (the review measured 251 / 724 / 2321 / 7590 ms at N = 250 / 500 / 1000 / 2000, main 765 / 1669 / 3891 / 9982 ms). Faster than main at every size measured, but it scales worse. Fix: parse the backtick variant once rather than once per segment, or deny past a backtick count.
 - Out of scope, recorded so nobody assumes it is covered: a quoted command word (`g''it checkout -- f.txt`, `xargs g''it checkout HEAD --`) escapes every destructive-git rule, on main as well. Quote removal on the command word is not done, and an agent is not expected to write it; the threat model is an agent's ordinary mistakes, not evasion.
 

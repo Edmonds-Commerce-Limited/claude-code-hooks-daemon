@@ -745,8 +745,6 @@ class TestReviewMinorAbbreviatedLongOptions:
             ("git switch --di side", RuleID.GIT_SWITCH_FORCE),
             ("git reset --merge HEAD~1", RuleID.GIT_RESET_HARD),
             ("git reset --mer HEAD~1", RuleID.GIT_RESET_HARD),
-            ("git reset --keep HEAD~1", RuleID.GIT_RESET_HARD),
-            ("git reset --kee HEAD~1", RuleID.GIT_RESET_HARD),
         ],
     )
     def test_the_abbreviation_is_denied(
@@ -759,6 +757,9 @@ class TestReviewMinorAbbreviatedLongOptions:
         "command",
         [
             "git reset --soft HEAD",
+            # Owner ruling A6 (Plan 00483): `git reset --keep` is allowed.
+            "git reset --keep HEAD~1",
+            "git reset --kee HEAD~1",
             "git clean -n",
             "git switch --detach side",
             "git restore --staged a.txt",
