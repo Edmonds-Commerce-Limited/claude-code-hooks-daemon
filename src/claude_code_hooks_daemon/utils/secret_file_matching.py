@@ -2998,6 +2998,9 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
             after = command[end : end + 1]
             if not (before_ok and (after == "" or after.isspace() or after == quote_char)):
                 return True
+            # The last word of a quoted string is left counted: it may end a
+            # spaced file NAME (`pr 'add x.secret.key'`), which only the whole
+            # quoted word spells (Ledger 00474 N744/N760 review, blocker 1).
             word_start, word_end = quote_index, end
     before = command[word_start - 1] if word_start > 0 else ""
     after_char = command[word_end] if word_end < len(command) else ""
@@ -3099,6 +3102,21 @@ def _is_indexed_name(token: str, index: "ProtectedFileIndex", cwds: tuple[str, .
     return any(entry.relpath.rsplit("/", 1)[-1] == token for entry in index.files)
 
 
+def _names_a_present_file(
+    token: str,
+    *,
+    index: "ProtectedFileIndex | None",
+    cwds: tuple[str, ...],
+    cwd: str | None,
+    project_root: str | None,
+) -> bool:
+    """Whether ``token`` names a file under any base the command may run in, or an indexed one."""
+    bases = {base for base in (*cwds, cwd, project_root) if base}
+    if any(os.path.lexists(Path(base) / token) for base in bases):
+        return True
+    return index is not None and _is_indexed_name(token, index, cwds)
+
+
 def _bare_dotted_counts(
     token: str,
     command: str,
@@ -3110,10 +3128,7 @@ def _bare_dotted_counts(
     project_root: str | None,
 ) -> bool:
     """Whether a bare dotted ``token`` that matched a pattern is a real mention."""
-    bases = {base for base in (*cwds, cwd, project_root) if base}
-    if any(os.path.lexists(Path(base) / token) for base in bases):
-        return True
-    if index is not None and _is_indexed_name(token, index, cwds):
+    if _names_a_present_file(token, index=index, cwds=cwds, cwd=cwd, project_root=project_root):
         return True
     check = _bash_occurrence_counts if context == "bash" else _content_occurrence_counts
     occurrences = [m.span() for m in re.finditer(re.escape(token), command)]
@@ -3379,8 +3394,15 @@ def iter_protected_mentions(
             if pattern is not None and _is_spaced_word(token):
                 # A quoted multi-word argument: its words are judged one by one
                 # (the ordinary stream yields them too), so one that names no
-                # file does not make the whole string a mention.
+                # file does not make the whole string a mention -- unless the
+                # whole string itself names a file that is there or indexed
+                # (Ledger 00474 N744/N760 review, blocker 1: `pr 'mid x.secret.key dle'`).
+                whole = pattern
                 pattern = next((p for p in map(judge, token.split()) if p is not None), None)
+                if pattern is None and _names_a_present_file(
+                    token, index=index, cwds=effective, cwd=cwd, project_root=project_root
+                ):
+                    pattern = whole
             mention_cache[token] = pattern
         if views_only and pattern != PROCESS_VIEW_PATTERN:
             continue

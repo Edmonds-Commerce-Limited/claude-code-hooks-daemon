@@ -48,6 +48,20 @@ def _reset_project_context() -> Any:
     ProjectContext.reset()
 
 
+@pytest.fixture
+def _scratch_in_a_throwaway_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ledger 00474 N769: the scratch-sweep verifier reads the project's live
+    scratch inventory, so a workspace with a live scratch notice failed the
+    baseline. Its root is pointed at an empty throwaway one; every other
+    verifier still runs against this repository."""
+    from claude_code_hooks_daemon.handlers.session_start.scratch_sweep import (
+        ScratchSweepHandler,
+    )
+
+    monkeypatch.setattr(ScratchSweepHandler, "_get_project_root", lambda self: tmp_path)
+
+
+@pytest.mark.usefixtures("_scratch_in_a_throwaway_root")
 class TestBaselineIsEmpty:
     """Anti-inflation guarantee, exercised end-to-end: nothing in this repo's
     shipped handler set has a verifier yet, so nothing is ACTION_REQUIRED."""

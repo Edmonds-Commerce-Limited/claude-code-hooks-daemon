@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.utils import (
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.message_sink import message_sink_view
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -251,7 +252,13 @@ def _judged_bash_command(command: str) -> str:
     """The Bash command text the guard judges: quoted bodies only a text reader reads, blanked.
 
     One source for the decision and for the deny reason's cause (review 2 F4 c).
+    A whole command that is one teamchat message-verb statement fed on stdin is
+    judged as its teamchat words alone: the message is posted, never opened or
+    run (Ledger 00474 N744, N760; :mod:`utils.message_sink` holds the grammar).
     """
+    sink = message_sink_view(command)
+    if sink is not None:
+        return sink
     return strip_quoted_heredoc_bodies(command, text_readers_only=True)
 
 
@@ -2166,7 +2173,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "when it names a file that exists, is in the protected-file "
             "index, or is the operand of a file-opening command or call "
             "(`cat`, `cp`, `source`, a redirect target, `open(...)`, "
-            "`Path(...)`). Recorded residual risk: a file that does not exist, "
+            "`Path(...)`). A word with no dot (an underscore identifier such "
+            "as a test name) gets no such narrowing: it is judged by the "
+            "pattern alone. A quoted multi-word argument whose WHOLE text "
+            "names a file that is there or indexed always counts. "
+            "Recorded residual risk: a file that does not exist, "
             "is not indexed and is read by a command outside the opening list "
             "is allowed. To work around a false positive: ask the "
             "user, scope the search to exclude the protected file, or have a "
@@ -2179,8 +2190,20 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "`-n`/`--allow-empty` only), or `gh issue|pr create` with one `--body` "
             "and/or `--title`. A pipe, chain, redirect, substitution, backslash, "
             "any other word or option, or a non-ASCII character outside the "
-            "quotes voids it. `printf` and `teamchat` are not covered (teamchat "
-            "reads its message from stdin). A deny names the CLASS of path matched and the token's line and "
+            "quotes voids it. `printf` is not covered there.\n\n"
+            "**A teamchat message on stdin is not judged at all (Bash "
+            "commands only).** For the message verbs `say`, `reply`, "
+            "`report`, `thread`, `ask-human`, `close` and `retitle`, when the "
+            "WHOLE command is one statement fed by exactly one quoted heredoc "
+            "(`teamchat report <<'EOF'`, nothing after the closing line), one "
+            "single-quoted here-string (`<<< '...'`) or one `printf`/`echo` of "
+            "literal quoted words piped in by a single `|`, the message text is "
+            "not judged; the teamchat words (a `--ref path:...`, a member name) "
+            "still are. Any other verb, a pipe out, chain, redirect, "
+            "substitution, variable, unquoted heredoc, wrapper, assignment, "
+            "unknown flag, or a producer that opens a file voids it. Residual "
+            "risk: a sink that wrote its stdin to a file; teamchat does not.\n\n"
+            "A deny names the CLASS of path matched and the token's line and "
             "column, never the glob.\n\n"
             "**Authoring a script that references a protected path is also "
             "denied** (the write-then-execute route). Markdown/prose naming a "
