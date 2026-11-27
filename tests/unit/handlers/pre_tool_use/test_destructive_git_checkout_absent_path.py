@@ -242,6 +242,111 @@ class TestLocalChangesStayDenied:
         _denied(handler, "git checkout HEAD~1 -- mod", repo)
 
 
+class TestAParentThatIsNotADirectoryStaysDenied:
+    """Second review of PR 293: git removes a FILE where the commit has a directory.
+
+    `d/x` is absent and unindexed, so the path alone looks clean, but restoring it
+    first deletes whatever sits at `d`.
+    """
+
+    def test_a_tracked_modified_file_at_the_parent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "d").mkdir()
+        (repo / "d" / "x").write_text("old x\n")
+        _git(repo, "add", "d")
+        _git(repo, "commit", "-q", "-m", "dir d")
+        _git(repo, "rm", "-q", "-r", "d")
+        (repo / "d").write_text("file d\n")
+        _git(repo, "add", "d")
+        _git(repo, "commit", "-q", "-m", "file d")
+        (repo / "d").write_text("my unsaved edit\n")
+        _denied(handler, "git checkout HEAD~1 -- d/x", repo)
+
+    def test_a_tracked_clean_file_at_the_parent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "d").mkdir()
+        (repo / "d" / "x").write_text("old x\n")
+        _git(repo, "add", "d")
+        _git(repo, "commit", "-q", "-m", "dir d")
+        _git(repo, "rm", "-q", "-r", "d")
+        (repo / "d").write_text("file d\n")
+        _git(repo, "add", "d")
+        _git(repo, "commit", "-q", "-m", "file d")
+        _denied(handler, "git checkout HEAD~1 -- d/x", repo)
+
+    def test_an_untracked_file_at_the_parent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "gonedir").write_text("untracked local work\n")
+        _denied(handler, f"git checkout {_OLD} -- gonedir/f.txt", repo)
+
+    def test_an_ignored_file_at_the_parent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / ".gitignore").write_text("gonedir\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-q", "-m", "ignore")
+        (repo / "gonedir").write_text("ignored local work\n")
+        _denied(handler, "git checkout HEAD~2 -- gonedir/f.txt", repo)
+
+    def test_a_modified_file_at_a_deeper_parent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "e" / "f").mkdir(parents=True)
+        (repo / "e" / "f" / "g").write_text("old g\n")
+        _git(repo, "add", "e")
+        _git(repo, "commit", "-q", "-m", "dir e/f")
+        _git(repo, "rm", "-q", "-r", "e/f")
+        (repo / "e").mkdir(exist_ok=True)
+        (repo / "e" / "f").write_text("file e/f\n")
+        _git(repo, "add", "e/f")
+        _git(repo, "commit", "-q", "-m", "file e/f")
+        (repo / "e" / "f").write_text("my unsaved edit\n")
+        _denied(handler, "git checkout HEAD~1 -- e/f/g", repo)
+
+    def test_an_index_entry_at_an_absent_parent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """The parent is deleted from the worktree but its file entry is still indexed."""
+        (repo / "a.txt").unlink()
+        _denied(handler, f"git checkout {_OLD} -- a.txt/x", repo)
+
+    def test_a_symlinked_parent_inside_the_repository_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "ln").symlink_to("sub")
+        _denied(handler, "git checkout HEAD -- ln/c.txt", repo)
+
+    def test_a_parent_lstat_error_denies(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_lstat = Path.lstat
+
+        def refusing(self: Path) -> Any:
+            if self.name == "gonedir":
+                raise PermissionError("lstat refused")
+            return real_lstat(self)
+
+        monkeypatch.setattr(Path, "lstat", refusing)
+        _denied(handler, f"git checkout {_OLD} -- gonedir/f.txt", repo)
+
+    def test_a_nested_absent_path_under_a_real_directory_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        decision, _ = _verdict(handler, f"git checkout {_OLD} -- gonedir/f.txt", repo)
+        assert decision == Decision.ALLOW
+
+    def test_an_existing_directory_holding_untracked_files_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """The reverse shape: the commit has a file where the worktree has a directory."""
+        (repo / "gone.txt").mkdir()
+        (repo / "gone.txt" / "mine").write_text("untracked local work\n")
+        _denied(handler, f"git checkout {_OLD} -- gone.txt", repo)
+
+
 class TestIndexFlagsThatHideChangesStayDenied:
     """Review of PR 293: `git diff` skips these entries, so a clean diff proves nothing."""
 

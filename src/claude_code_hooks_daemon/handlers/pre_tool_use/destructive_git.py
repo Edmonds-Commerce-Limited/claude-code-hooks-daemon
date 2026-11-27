@@ -2,6 +2,7 @@
 
 import logging
 import re
+import stat
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -1073,8 +1074,8 @@ _REGULAR_FILE_MODES: Final[dict[str, bool]] = {"100644": False, "100755": True}
 _EXECUTABLE_BITS: Final[int] = 0o111
 
 
-def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
-    """Every index entry ``name`` names, each a plain merged entry, else _CheckoutUnproven."""
+def _index_records(directory: Path, name: str) -> list[_IndexEntry]:
+    """Every index entry the literal pathspec ``name`` matches, else _CheckoutUnproven."""
     listed = run_git(
         directory,
         _LITERAL_PATHSPECS,
@@ -1095,7 +1096,14 @@ def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
         found = _INDEX_RECORD.fullmatch(record)
         if found is None:
             raise _CheckoutUnproven(f"git's index listing for `{name}` could not be read")
-        entry = _IndexEntry(**found.groupdict())
+        entries.append(_IndexEntry(**found.groupdict()))
+    return entries
+
+
+def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
+    """Every index entry ``name`` names, each a plain merged entry, else _CheckoutUnproven."""
+    entries = _index_records(directory, name)
+    for entry in entries:
         if entry.tag != _PLAIN_CACHED_TAG:
             raise _CheckoutUnproven(
                 f"`{entry.path}` carries index tag `{entry.tag}` (assume-unchanged, "
@@ -1103,8 +1111,32 @@ def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
             )
         if entry.stage != _MERGED_STAGE:
             raise _CheckoutUnproven(f"`{entry.path}` is unmerged")
-        entries.append(entry)
     return entries
+
+
+def _parent_problem(directory: Path, name: str) -> str | None:
+    """Why a parent of ``name`` would be replaced to make room for it, or None.
+
+    Restoring ``d/x`` first removes whatever sits at ``d`` when it is not a directory,
+    so every parent prefix must be absent or a real directory (lstat: a symlink counts
+    as not a directory), and no parent may itself be an index entry. An lstat error
+    other than absence propagates as OSError, which the caller turns into a denial.
+    """
+    parts = name.split(_PATH_SEPARATOR)
+    parents = [_PATH_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts))]
+    for parent in parents:
+        if any(entry.path == parent for entry in _index_records(directory, parent)):
+            return f"`{parent}` is a file in the index, so restoring `{name}` would replace it"
+    for parent in parents:
+        try:
+            mode = (directory / parent).lstat().st_mode
+        except FileNotFoundError:
+            # Not there is an answer, not a failure: the checkout creates this parent
+            # and every deeper one as directories, so nothing below it can be replaced.
+            break
+        if not stat.S_ISDIR(mode):
+            return f"`{parent}` is not a directory, so restoring `{name}` would replace it"
+    return None
 
 
 def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]) -> str | None:
@@ -1160,6 +1192,9 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
     base = directory.resolve()
     for name in paths:
         target = directory / name
+        parent_problem = _parent_problem(directory, name)
+        if parent_problem is not None:
+            return parent_problem
         if target.is_symlink():
             return f"`{name}` is a symlink"
         if target.resolve() != base / name:
