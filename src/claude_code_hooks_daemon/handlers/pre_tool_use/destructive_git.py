@@ -1280,8 +1280,9 @@ _VALUE_SEPARATOR: Final[str] = "="
 _PREVIOUS_BRANCH: Final[str] = "-"
 _PREVIOUS_BRANCH_REVISION: Final[str] = "@{-1}"
 _HEAD: Final[str] = "HEAD"
-# The paths a switch creates: added between HEAD and the target.
-_ADDED_PATHS_FILTER: Final[str] = "--diff-filter=A"
+# The paths a switch writes: added, modified or retyped between HEAD and the target.
+_WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=AMT"
+_ADDED_STATUS: Final[str] = "A"
 # Runners that add words of their own to the command they run (N765).
 _ARGUMENT_FEEDERS: Final[frozenset[str]] = frozenset({"xargs", "parallel", "find", "fd", "fdfind"})
 # Prefixes that run the command they are given with its words unchanged.
@@ -1483,39 +1484,51 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
     """Why switching to ``revision`` would write over a local path git does not track, or None.
 
     Git refuses to switch over a modified tracked file or an untracked one, but it writes
-    over an IGNORED file the target tracks without a word. So every path the switch
-    creates (added between ``HEAD`` and ``revision``) must be absent locally, with every
-    parent absent or a real directory. Any git failure is a reason too.
+    over an IGNORED file the target tracks without a word, and to write a path whose
+    tracked parent was replaced locally (by an untracked file or symlink) it removes that
+    parent. So for every path the switch writes (added, modified or retyped between
+    ``HEAD`` and ``revision``) each parent must be absent or a real directory, and an
+    added path must be absent. Any git failure is a reason too.
     """
     top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
     if top.returncode != 0 or not top.stdout.strip():
         return f"`{directory}` is not in a git working tree git could read"
-    added = run_git(
+    written = run_git(
         directory,
         "diff",
-        "--name-only",
+        "--name-status",
         "-z",
         "--no-renames",
         "--no-ext-diff",
         "--no-relative",
-        _ADDED_PATHS_FILTER,
+        _WRITTEN_PATHS_FILTER,
         _HEAD,
         revision,
         _OPTIONS_END,
         timeout=Timeout.GIT_CONTEXT,
     )
-    if added.returncode != 0:
-        return f"git could not list what switching to `{revision}` creates"
+    if written.returncode != 0:
+        return f"git could not list what switching to `{revision}` writes"
+    fields = written.stdout.split(_RECORD_SEPARATOR)
+    if fields and not fields[-1]:
+        fields.pop()
+    if len(fields) % 2:
+        return f"git's list of what switching to `{revision}` writes could not be read"
     root = Path(top.stdout.strip())
-    for name in added.stdout.split(_RECORD_SEPARATOR):
-        problem = _created_path_problem(root, name) if name else None
+    for status, name in zip(fields[::2], fields[1::2], strict=True):
+        problem = _written_path_problem(root, name, added=status == _ADDED_STATUS)
         if problem is not None:
             return problem
     return None
 
 
-def _created_path_problem(root: Path, name: str) -> str | None:
-    """Why creating ``name`` under ``root`` would replace something local, or None."""
+def _written_path_problem(root: Path, name: str, *, added: bool) -> str | None:
+    """Why writing ``name`` under ``root`` would replace something local, or None.
+
+    Every parent must be absent or a real directory (lstat: a symlink is not one). The
+    path itself must be absent when ``added`` (git does not track it here), and must
+    not be a directory when it is modified or retyped (git tracks a file there).
+    """
     parts = name.split(_PATH_SEPARATOR)
     for depth in range(1, len(parts) + 1):
         try:
@@ -1525,8 +1538,11 @@ def _created_path_problem(root: Path, name: str) -> str | None:
             break
         except OSError as error:
             return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
-        if depth == len(parts) or not stat.S_ISDIR(mode):
-            return f"`{name}` would be written over a local file git does not track"
+        if depth < len(parts):
+            if not stat.S_ISDIR(mode):
+                return f"`{name}` would replace a local non-directory parent of it"
+        elif added or stat.S_ISDIR(mode):
+            return f"`{name}` would be written over a local path git does not track"
     return None
 
 

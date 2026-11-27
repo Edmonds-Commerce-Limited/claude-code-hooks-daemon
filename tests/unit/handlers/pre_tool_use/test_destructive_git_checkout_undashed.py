@@ -835,6 +835,21 @@ class TestReviewMinorASwitchOverIgnoredFiles:
         (feat / "deep").write_text("ignored local work\n")
         _denied(handler, "git checkout feat", feat, RuleID.GIT_CHECKOUT_DISCARD)
 
+    def test_a_tracked_parent_replaced_by_an_untracked_symlink_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        """Git removes the symlink to re-create `sub/c.txt` from a branch that modifies it."""
+        _git(repo, "checkout", "-q", "-b", "edits")
+        (repo / "sub" / "c.txt").write_text("edited on the branch\n")
+        _git(repo, "commit", "-q", "-a", "-m", "edit c")
+        _git(repo, "checkout", "-q", "main")
+        (repo / "sub" / "c.txt").unlink()
+        (repo / "sub").rmdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (repo / "sub").symlink_to(elsewhere)
+        _denied(handler, "git checkout edits", repo, RuleID.GIT_CHECKOUT_DISCARD)
+
     def test_the_previous_branch_is_read_the_same_way(
         self, handler: DestructiveGitHandler, feat: Path
     ) -> None:
