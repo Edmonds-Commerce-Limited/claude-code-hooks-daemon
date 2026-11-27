@@ -1601,6 +1601,80 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
     @pytest.mark.parametrize(
         "command",
         [
+            # The peer seat's exact shape (daemon v3.76.0, N747).
+            "cd src-go && mkdir -p ../untracked/scratch && timeout 300 go test ./x/ -run 'X' "
+            "> ../untracked/scratch/t1.txt 2>&1; echo rc=$?; cat ../untracked/scratch/t1.txt",
+            "cd src-go && mkdir -p ../untracked/scratch",
+            "cd src-go && mkdir -p ../untracked/scratch && echo x > ../untracked/scratch/t1.txt",
+            "(cd src-go && mkdir -p ../u && echo x > ../u/t1.txt)",
+            "(cd src-go && mkdir -p ../u && echo x > ../u/t1.txt); echo rc=$?",
+            "cd src-go && cd .. && mkdir -p u && echo x > u/t1.txt",
+        ],
+    )
+    def test_the_peer_shape_and_variants_land_inside_and_are_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "src-go").mkdir()
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd src-go && mkdir -p ../../x && echo x > ../../x/t1.txt",
+            "cd src-go && mkdir -p ../untracked && echo x > ../../t1.txt; echo rc=$?",
+            "cd src-go && mkdir -p ../untracked; echo x > ../../t1.txt",
+            "cd .. && mkdir -p u && echo x > u/t1.txt",
+            "cd link && mkdir -p ../u && echo x > t1.txt",
+            "cd link && echo x > t1.txt",
+            # A `;` or `||` after a chain means the `cd` may have failed, so the
+            # later write is also read from the start directory, where `../` escapes.
+            "cd src-go && mkdir -p ../u; echo x > ../u/t1.txt; echo rc=$?",
+            "cd src-go; mkdir -p ../u && echo x > ../u/t1.txt",
+            "cd src-go && true || echo x > ../u/t1.txt",
+        ],
+    )
+    def test_a_relative_write_that_escapes_after_a_cd_stays_denied(
+        self, handler: ProjectContainmentHandler, repo: Path, tmp_path: Path, command: str
+    ) -> None:
+        (repo / "src-go").mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (repo / "link").symlink_to(outside)
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_the_peer_shape_with_an_absolute_cd_is_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        """N747: the report's `cd /abs/src-go && mkdir -p ../x && ... > ../x/f; echo; cat`."""
+        (repo / "src-go").mkdir()
+        command = (
+            f"cd {repo}/src-go && mkdir -p ../untracked/scratch && timeout 300 go test ./x/ "
+            "-run 'X' > ../untracked/scratch/t1.txt 2>&1; echo rc=$?; "
+            "cat ../untracked/scratch/t1.txt"
+        )
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$UNKNOWN_DIR" && mkdir -p ../u && echo x > ../u/t1.txt',
+            "cd src-go && cd - && echo x > ../t1.txt",
+        ],
+    )
+    def test_a_cd_that_cannot_be_placed_is_never_guessed_and_says_so(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "src-go").mkdir()
+        result = handler.handle(_bash(command, cwd=str(repo)))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             "cd /tmp && echo x > x",
             "cd .. && cd .. && echo x > x",
             "cd .. && echo x > x",
