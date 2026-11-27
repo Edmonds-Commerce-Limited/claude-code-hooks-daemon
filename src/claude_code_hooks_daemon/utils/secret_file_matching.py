@@ -3000,7 +3000,7 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
                 return True
             # The last word of a quoted string is left counted: it may end a
             # spaced file NAME (`pr 'add x.secret.key'`), which only the whole
-            # quoted word spells (N749 review blocker 1).
+            # quoted word spells (Ledger 00474 N744/N760 review, blocker 1).
             word_start, word_end = quote_index, end
     before = command[word_start - 1] if word_start > 0 else ""
     after_char = command[word_end] if word_end < len(command) else ""
@@ -3396,7 +3396,7 @@ def iter_protected_mentions(
                 # (the ordinary stream yields them too), so one that names no
                 # file does not make the whole string a mention -- unless the
                 # whole string itself names a file that is there or indexed
-                # (N749 review blocker 1: `pr 'add x_vault_pass'`).
+                # (Ledger 00474 N744/N760 review, blocker 1: `pr 'mid x.secret.key dle'`).
                 whole = pattern
                 pattern = next((p for p in map(judge, token.split()) if p is not None), None)
                 if pattern is None and _names_a_present_file(

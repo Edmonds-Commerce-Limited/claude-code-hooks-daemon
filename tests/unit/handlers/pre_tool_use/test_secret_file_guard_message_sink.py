@@ -7,10 +7,9 @@ posted, never opened or run, so it is not judged as a path mention; the
 teamchat words (a ``--ref path:...``, a member name) still are, and every other
 shape is judged exactly as before.
 
-Also pinned here: N749's narrowing of the underscore patterns (an identifier
-with no slash and no leading dot counts only when it names a file that exists,
-is indexed, or is opened), and the deny's position of the matched word inside
-a long quoted token.
+Also pinned here: underscore-pattern words are judged as on main (N749 stays
+open), and a quoted multi-word argument whose whole text names a present file
+is a mention.
 
 Synthetic fixtures only: the protected files live in ``tmp_path`` and their
 names are assembled so this file never spells one.
@@ -44,7 +43,6 @@ _SG = _SECRET_GLOB
 #: An underscore-pattern word, assembled: ``x_`` + the vault-password stem.
 _VAULT_STEM = "vault" + "_pass"
 _IDENTIFIER = "test_a_missing_" + _VAULT_STEM + "word_file_is_tool_unavailable"
-_EXISTING_IDENT = "kept_" + _VAULT_STEM
 _HEREDOC = "<<'EOF'"
 
 
@@ -67,7 +65,6 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Project
     vault.mkdir(parents=True)
     protected = vault / _PROTECTED_NAME
     protected.write_bytes(b"DUMMY\n")
-    (root / _EXISTING_IDENT).write_bytes(b"DUMMY\n")
     monkeypatch.chdir("/")
     monkeypatch.setenv("HOME", str(base / "home"))
     reset_snapshot_cache()
@@ -290,6 +287,8 @@ class TestASpacedProtectedNameIsAMention:
             "add z" + _SUFFIX + ".key",
             "z" + _SUFFIX + ".key more",
             "two words" + _SUFFIX,
+            "mid z" + _SUFFIX + ".key dle",
+            "add" + chr(0x00A0) + "z" + _SUFFIX + ".key",
         ],
     )
     @pytest.mark.parametrize("reader", ["pr", "expand", "nice pr", "command pr", "iconv -f utf-8"])
