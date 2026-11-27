@@ -312,7 +312,7 @@ class TestARealBranchSwitchStaysAllowed:
             "git checkout --track side",
             "git checkout --no-track -b feature side",
             "git checkout -m side",
-            "git checkout --recurse-submodules side",
+            "git checkout --no-recurse-submodules side",
             "git checkout --no-guess side",
             f"git checkout {_OLD} --",
             "git checkout",
@@ -943,32 +943,37 @@ class TestReviewMinorASwitchOverIgnoredFiles:
         _denied(handler, "git checkout feat", feat, RuleID.GIT_CHECKOUT_DISCARD)
 
 
+def _feat_tracks_an_ignored_file(repo: Path) -> Path:
+    """`ign.txt` is tracked on `feat` AND on the merge base of `feat` and `main`; `main`
+    stops tracking it, so on main it is an ignored local file. `origin` has the standard
+    fetch refspec and a remote-tracking `remote-only` at `feat`."""
+    (repo / "ign.txt").write_text("tracked on the base\n")
+    _git(repo, "add", "ign.txt")
+    _git(repo, "commit", "-q", "-m", "the base tracks ign.txt")
+    _git(repo, "checkout", "-q", "-b", "feat")
+    (repo / "feat-only.txt").write_text("on feat\n")
+    _git(repo, "add", "feat-only.txt")
+    _git(repo, "commit", "-q", "-m", "feat moves on")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "rm", "-q", "--cached", "ign.txt")
+    (repo / "ign.txt").unlink()
+    (repo / "main-only.txt").write_text("on main\n")
+    _git(repo, "add", "main-only.txt")
+    _git(repo, "commit", "-q", "-m", "main stops tracking ign.txt")
+    (repo / ".git" / "info" / "exclude").write_text("ign.txt\n")
+    _git(repo, "config", "remote.origin.url", "/nonexistent")
+    _git(repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+    _git(repo, "update-ref", "refs/remotes/origin/remote-only", "feat")
+    return repo
+
+
 class TestSecondReviewTheSwitchTargetIsWhatCheckoutPicks:
     """Second review, blocker 1: the switch check must compare HEAD with the commit git
     actually switches to, not with whatever `rev-parse <operand>` picks."""
 
     @pytest.fixture
     def feat(self, repo: Path) -> Path:
-        """`ign.txt` is tracked on `feat` AND on the merge base of `feat` and `main`;
-        `main` stops tracking it, so on main it is an ignored local file."""
-        (repo / "ign.txt").write_text("tracked on the base\n")
-        _git(repo, "add", "ign.txt")
-        _git(repo, "commit", "-q", "-m", "the base tracks ign.txt")
-        _git(repo, "checkout", "-q", "-b", "feat")
-        (repo / "feat-only.txt").write_text("on feat\n")
-        _git(repo, "add", "feat-only.txt")
-        _git(repo, "commit", "-q", "-m", "feat moves on")
-        _git(repo, "checkout", "-q", "main")
-        _git(repo, "rm", "-q", "--cached", "ign.txt")
-        (repo / "ign.txt").unlink()
-        (repo / "main-only.txt").write_text("on main\n")
-        _git(repo, "add", "main-only.txt")
-        _git(repo, "commit", "-q", "-m", "main stops tracking ign.txt")
-        (repo / ".git" / "info" / "exclude").write_text("ign.txt\n")
-        _git(repo, "config", "remote.origin.url", "/nonexistent")
-        _git(repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-        _git(repo, "update-ref", "refs/remotes/origin/remote-only", "feat")
-        return repo
+        return _feat_tracks_an_ignored_file(repo)
 
     @staticmethod
     def _ignored_in_the_way(repo: Path) -> None:
@@ -1002,15 +1007,19 @@ class TestSecondReviewTheSwitchTargetIsWhatCheckoutPicks:
         self._ignored_in_the_way(feat)
         _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
 
-    @pytest.mark.parametrize(
-        "command", ["git checkout feat...main", "git checkout remote-only", "git checkout amb"]
-    )
+    @pytest.mark.parametrize("command", ["git checkout feat...main", "git checkout remote-only"])
     def test_the_same_switches_with_nothing_in_the_way_are_allowed(
         self, handler: DestructiveGitHandler, feat: Path, command: str
     ) -> None:
+        _allowed(handler, command, feat)
+
+    def test_a_name_both_a_branch_and_a_tag_is_denied_even_with_nothing_in_the_way(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        """Third review: an ambiguous name is denied outright (a deliberate over-deny, N771)."""
         _git(feat, "tag", "amb", "HEAD")
         _git(feat, "branch", "amb", "feat")
-        _allowed(handler, command, feat)
+        _denied(handler, "git checkout amb", feat, RuleID.GIT_CHECKOUT_DISCARD)
 
     def test_a_shortcut_name_two_remotes_hold_is_denied(
         self, handler: DestructiveGitHandler, feat: Path
@@ -1086,7 +1095,222 @@ class TestReviewMinorTheReadingIsBounded:
         monkeypatch.setattr(destructive_git, "run_git", recording)
         command = " && ".join(f"git checkout b{index}" for index in range(400))
         _denied(handler, command, repo, RuleID.GIT_CHECKOUT_DISCARD)
-        # A name that resolves to nothing costs three questions: is it a branch or a
-        # remote-tracking branch, is it a commit, is it a path. The bound is per
-        # reading, never per operand.
-        assert len(calls) <= 3 * destructive_git._MAX_SWITCH_READINGS
+        # A name that resolves to nothing costs four questions: which refs end in it, is
+        # it a commit, is it an index path, what do the fetch refspecs map. The bound is
+        # per reading, never per operand.
+        assert len(calls) <= 4 * destructive_git._MAX_SWITCH_READINGS
+
+
+class TestThirdReviewOnlyAPlainNameSwitches:
+    """Third review: the allow-set is shrunk, not the check extended. A one-operand switch
+    is allowed only for a plain ASCII ref spelling that resolves to one branch, tag or
+    commit (or the one standard remote-tracking branch) and passes the switch check."""
+
+    @pytest.fixture
+    def feat(self, repo: Path) -> Path:
+        return _feat_tracks_an_ignored_file(repo)
+
+    @staticmethod
+    def _ignored_in_the_way(repo: Path) -> None:
+        (repo / "ign.txt").write_text("ignored local work\n")
+
+    @pytest.mark.parametrize("name", ["fé", "a,b", "a=b", "a%b", "a#b"])
+    @pytest.mark.parametrize("in_the_way", [True, False])
+    def test_a_branch_with_a_name_outside_the_plain_spelling_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path, name: str, in_the_way: bool
+    ) -> None:
+        """Blocker 1: such a name was never judged and lost `ign.txt`; now it is denied
+        whatever the worktree holds (a deliberate over-deny, N771)."""
+        _git(feat, "branch", name, "feat")
+        if in_the_way:
+            self._ignored_in_the_way(feat)
+        _denied(handler, f"git checkout '{name}'", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_tag_with_a_non_ascii_name_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _git(feat, "tag", "tç", "feat")
+        self._ignored_in_the_way(feat)
+        _denied(handler, "git checkout tç", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        ("refspec", "ref", "name"),
+        [
+            ("+refs/heads/*:refs/mirror/*", "refs/mirror/rem2", "rem2"),
+            ("+refs/heads/*:refs/remotes/origin/x/*", "refs/remotes/origin/x/rem3", "rem3"),
+            ("+refs/heads/*:refs/remotes/origin/pre-*", "refs/remotes/origin/pre-rem6", "rem6"),
+        ],
+    )
+    @pytest.mark.parametrize("in_the_way", [True, False])
+    def test_a_shortcut_through_a_non_standard_refspec_is_denied(
+        self,
+        handler: DestructiveGitHandler,
+        feat: Path,
+        refspec: str,
+        ref: str,
+        name: str,
+        in_the_way: bool,
+    ) -> None:
+        """Blocker 2: git maps the name through each fetch refspec, which can point
+        anywhere, so any refspec but `+refs/heads/*:refs/remotes/<remote>/*` denies."""
+        _git(feat, "config", "remote.origin.fetch", refspec)
+        _git(feat, "update-ref", ref, "feat")
+        if in_the_way:
+            self._ignored_in_the_way(feat)
+        _denied(handler, f"git checkout {name}", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_name_resolved_through_a_ref_outside_the_three_namespaces_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _git(feat, "update-ref", "refs/rem5", "feat")
+        _denied(handler, "git checkout rem5", feat, RuleID.GIT_CHECKOUT_DISCARD)
+        _denied(handler, "git checkout refs/rem5", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_shortcut_ref_under_a_remote_that_is_not_configured_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _git(feat, "update-ref", "refs/remotes/stale/rem7", "feat")
+        _denied(handler, "git checkout rem7", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git checkout feat",
+            "git checkout remote-only",
+            "git checkout origin/remote-only",
+            "git checkout refs/heads/feat",
+            "git checkout heads/feat",
+            "git checkout feat~0",
+            "git checkout 'feat^{commit}'",
+            "git checkout HEAD@{0}",
+            "git checkout not-a-ref-and-not-a-path",
+        ],
+    )
+    def test_plain_names_with_nothing_in_the_way_stay_allowed(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        _allowed(handler, command, feat)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git checkout HEAD {a,sub/c}.txt",
+            "git checkout HEAD {a.txt,}",
+            "git checkout HEAD ~+/a.txt",
+            "git checkout {HEAD,a.txt}",
+            "git checkout HEAD -- {a,b}.txt",
+            "git checkout HEAD -- ~+/a.txt",
+            "git checkout HEAD -- p{1..2}.txt",
+            "git checkout HEAD -- x=~/a.txt",
+            "git checkout HEAD@{0,1} -- a.txt",
+            "git restore {a,b}.txt",
+        ],
+    )
+    @pytest.mark.parametrize("edited", [True, False])
+    def test_a_shell_expansion_in_an_operand_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str, edited: bool
+    ) -> None:
+        """Blocker 3: bash expands `{a,b}`, `{1..2}` and a leading `~` before git runs, so
+        the word judged is not the word git gets; such a word is denied whether or not
+        the expansion would reach a local edit."""
+        if edited:
+            (repo / "a.txt").write_text("my unsaved edit\n")
+        verdict, _ = _verdict(handler, command, repo)
+        assert verdict == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command", ["git checkout HEAD@{0} -- absent.txt", "git checkout HEAD -- a{b}.txt"]
+    )
+    def test_braces_that_bash_leaves_alone_are_judged_as_written(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        _allowed(handler, command, repo)
+
+
+def _superproject_whose_branch_moves_a_submodule(tmp_path: Path) -> Path:
+    """`super` has submodule `sm` at a commit without `ign2.txt`; branch `smA` moves it to
+    one that tracks it, and `sm/ign2.txt` is an ignored local file in the submodule."""
+    source = tmp_path / "smsrc"
+    _git(tmp_path, "init", "-q", "-b", "main", str(source))
+    (source / "base.txt").write_text("base\n")
+    _git(source, "add", "base.txt")
+    _git(source, "commit", "-q", "-m", "c0")
+    super_repo = tmp_path / "super"
+    _git(tmp_path, "init", "-q", "-b", "main", str(super_repo))
+    _git(
+        super_repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(source), "sm"
+    )
+    _git(super_repo, "commit", "-q", "-m", "add sm at c0")
+    (source / "ign2.txt").write_text("tracked in c1\n")
+    _git(source, "add", "ign2.txt")
+    _git(source, "commit", "-q", "-m", "c1 tracks ign2.txt")
+    submodule = super_repo / "sm"
+    _git(submodule, "-c", "protocol.file.allow=always", "fetch", "-q", "origin")
+    _git(super_repo, "checkout", "-q", "-b", "smA")
+    _git(submodule, "checkout", "-q", "origin/main")
+    _git(super_repo, "add", "sm")
+    _git(super_repo, "commit", "-q", "-m", "smA moves sm to c1")
+    _git(super_repo, "checkout", "-q", "main")
+    _git(super_repo, "submodule", "-q", "update")
+    exclude = Path(_git(submodule, "rev-parse", "--git-path", "info/exclude"))
+    exclude = exclude if exclude.is_absolute() else submodule / exclude
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("ign2.txt\n")
+    (submodule / "ign2.txt").write_text("ignored local work in the submodule\n")
+    return super_repo
+
+
+class TestThirdReviewSubmoduleRecursion:
+    """Third review, minor 1: a recursing switch writes inside a submodule, which the
+    switch check never reads, so recursion is denied when the switch moves a gitlink."""
+
+    @pytest.fixture
+    def super_repo(self, tmp_path: Path) -> Path:
+        return _superproject_whose_branch_moves_a_submodule(tmp_path)
+
+    def test_the_recurse_option_is_denied(
+        self, handler: DestructiveGitHandler, super_repo: Path
+    ) -> None:
+        _denied(
+            handler,
+            "git checkout --recurse-submodules smA",
+            super_repo,
+            RuleID.GIT_CHECKOUT_DISCARD,
+        )
+
+    def test_recursion_switched_on_in_config_is_denied(
+        self, handler: DestructiveGitHandler, super_repo: Path
+    ) -> None:
+        _git(super_repo, "config", "submodule.recurse", "true")
+        _denied(handler, "git checkout smA", super_repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_without_recursion_the_submodule_is_not_touched_and_the_switch_is_allowed(
+        self, handler: DestructiveGitHandler, super_repo: Path
+    ) -> None:
+        _allowed(handler, "git checkout smA", super_repo)
+        _allowed(handler, "git checkout --no-recurse-submodules smA", super_repo)
+
+
+class TestThirdReviewManyPathsAreReadInBatches:
+    """Third review, minor 2: a long path list is read in a few batched git calls."""
+
+    def test_two_thousand_absent_paths_take_a_bounded_number_of_git_calls(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", recording)
+        command = "git checkout v1 " + " ".join(f"p{index}.txt" for index in range(2000))
+        _allowed(handler, command, repo)
+        assert len(calls) <= 40
+
+    def test_a_present_edited_file_among_many_is_still_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        names = [f"p{index}.txt" for index in range(600)] + ["a.txt"]
+        _denied(handler, "git checkout v1 " + " ".join(names), repo, RuleID.GIT_CHECKOUT_DISCARD)

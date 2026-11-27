@@ -966,9 +966,16 @@ _DIRECTORY_CHANGES: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 # Flags a restore may carry without changing WHICH files it overwrites. Anything else
 # (`--source`, `-p`, `--pathspec-from-file`, `--staged`, `--ours`...) is unverifiable.
 _RESTORE_FLAGS: Final[frozenset[str]] = frozenset({"--worktree", "-W", "--quiet", "-q"})
+# A word bash rewrites before git runs: brace expansion (`{a,b}`, `{1..3}`) and a tilde
+# at the start of the word or of an assignment-like value (`~+/f`, `x=~/f`). The words
+# this reading gets are already unquoted, so a quoted brace is refused too (fail closed).
+_SHELL_EXPANSION: Final[str] = r"\{[^}]*(?:,|\.\.)[^}]*\}|(?:^|[=:])~"
+_SHELL_EXPANSION_PATTERN: Final[re.Pattern[str]] = re.compile(_SHELL_EXPANSION)
 # A path word that is not one literal file name: a glob, a pathspec magic prefix, a
-# variable, or an escape. `.` and `..` name a directory.
-_NOT_A_LITERAL_PATH: Final[re.Pattern[str]] = re.compile(r"[*?\[\]$\\`]|^:|^\.{1,2}$")
+# variable, an escape, or a shell expansion. `.` and `..` name a directory.
+_NOT_A_LITERAL_PATH: Final[re.Pattern[str]] = re.compile(
+    rf"[*?\[\]$\\`]|^:|^\.{{1,2}}$|{_SHELL_EXPANSION}"
+)
 
 
 def _restore_loss(run: GitInvocation, cwd: Path) -> str | None:
@@ -1060,8 +1067,16 @@ _CHECKOUT: Final[str] = "checkout"
 _DASH_C: Final[str] = "-C"
 #: One wall-clock bound on every git call of the checkout proof (module-level for tests).
 _CHECKOUT_PROOF_BUDGET: float = Timeout.GIT_CHECKOUT_RESTORE_PROOF
-# A commit word safe to hand to git as one argument: no option, glob, variable or escape.
+# A commit word safe to hand to git as one argument: ASCII only, and no option, glob,
+# variable, escape, comma, `=`, `%` or `#`. `_plain_revision` also refuses a shell expansion.
 _LITERAL_COMMIT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_@][A-Za-z0-9._/@~^{}+-]*$")
+
+
+def _plain_revision(word: str) -> bool:
+    """Whether ``word`` is a revision spelling git gets exactly as written (no expansion)."""
+    return bool(_LITERAL_COMMIT.match(word)) and not _SHELL_EXPANSION_PATTERN.search(word)
+
+
 _PATH_SEPARATOR: Final[str] = "/"
 # Path components that do not name one entry: `a//b`, `a/.`, `a/../b`, a trailing `/`.
 _NON_NAMING_COMPONENTS: Final[frozenset[str]] = frozenset({"", ".", ".."})
@@ -1142,7 +1157,7 @@ def _checkout_restore_loss(
             "restored from the index, which discards unstaged changes (to switch branches, "
             "write the branch name literally)"
         )
-    if len(before) != 1 or not _LITERAL_COMMIT.match(before[0]):
+    if len(before) != 1 or not _plain_revision(before[0]):
         return "it must name exactly one literal commit before its paths"
     if not paths:
         return "it names no path"
@@ -1265,7 +1280,8 @@ _SWITCH_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
         "--detach",
         "--merge",
         "--ignore-other-worktrees",
-        "--recurse-submodules",
+        # `--recurse-submodules` is not here: it writes inside submodules, which the switch
+        # check does not read (third review, minor 1).
         "--no-recurse-submodules",
     }
 )
@@ -1283,7 +1299,22 @@ _PREVIOUS_BRANCH: Final[str] = "-"
 _PREVIOUS_BRANCH_REVISION: Final[str] = "@{-1}"
 # `A...B` names the merge base of A and B.
 _MERGE_BASE_MARK: Final[str] = "..."
+_REFS_PREFIX: Final[str] = "refs/"
+_TAGS_PREFIX: Final[str] = "refs/tags/"
 _REMOTES_PREFIX: Final[str] = "refs/remotes/"
+# The ref namespaces a one-operand switch may reach a commit through.
+_SWITCH_REF_NAMESPACES: Final[tuple[str, ...]] = (HEADS_PREFIX, _TAGS_PREFIX, _REMOTES_PREFIX)
+_FETCH_REFSPEC_KEYS: Final[str] = r"^remote\..*\.fetch$"
+_FETCH_REFSPEC_KEY: Final[re.Pattern[str]] = re.compile(r"remote\.(?P<remote>.+)\.fetch")
+_FORCED_REFSPEC: Final[str] = "+"
+# `git config --get` exits 1 when the key is not set.
+_CONFIG_KEY_ABSENT: Final[int] = 1
+_SUBMODULE_RECURSE_KEY: Final[str] = "submodule.recurse"
+_CONFIG_FALSE: Final[str] = "false"
+_GITLINK_MODE: Final[str] = "160000"
+# A `git diff --raw -z` record header: `:`, two modes, two object ids and a status.
+_RAW_RECORD_MARK: Final[str] = ":"
+_RAW_HEADER_FIELDS: Final[int] = 5
 _HEAD: Final[str] = "HEAD"
 # The paths a switch writes: added, modified or retyped between HEAD and the target.
 _WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=ADMT"
@@ -1483,8 +1514,10 @@ def _undashed_may_restore(run: GitInvocation, cwd: Path | None) -> bool:
     with git_deadline(time.monotonic() + _CHECKOUT_PROOF_BUDGET):
         if _MERGE_BASE_MARK in operand:
             return _merge_base_switch_may_restore(directory, operand)
-        if not _LITERAL_COMMIT.match(operand):
-            return _path_reading(directory, operand) is not None
+        if not _plain_revision(operand):
+            # Only a plain ASCII spelling is read as a switch (third review): any other
+            # name is denied, whether git would switch to it or restore it as a path.
+            return True
         if previous:
             if _resolves(directory, operand, "commit"):
                 return _switch_overwrite(directory, operand) is not None
@@ -1501,7 +1534,7 @@ def _merge_base_switch_may_restore(directory: Path, operand: str) -> bool:
     """
     left, _, right = operand.partition(_MERGE_BASE_MARK)
     sides = [side or _HEAD for side in (left, right)]
-    if not all(_LITERAL_COMMIT.match(side) and _MERGE_BASE_MARK not in side for side in sides):
+    if not all(_plain_revision(side) and _MERGE_BASE_MARK not in side for side in sides):
         return True
     bases = run_git(directory, "merge-base", "--all", *sides, timeout=Timeout.GIT_CONTEXT)
     found = bases.stdout.split()
@@ -1513,39 +1546,86 @@ def _merge_base_switch_may_restore(directory: Path, operand: str) -> bool:
 def _named_switch_may_restore(directory: Path, name: str) -> bool:
     """Whether ``git checkout <name>`` may lose work, resolved as checkout resolves it.
 
-    A local branch of that name wins over a same-named tag; then any commit; then a
-    path, which git restores from the index; then the remote-branch shortcut, the one
-    remote-tracking branch of that name. Two remotes holding it, or a git failure,
-    counts as a possible loss; a name that is none of these makes git refuse.
+    Every ref ending in ``/<name>`` is listed once. A name more than one of git's
+    readings matches (``refs/<name>``, a tag, a branch, ``refs/remotes/<name>``) is
+    ambiguous and denied. A local branch is checked; then any commit, unless git reaches
+    it through a ref outside ``refs/heads``, ``refs/tags`` and ``refs/remotes``; then a
+    path, which git restores from the index; then the remote-branch shortcut. Any git
+    failure counts as a possible loss; a name that is none of these makes git refuse.
     """
     listed = run_git(
         directory,
         "for-each-ref",
         "--format=%(refname)",
-        f"{HEADS_PREFIX}{name}",
-        f"{_REMOTES_PREFIX}*/{name}",
+        f"{_REFS_PREFIX}**/{name}",
         timeout=Timeout.GIT_CONTEXT,
     )
     if listed.returncode != 0:
         return True
-    refs = listed.stdout.split()
+    refs = {ref for ref in listed.stdout.split() if ref.endswith(f"{_PATH_SEPARATOR}{name}")}
+    readings = (_REFS_PREFIX, _TAGS_PREFIX, HEADS_PREFIX, _REMOTES_PREFIX)
+    if sum(f"{prefix}{name}" in refs for prefix in readings) > 1:
+        return True
     branch = f"{HEADS_PREFIX}{name}"
     if branch in refs:
         return _switch_overwrite(directory, branch) is not None
     if _resolves(directory, name, "commit"):
+        full = name if name.startswith(_REFS_PREFIX) else f"{_REFS_PREFIX}{name}"
+        if (full == name or full in refs) and not full.startswith(_SWITCH_REF_NAMESPACES):
+            return True
         return _switch_overwrite(directory, name) is not None
     if _path_reading(directory, name) is not None:
         return True
-    remotes = [
-        ref
-        for ref in refs
-        if ref.startswith(_REMOTES_PREFIX)
-        and ref.endswith(f"/{name}")
-        and len(ref) > len(_REMOTES_PREFIX) + len(name) + 1
-    ]
-    if len(remotes) > 1:
+    return _remote_shortcut_may_restore(directory, name, refs)
+
+
+def _remote_shortcut_may_restore(directory: Path, name: str, refs: set[str]) -> bool:
+    """Whether the remote-branch shortcut ``git checkout <name>`` may lose work.
+
+    Git maps ``refs/heads/<name>`` through every remote's fetch refspec, which can point
+    anywhere, so the shortcut is read only when every refspec is the standard one. Then
+    the one ref outside ``refs/heads`` and ``refs/tags`` ending in ``/<name>`` must be
+    ``refs/remotes/<remote>/<name>`` of a configured remote, and is checked; more than
+    one, or any other ref, denies. None found means git refuses the checkout.
+    """
+    remotes = _standard_fetch_remotes(directory)
+    if remotes is None:
         return True
-    return bool(remotes) and _switch_overwrite(directory, remotes[0]) is not None
+    others = [ref for ref in refs if not ref.startswith((HEADS_PREFIX, _TAGS_PREFIX))]
+    if not others:
+        return False
+    if len(others) > 1 or others[0] not in {
+        f"{_REMOTES_PREFIX}{remote}{_PATH_SEPARATOR}{name}" for remote in remotes
+    }:
+        return True
+    return _switch_overwrite(directory, others[0]) is not None
+
+
+def _standard_fetch_remotes(directory: Path) -> frozenset[str] | None:
+    """The configured remotes, or None when any fetch refspec is not the standard one.
+
+    Standard is ``[+]refs/heads/*:refs/remotes/<remote>/*`` for a remote whose name has
+    no ``/``; any other shape, or a git failure, is None.
+    """
+    listed = run_git(
+        directory, "config", "--get-regexp", _FETCH_REFSPEC_KEYS, timeout=Timeout.GIT_CONTEXT
+    )
+    if listed.returncode == _CONFIG_KEY_ABSENT and not listed.stdout.strip():
+        return frozenset()
+    if listed.returncode != 0:
+        return None
+    remotes: set[str] = set()
+    for line in listed.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        found = _FETCH_REFSPEC_KEY.fullmatch(key)
+        if found is None:
+            return None
+        remote = found["remote"]
+        standard = f"{HEADS_PREFIX}*:{_REMOTES_PREFIX}{remote}{_PATH_SEPARATOR}*"
+        if _PATH_SEPARATOR in remote or value.removeprefix(_FORCED_REFSPEC) != standard:
+            return None
+        remotes.add(remote)
+    return frozenset(remotes)
 
 
 def _switch_overwrite(directory: Path, revision: str) -> str | None:
@@ -1556,7 +1636,9 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
     tracked parent was replaced locally (by an untracked file or symlink) it removes that
     parent. So for every path the switch writes (added, modified or retyped between
     ``HEAD`` and ``revision``) each parent must be absent or a real directory, and an
-    added path must be absent. Any git failure is a reason too.
+    added path must be absent. A switch that moves a submodule while recursion is on (or
+    may be) writes inside it, which this check does not read. Any git failure is a
+    reason too.
     """
     top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
     if top.returncode != 0 or not top.stdout.strip():
@@ -1564,7 +1646,7 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
     written = run_git(
         directory,
         "diff",
-        "--name-status",
+        "--raw",
         "-z",
         "--no-renames",
         "--no-ext-diff",
@@ -1585,7 +1667,14 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
     root = Path(top.stdout.strip())
     in_the_way: list[str] = []
     touched: list[str] = []
-    for status, name in zip(fields[::2], fields[1::2], strict=True):
+    moves_a_submodule = False
+    for header, name in zip(fields[::2], fields[1::2], strict=True):
+        # `:<old mode> <new mode> <old id> <new id> <status>`
+        parts = header.removeprefix(_RAW_RECORD_MARK).split()
+        if not header.startswith(_RAW_RECORD_MARK) or len(parts) != _RAW_HEADER_FIELDS:
+            return f"git's list of what switching to `{revision}` writes could not be read"
+        status = parts[-1]
+        moves_a_submodule = moves_a_submodule or _GITLINK_MODE in parts[:2]
         touched.append(name)
         if status == _DELETED_STATUS:
             continue
@@ -1593,10 +1682,33 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
             in_the_way.extend(_paths_in_the_way(root, name, added=status == _ADDED_STATUS))
         except OSError as error:
             return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
+    if moves_a_submodule:
+        problem = _submodule_recursion_problem(root)
+        if problem is not None:
+            return problem
     problem = _untracked_content(root, list(dict.fromkeys(in_the_way)))
     if problem is not None:
         return problem
     return _touched_local_changes(root, touched)
+
+
+def _submodule_recursion_problem(root: Path) -> str | None:
+    """Why a switch in ``root`` may recurse into the submodules it moves, or None.
+
+    Only ``submodule.recurse`` unset or false is no recursion: git then leaves each
+    submodule's working tree alone. Any other value, or a git failure, is a reason.
+    """
+    setting = run_git(
+        root, "config", "--type=bool", "--get", _SUBMODULE_RECURSE_KEY, timeout=Timeout.GIT_CONTEXT
+    )
+    if setting.returncode == _CONFIG_KEY_ABSENT and not setting.stdout.strip():
+        return None
+    if setting.returncode == 0 and setting.stdout.strip() == _CONFIG_FALSE:
+        return None
+    return (
+        f"`{_SUBMODULE_RECURSE_KEY}` makes the switch write inside a submodule it moves, "
+        "which this check does not read"
+    )
 
 
 def _touched_local_changes(root: Path, names: list[str]) -> str | None:
@@ -1751,9 +1863,48 @@ def _index_records(directory: Path, name: str) -> list[_IndexEntry]:
     return entries
 
 
-def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
-    """Every index entry ``name`` names, each a plain merged entry, else _CheckoutUnproven."""
-    entries = _index_records(directory, name)
+def _index_records_by_name(directory: Path, names: list[str]) -> dict[str, list[_IndexEntry]]:
+    """The index entries each literal pathspec in ``names`` matches, else _CheckoutUnproven.
+
+    One ``ls-files`` call per chunk of names rather than one per name. A pathspec
+    ``d`` matches ``d`` itself and everything under ``d/``, so each entry is filed
+    under every name in its chunk that is the entry's path or one of its parents.
+    """
+    unique = list(dict.fromkeys(names))
+    found: dict[str, list[_IndexEntry]] = {name: [] for name in unique}
+    for start in range(0, len(unique), _PATHS_PER_LISTING):
+        chunk = unique[start : start + _PATHS_PER_LISTING]
+        asked = set(chunk)
+        listed = run_git(
+            directory,
+            _LITERAL_PATHSPECS,
+            "ls-files",
+            "--stage",
+            "-v",
+            "-z",
+            _OPTIONS_END,
+            *chunk,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listed.returncode != 0:
+            raise _CheckoutUnproven(f"git could not list `{chunk[0]}` in the index")
+        for record in listed.stdout.split(_RECORD_SEPARATOR):
+            if not record:
+                continue
+            parsed = _INDEX_RECORD.fullmatch(record)
+            if parsed is None:
+                raise _CheckoutUnproven(f"git's index listing for `{chunk[0]}` could not be read")
+            entry = _IndexEntry(**parsed.groupdict())
+            parts = entry.path.split(_PATH_SEPARATOR)
+            for depth in range(1, len(parts) + 1):
+                prefix = _PATH_SEPARATOR.join(parts[:depth])
+                if prefix in asked:
+                    found[prefix].append(entry)
+    return found
+
+
+def _plain_index_entries(entries: list[_IndexEntry]) -> list[_IndexEntry]:
+    """``entries``, each a plain merged entry, else _CheckoutUnproven."""
     for entry in entries:
         if entry.tag != _PLAIN_CACHED_TAG:
             raise _CheckoutUnproven(
@@ -1765,18 +1916,24 @@ def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
     return entries
 
 
-def _parent_problem(directory: Path, name: str) -> str | None:
+def _parents(name: str) -> list[str]:
+    """Every proper parent prefix of the relative path ``name``, shallowest first."""
+    parts = name.split(_PATH_SEPARATOR)
+    return [_PATH_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts))]
+
+
+def _parent_problem(directory: Path, name: str, index: dict[str, list[_IndexEntry]]) -> str | None:
     """Why a parent of ``name`` would be replaced to make room for it, or None.
 
     Restoring ``d/x`` first removes whatever sits at ``d`` when it is not a directory,
     so every parent prefix must be absent or a real directory (lstat: a symlink counts
-    as not a directory), and no parent may itself be an index entry. An lstat error
-    other than absence propagates as OSError, which the caller turns into a denial.
+    as not a directory), and no parent may itself be an index entry (``index`` holds
+    the entries each parent matches). An lstat error other than absence propagates as
+    OSError, which the caller turns into a denial.
     """
-    parts = name.split(_PATH_SEPARATOR)
-    parents = [_PATH_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts))]
+    parents = _parents(name)
     for parent in parents:
-        if any(entry.path == parent for entry in _index_records(directory, parent)):
+        if any(entry.path == parent for entry in index[parent]):
             return f"`{parent}` is a file in the index, so restoring `{name}` would replace it"
     for parent in parents:
         try:
@@ -1791,11 +1948,10 @@ def _parent_problem(directory: Path, name: str) -> str | None:
 
 
 def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]) -> str | None:
-    """Why the existing ``name`` holds bytes or a mode its index entry lacks, or None.
+    """Why the existing ``name`` is not one regular tracked file with its index mode, or None.
 
-    ``git diff`` compares after clean filters and line-ending conversion and may ignore
-    the executable bit, so the raw bytes are hashed with no filters and compared with
-    the index object, and the executable bit with the index mode.
+    ``git diff`` may ignore the executable bit, so it is compared with the index mode
+    here; the raw bytes are compared by :func:`_raw_bytes_problem`.
     """
     target = directory / name
     if not path_is_file(target, unreadable_means=False):
@@ -1804,19 +1960,37 @@ def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]
         return f"`{name}` is untracked work the checkout would overwrite"
     if len(entries) != 1 or entries[0].path != name:
         return f"`{name}` is not one tracked file"
-    entry = entries[0]
-    executable = _REGULAR_FILE_MODES.get(entry.mode)
+    executable = _REGULAR_FILE_MODES.get(entries[0].mode)
     if executable is None:
         return f"`{name}` is not a regular file in the index"
     if bool(target.stat().st_mode & _EXECUTABLE_BITS) != executable:
         return f"`{name}` has an executable bit the index does not record"
-    hashed = run_git(
-        directory, "hash-object", "--no-filters", _OPTIONS_END, name, timeout=Timeout.GIT_CONTEXT
-    )
-    if hashed.returncode != 0:
-        return f"git could not hash `{name}`"
-    if hashed.stdout.strip() != entry.object_id:
-        return f"`{name}` holds bytes (line endings or filtered content) the index does not"
+    return None
+
+
+def _raw_bytes_problem(directory: Path, present: list[tuple[str, _IndexEntry]]) -> str | None:
+    """Why any present file holds raw bytes its index object lacks, or None.
+
+    ``git diff`` compares after clean filters and line-ending conversion, so the raw
+    bytes are hashed with no filters, one ``hash-object`` call per chunk of files, and
+    each hash is compared with the index object.
+    """
+    for start in range(0, len(present), _PATHS_PER_LISTING):
+        chunk = present[start : start + _PATHS_PER_LISTING]
+        hashed = run_git(
+            directory,
+            "hash-object",
+            "--no-filters",
+            _OPTIONS_END,
+            *(name for name, _ in chunk),
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        hashes = hashed.stdout.split()
+        if hashed.returncode != 0 or len(hashes) != len(chunk):
+            return f"git could not hash `{chunk[0][0]}`"
+        for (name, entry), found in zip(chunk, hashes, strict=True):
+            if found != entry.object_id:
+                return f"`{name}` holds bytes (line endings or filtered content) the index does not"
     return None
 
 
@@ -1841,9 +2015,13 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
         return f"`{directory}` is not in a git working tree git could read"
     top_level = Path(top.stdout.strip()).resolve()
     base = directory.resolve()
+    index = _index_records_by_name(
+        directory, [*paths, *(parent for name in paths for parent in _parents(name))]
+    )
+    present: list[tuple[str, _IndexEntry]] = []
     for name in paths:
         target = directory / name
-        parent_problem = _parent_problem(directory, name)
+        parent_problem = _parent_problem(directory, name, index)
         if parent_problem is not None:
             return parent_problem
         if target.is_symlink():
@@ -1852,28 +2030,39 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
             return f"`{name}` passes through a symlink"
         if not path_is_relative_to(base / name, top_level):
             return f"`{name}` is outside the repository"
-        entries = _index_entries(directory, name)
+        entries = _plain_index_entries(index[name])
         if path_exists(target, unreadable_means=True):
             problem = _present_file_problem(directory, name, entries)
             if problem is not None:
                 return problem
+            present.append((name, entries[0]))
         elif entries:
             return f"`{name}` is deleted in the working tree but still in the index"
-    for staged, where in ((False, "unstaged"), (True, "staged")):
-        args = ("diff", "--cached") if staged else ("diff",)
-        diff = run_git(
-            directory,
-            _LITERAL_PATHSPECS,
-            *args,
-            "--quiet",
-            _OPTIONS_END,
-            *paths,
-            timeout=Timeout.GIT_CONTEXT,
-        )
-        if diff.returncode == _DIFF_DIFFERS:
-            return f"`{' '.join(paths)}` holds {where} changes the checkout would discard"
-        if diff.returncode != _DIFF_CLEAN:
-            return f"git could not compare `{' '.join(paths)}` for {where} changes"
+    problem = _raw_bytes_problem(directory, present)
+    if problem is not None:
+        return problem
+    return _paths_local_changes(directory, paths)
+
+
+def _paths_local_changes(directory: Path, paths: tuple[str, ...]) -> str | None:
+    """Why any of ``paths`` holds a staged or unstaged change, asked in chunks, or None."""
+    for start in range(0, len(paths), _PATHS_PER_LISTING):
+        chunk = paths[start : start + _PATHS_PER_LISTING]
+        for staged, where in ((False, "unstaged"), (True, "staged")):
+            args = ("diff", "--cached") if staged else ("diff",)
+            diff = run_git(
+                directory,
+                _LITERAL_PATHSPECS,
+                *args,
+                "--quiet",
+                _OPTIONS_END,
+                *chunk,
+                timeout=Timeout.GIT_CONTEXT,
+            )
+            if diff.returncode == _DIFF_DIFFERS:
+                return f"`{' '.join(chunk)}` holds {where} changes the checkout would discard"
+            if diff.returncode != _DIFF_CLEAN:
+                return f"git could not compare `{' '.join(chunk)}` for {where} changes"
     return None
 
 
