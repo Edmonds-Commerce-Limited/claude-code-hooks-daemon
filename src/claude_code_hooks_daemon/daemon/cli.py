@@ -11603,7 +11603,7 @@ def _housekeeping_run_refusal(
         return "--run cannot be combined with --list or --apply; run it on its own"
     if getattr(args, "project_root", None) is None:
         return (
-            "--run needs an explicit --project-root (bin/hooks-daemon passes one); "
+            "--run needs an explicit --project-root (the daemon wrapper passes one); "
             "it never acts on a project found from the working directory"
         )
     return ""
