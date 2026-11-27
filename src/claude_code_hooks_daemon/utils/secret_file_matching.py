@@ -3138,7 +3138,8 @@ def iter_protected_mentions(
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
 
     ``whole_command`` (PR 291 review) is True only when ``command`` is the WHOLE
-    Bash command or script the guard judges. Only then is a glob inside text a
+    Bash tool command the guard judges. Never for authored Write/Edit content: an
+    Edit is a fragment of a file, and a script is RUN, not sent. Only then is a glob inside text a
     sender merely prints or posts relaxed (:func:`_sent_text_spans`). A caller
     judging a FRAGMENT leaves it False: ``echo '<glob>'`` cut out of
     ``alias echo=cat; echo '<glob>'`` would otherwise pass the whole-command

@@ -3,7 +3,7 @@
 **Plan**: 00474
 **Audience**: everyone
 
-A command that is ONE statement, either `echo` with no option, `git commit` with a single `-m` message, or `gh issue|pr create` with a `--body` and/or `--title`, only prints or posts its quoted text. A glob inside that literal-quoted text is therefore no longer treated as a mention of a protected path. A literal protected name inside it still denies. Before this change, a commit message or echo that quoted a permission rule, named the secret-file glob, or held `*` or `**` was denied with R-SECRET-BASH-MENTION.
+A Bash command (never authored Write/Edit script content, which is judged exactly as before) that is ONE statement, either `echo` with no option, `git commit` with a single `-m` message, or `gh issue|pr create` with a `--body` and/or `--title`, only prints or posts its quoted text. A glob inside that literal-quoted text is therefore no longer treated as a mention of a protected path. A literal protected name inside it still denies. Before this change, a commit message or echo that quoted a permission rule, named the secret-file glob, or held `*` or `**` was denied with R-SECRET-BASH-MENTION.
 
 The exemption is deliberately narrow, and anything outside it is judged exactly as before:
 

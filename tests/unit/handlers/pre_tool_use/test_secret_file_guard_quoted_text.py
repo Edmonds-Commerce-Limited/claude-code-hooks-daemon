@@ -351,6 +351,53 @@ class TestDifferentialCorpus:
         assert allowed == []
 
 
+#: Where authored script content is scanned as shell (PR 291 third review).
+_SCRIPT_PATHS: tuple[str, ...] = ("x.sh", "Makefile", ".github/workflows/ci.yml")
+#: Bodies that are one quoted-text sender statement, and are still a script that is RUN.
+_SCRIPT_BODIES: tuple[str, ...] = (
+    f"echo 'vault/{_SG}'",
+    f"echo 'cat vault/{_SG}'",
+    f"git commit -m 'vault/{_SG}'",
+    f"gh pr create -b 'vault/{_SG}'",
+)
+
+
+def _edit(path: Path, new_string: str) -> GatingResult:
+    """An Edit of ``path`` (which holds ``cat $(PLACEHOLDER)``) putting ``new_string`` in."""
+    return _run(
+        {
+            "tool_name": ToolName.EDIT,
+            "tool_input": {
+                "file_path": str(path),
+                "old_string": "PLACEHOLDER",
+                "new_string": new_string,
+            },
+            "cwd": str(path.parent),
+        }
+    )
+
+
+class TestScriptAuthoringNeverUsesTheExemption:
+    """PR 291 third review: Write/Edit content is a script that is RUN, and an Edit is a
+    fragment (``cat $(PLACEHOLDER)`` + ``echo '<glob>'`` = a read), so authored content is
+    judged exactly as on main."""
+
+    @pytest.mark.parametrize("relative", _SCRIPT_PATHS)
+    @pytest.mark.parametrize("body", _SCRIPT_BODIES)
+    def test_write_denies(self, project: Project, relative: str, body: str) -> None:
+        target = project.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        assert _write(target, body).decision == Decision.DENY
+
+    @pytest.mark.parametrize("relative", _SCRIPT_PATHS)
+    @pytest.mark.parametrize("body", _SCRIPT_BODIES)
+    def test_edit_denies(self, project: Project, relative: str, body: str) -> None:
+        target = project.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("cat $(PLACEHOLDER)\n", encoding="utf-8")
+        assert _edit(target, body).decision == Decision.DENY
+
+
 class TestDenyNamesClassAndPosition:
     """N757 c: the deny names the token's position and the pattern CLASS, never the glob."""
 

@@ -1901,7 +1901,6 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 deadline=deadline,
                 cwd=cwd,
                 context=context,
-                whole_command=True,
             )
         except shell_expansion.UnresolvableBraceQuotingError:
             if context != "content":
@@ -2172,7 +2171,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "is allowed. To work around a false positive: ask the "
             "user, scope the search to exclude the protected file, or have a "
             "human narrow the config (`mode: replace` with a tighter list).\n\n"
-            "**A quoted message is not a mention, narrowly.** When the WHOLE "
+            "**A quoted message is not a mention, narrowly (Bash commands "
+            "only; authored script content never).** When the WHOLE Bash "
             "command is ONE statement, a GLOB inside its literal-quoted text is "
             "not judged (a literal protected name still is): `echo` with no "
             "option, `git commit` with one `-m` message (beside `-a`/`-s`/`-q`/"
