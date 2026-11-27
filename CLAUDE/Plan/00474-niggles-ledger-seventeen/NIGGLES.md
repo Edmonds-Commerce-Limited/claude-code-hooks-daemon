@@ -8763,7 +8763,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Corroboration** (2026-11-26 07:42Z, relayed by the coordinator, second-hand): a builder on the coordinator's host hit the same class twice that day, a Write denied by the guard whose only match was the token `python3`. That token is not a vault key name, so it points at a broader identifier-or-word match than the `*vault_pass*` case, and the reporter's guard options and deny text are needed to place it.
 
-**Status**: ⬜ Open. Same family as N744. Decide with the owner whether an identifier-shaped token (no `/`, no leading `.`) should need to name an existing file before `*vault_pass*` denies it, as `*.secret*` already does.
+**Status**: 🔄 Built with N744/N760 on branch `guard-n744-n760-teamchat-message-sink` (unmerged, release note 124). An identifier (`[A-Za-z0-9_][A-Za-z0-9_-]*`, so no `/`, `.` or glob) matched by a WILDCARD pattern holding an underscore goes through the bare-dotted gate: it counts when it exists, is indexed or is the operand of a file-opening command or call. Exact-name patterns (the SSH key names) are unchanged. The gate also placed the last word of a quoted string wrongly (it read the closing quote as glued text, so `echo 'add <identifier>'` counted); fixed. Still denied: `git commit -m '<identifier>'` (git is a file-opening head for its pathspecs, as for a dotted word). Owner's decision still open on whether that narrowing is wanted.
 
 ### N750 — `hooks-daemon delete-branch` refuses a branch that exists only on the remote
 
@@ -8811,7 +8811,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Source**: the coordinator and the laptop host seat, 2026-11-26 08:10Z: a piped chat message that happens to hold a protected-name pattern is denied as a whole, four times that day, and each sender loses the message. The coordinator asked for a reopening; N749 is the same cost from a code file.
 
-**Status**: ⬜ Reopened as a usability defect (supersedes the "as designed" half of N744). Proposal, built as an UNMERGED proposal PR for the owner (it changes a guard documented as deliberately broad, and only a human may lift protection): judge only path-like arguments and redirect targets of a message-sink command (`teamchat` `say`, `reply`, `report`, `thread`, the ask verb, `close`, `retitle`), never the text piped to stdin; apply N749's narrowing to the underscore patterns; keep the deny text naming glob and token and add the token class. Residual risk to state to the owner: a sink that echoes its stdin to a file is not covered (teamchat does not). The coordinator will put one owner question covering this and the release.
+**Status**: 🔄 Built on branch `guard-n744-n760-teamchat-message-sink` (unmerged, release note 124), with N760; awaits an independent security review and the owner's call. `utils/message_sink.py` recognises ONE plain `teamchat <message verb>` statement fed by exactly one quoted heredoc, single-quoted here-string or literal `printf`/`echo` pipe, and the guard judges only `teamchat <verb> <words>` for it; every other shape is judged as before (`test_message_sink.py`, `test_secret_file_guard_message_sink.py`, RED first). N749's narrowing is applied to wildcard underscore patterns only. Original proposal, built as an UNMERGED proposal PR for the owner (it changes a guard documented as deliberately broad, and only a human may lift protection): judge only path-like arguments and redirect targets of a message-sink command (`teamchat` `say`, `reply`, `report`, `thread`, the ask verb, `close`, `retitle`), never the text piped to stdin; apply N749's narrowing to the underscore patterns; keep the deny text naming glob and token and add the token class. Residual risk to state to the owner: a sink that echoes its stdin to a file is not covered (teamchat does not). The coordinator will put one owner question covering this and the release.
 
 ### N754 — a Bash call that reads a file the same batch tried to Write runs on the old content when the Write is refused
 
@@ -8883,7 +8883,17 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: the commonest false positive the peers reported (a message about permission rules) still happens; the workaround is a Write-tool body file fed on stdin.
 
-**Status**: ⬜ Open. Fix, test first: a verb-aware sink for the teamchat message verbs (say, reply, report, thread, the ask verb, close, retitle: the same sink list as the N744 proposal) so that text arriving on stdin or in a heredoc for exactly those verbs is not judged as a path mention, with the same one-statement narrowness and a fresh differential corpus review. Also have the deny report the matched word's position inside a long quoted token. Needs an independent security review, as PR 291 did.
+**Status**: 🔄 Built with N744 on branch `guard-n744-n760-teamchat-message-sink` (unmerged, release note 124); needs the independent security review and a fresh differential corpus run. The sink is `utils/message_sink.py` (verbs say, reply, report, thread, ask-human, close, retitle; a closed word grammar, a flag allowlist, one feed). The deny now adds "The matched word is word N of that token, at line L, column C." for a multi-word token, never the word or glob. The whole-token report itself was not reproduced here: the ordinary token stream names the single word first in every shape tried, so the line is pinned by a direct test and a forced finding. Residual risk: a sink that writes its stdin to a file (teamchat does not), and a function or binary named `teamchat` carried in from outside the command (the documented shell-state and look-alike limits).
+
+### N769 — two session-actions baseline tests read the real project scratch
+
+**Source**: this seat, 2026-11-27, while running targeted QA for N744/N760.
+
+**Evidence**: `tests/unit/daemon/test_cli_session_actions.py` `TestBaselineIsEmpty::test_no_items_reported` and `test_json_output_is_an_empty_list` run the real handlers against this repository, and the `scratch_sweep` verifier reads the project's live scratch inventory, so a workspace with a live scratch notice reports one ACTION_REQUIRED item and both fail.
+
+**Severity**: LOW: a test that passes or fails on the state of the workspace.
+
+**Status**: ✅ Fixed on branch `guard-n744-n760-teamchat-message-sink`: the class points the scratch-sweep handler's project root at an empty `tmp_path`; every other verifier still runs against this repository. Both failed before the change in this workspace.
 
 ### N761 — two minor secret-guard gaps the PR 291 reviews found on main
 

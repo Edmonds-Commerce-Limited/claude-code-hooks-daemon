@@ -1,0 +1,10 @@
+# Callout: a teamchat message sent on stdin is no longer judged as a path mention
+
+**Plan**: 00474
+**Audience**: everyone
+
+`secret_file_guard` no longer denies a teamchat message because its TEXT quotes a protected glob or names a protected file. It applies to the message verbs only (`say`, `reply`, `report`, `thread`, `ask-human`, `close`, `retitle`), and only when the whole Bash command is one plain statement whose message arrives on stdin in exactly one of three ways: a quoted-delimiter heredoc (`teamchat report <<'EOF'` ... `EOF`, nothing after the closing line), a single-quoted here-string (`teamchat report <<< '...'`), or one `printf` or `echo` of literal quoted words piped in by a single `|`. The teamchat words themselves are still judged: a `--ref path:...` or member name that names a protected path still denies. Any other shape is judged exactly as before: a pipe out of teamchat, a chain, any redirect, a substitution or variable, an unquoted heredoc, a wrapper or assignment before `teamchat`, an unknown flag, another verb (`run`, `ping`), a producer that opens a file (`cat`, `tee`, `head`), or a `printf`/`echo` option. A script written with Write or Edit is never relaxed: a script is run, not sent. Residual risk: a sink that wrote its stdin to a file would not be covered; teamchat does not.
+
+An identifier with no slash and no leading dot (a Python test name, say) that matches a wildcard protected pattern holding an underscore, such as the vault-password one, now counts only when it names a file that exists, is in the protected-file index, or is the operand of a file-opening command or call, as a bare dotted word already did. The last word of a quoted string is now placed correctly by that check.
+
+A deny whose matched token is a long quoted string now says which word of it matched, by number, line and column, never by repeating the glob.

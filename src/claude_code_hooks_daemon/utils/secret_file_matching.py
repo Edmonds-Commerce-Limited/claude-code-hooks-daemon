@@ -2550,6 +2550,26 @@ def _is_bare_dotted(token: str) -> bool:
     return _BARE_DOTTED_TOKEN.fullmatch(token) is not None
 
 
+#: A plain identifier: no dot, slash, glob, variable or option shape (Ledger 00474 N749).
+_BARE_IDENTIFIER: Final = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
+_PATTERN_WILDCARDS: Final = frozenset("*?[")
+
+
+def _is_underscore_identifier_mention(token: str, pattern: str) -> bool:
+    """True for an identifier ``token`` matched by a WILDCARD pattern holding an underscore.
+
+    N749: ``test_a_missing_<vault stem>word_file`` is a name in code, not a path,
+    so it is gated like a bare dotted word (it counts when it exists, is indexed
+    or is opened). An exact-name pattern such as an SSH key name is left as it
+    was: the token is then the protected name itself.
+    """
+    return (
+        "_" in pattern
+        and any(char in _PATTERN_WILDCARDS for char in pattern)
+        and _BARE_IDENTIFIER.fullmatch(token) is not None
+    )
+
+
 def _is_spaced_word(token: str) -> bool:
     """True for a multi-word string with no path separator in it."""
     return len(token.split()) > 1 and "/" not in token and "\\" not in token
@@ -2998,7 +3018,9 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
             after = command[end : end + 1]
             if not (before_ok and (after == "" or after.isspace() or after == quote_char)):
                 return True
-            word_start, word_end = quote_index, end
+            # The last word of a quoted string ends at its closing quote, so the
+            # character after the WORD is the one after that quote (N749).
+            word_start, word_end = quote_index, end + 1 if after == quote_char else end
     before = command[word_start - 1] if word_start > 0 else ""
     after_char = command[word_end] if word_end < len(command) else ""
     if before and not before.isspace() and before not in _COMMAND_SEPARATOR_CHARS:
@@ -3342,7 +3364,7 @@ def iter_protected_mentions(
             return None
         if (
             found is not None
-            and _is_bare_dotted(core)
+            and (_is_bare_dotted(core) or _is_underscore_identifier_mention(core, found))
             and not _bare_dotted_counts(
                 core,
                 command,

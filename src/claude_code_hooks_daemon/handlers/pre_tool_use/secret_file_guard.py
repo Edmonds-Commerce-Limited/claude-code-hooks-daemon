@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.utils import (
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.message_sink import message_sink_view
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -134,6 +135,9 @@ _CAUSED_TOKEN_LINE: Final[str] = (
     "No protected name matched; the word denied for the reason above, at {where}: `{token}`"
 )
 _UNPLACED_TOKEN: Final[str] = "a decoded form of a word"
+#: N760: which word of a long quoted token matched, by number and place only.
+_WORD_IN_TOKEN_LINE: Final[str] = "The matched word is word {number} of that token, at {where}."
+_WORD_IN_TOKEN_UNPLACED: Final[str] = "The matched word is word {number} of that token."
 
 
 def _wrapper(subcommand: str) -> str:
@@ -251,7 +255,13 @@ def _judged_bash_command(command: str) -> str:
     """The Bash command text the guard judges: quoted bodies only a text reader reads, blanked.
 
     One source for the decision and for the deny reason's cause (review 2 F4 c).
+    A whole command that is one teamchat message-verb statement fed on stdin is
+    judged as its teamchat words alone: the message is posted, never opened or
+    run (Ledger 00474 N744, N760; :mod:`utils.message_sink` holds the grammar).
     """
+    sink = message_sink_view(command)
+    if sink is not None:
+        return sink
     return strip_quoted_heredoc_bodies(command, text_readers_only=True)
 
 
@@ -271,9 +281,36 @@ def _token_position(haystack: str, token: str) -> str:
     at = haystack.find(token)
     if at < 0:
         return _UNPLACED_TOKEN
+    return _offset_position(haystack, at)
+
+
+def _offset_position(haystack: str, at: int) -> str:
+    """``line L, column C`` of offset ``at`` in ``haystack`` (1-based)."""
     line = haystack.count("\n", 0, at) + 1
     column = at - (haystack.rfind("\n", 0, at) + 1) + 1
     return f"line {line}, column {column}"
+
+
+def _word_in_token(haystack: str, token: str, pattern: str) -> str | None:
+    """Which word of a multi-word ``token`` matched ``pattern``, by position only (N760).
+
+    A long quoted token is reported whole, which does not say what to change.
+    The word is named by its number and place, never echoed: it may be the
+    glob itself. None for a one-word token or when no single word matches.
+    """
+    words = list(re.finditer(r"\S+", token))
+    if len(words) < 2:
+        return None
+    for number, word in enumerate(words, start=1):
+        if sfm.protecting_pattern(word.group(0), (pattern,)) is None:
+            continue
+        at = haystack.find(token)
+        if at < 0:
+            return _WORD_IN_TOKEN_UNPLACED.format(number=number)
+        return _WORD_IN_TOKEN_LINE.format(
+            number=number, where=_offset_position(haystack, at + word.start())
+        )
+    return None
 
 
 def _linked_cwd(cwd: str | None) -> str:
@@ -1696,9 +1733,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         # that stopped matching once fed stripped words) -- so each
         # consumer decodes separately for correctness, same as before.
         shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
-        # A bare dotted word is a mention only when it names an existing or
-        # indexed file, so such a command needs the index too.
-        needs_index = _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command)
+        # A bare dotted word, or an underscore identifier (N749), is a mention
+        # only when it names an existing or indexed file, so such a command
+        # needs the index too.
+        needs_index = (
+            _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command) or "_" in command
+        )
         index = self._index(patterns) if needs_index else None
         # A glob is expanded against the index of protected files; with none
         # it goes unjudged, and the agent is told so (never a silent allow).
@@ -2006,6 +2046,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             )
             line = _TOKEN_LINE if cause is None else _CAUSED_TOKEN_LINE
             message += "\n" + line.format(where=_token_position(haystack, token), token=token)
+            inner = None if cause is not None else _word_in_token(haystack, token, pattern)
+            if inner is not None:
+                message += "\n" + inner
 
         return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
@@ -2166,7 +2209,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "when it names a file that exists, is in the protected-file "
             "index, or is the operand of a file-opening command or call "
             "(`cat`, `cp`, `source`, a redirect target, `open(...)`, "
-            "`Path(...)`). Recorded residual risk: a file that does not exist, "
+            "`Path(...)`). The same holds for an IDENTIFIER (no dot, slash or "
+            "leading dot, such as a Python test name) matched by a wildcard "
+            "pattern holding an underscore (`*vault_pass*`); an exact name "
+            "such as `id_rsa` is judged as before. "
+            "Recorded residual risk: a file that does not exist, "
             "is not indexed and is read by a command outside the opening list "
             "is allowed. To work around a false positive: ask the "
             "user, scope the search to exclude the protected file, or have a "
@@ -2179,9 +2226,22 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "`-n`/`--allow-empty` only), or `gh issue|pr create` with one `--body` "
             "and/or `--title`. A pipe, chain, redirect, substitution, backslash, "
             "any other word or option, or a non-ASCII character outside the "
-            "quotes voids it. `printf` and `teamchat` are not covered (teamchat "
-            "reads its message from stdin). A deny names the CLASS of path matched and the token's line and "
-            "column, never the glob.\n\n"
+            "quotes voids it. `printf` is not covered there.\n\n"
+            "**A teamchat message on stdin is not judged at all (Bash "
+            "commands only).** For the message verbs `say`, `reply`, "
+            "`report`, `thread`, `ask-human`, `close` and `retitle`, when the "
+            "WHOLE command is one statement fed by exactly one quoted heredoc "
+            "(`teamchat report <<'EOF'`, nothing after the closing line), one "
+            "single-quoted here-string (`<<< '...'`) or one `printf`/`echo` of "
+            "literal quoted words piped in by a single `|`, the message text is "
+            "not judged; the teamchat words (a `--ref path:...`, a member name) "
+            "still are. Any other verb, a pipe out, chain, redirect, "
+            "substitution, variable, unquoted heredoc, wrapper, assignment, "
+            "unknown flag, or a producer that opens a file voids it. Residual "
+            "risk: a sink that wrote its stdin to a file; teamchat does not.\n\n"
+            "A deny names the CLASS of path matched and the token's line and "
+            "column, never the glob; for a long quoted token it also gives "
+            "the matched word's number and place in it.\n\n"
             "**Authoring a script that references a protected path is also "
             "denied** (the write-then-execute route). Markdown/prose naming a "
             "protected file stays writable.\n\n"
