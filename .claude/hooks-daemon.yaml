@@ -1440,6 +1440,11 @@ handlers:
           # push atomically and regularly. git is your primary backup".
           - id: commit-push-cadence
             enabled: true
+          # Owner ruling, verified human event $T1O7a8pMKCrwiKGvFfobDuWFxvcF8NsXhEFJN66jwUM
+          # (Plan 00627 R13, Plan 00474): "hell yes, lock that in" to unconfirmed
+          # expired-scratch cleanup via `housekeeping --run scratch-sweep-apply` only.
+          - id: scratch-expired-cleanup
+            enabled: true
 
     # auto_continue:  # Auto-continues on 'continue' keyword
     #   enabled: false # Optional - enable for auto-continue behavior

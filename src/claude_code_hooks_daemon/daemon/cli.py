@@ -6842,6 +6842,7 @@ def cmd_scratch_sweep(
     fresh = sources.classify(sweep_root)
     pressure = _scratch_pressure(sources, fresh, sweep_root.ttl_hours)
     notice = _scratch_pressure_notice(fresh, pressure)
+    # The verb's gate stays (Plan 00627 R13): only `housekeeping --run` acts unconfirmed.
     if not (confirm_apply or confirm_apply_interactively)(relative, notice):
         print(
             "scratch-sweep: refused: --apply needs a human's typed confirmation at a "
@@ -6853,6 +6854,107 @@ def cmd_scratch_sweep(
     if args.root is None:
         _record_scratch_inventory(sources, sources.classify(sweep_root))
     return applied
+
+
+def run_scratch_sweep_apply_step(
+    repo: Path,
+    *,
+    scandir: Callable[[str], Any] = os.scandir,
+    wall_clock: Callable[[], float] = time.time,
+    budget_clock: Callable[[], float] = time.monotonic,
+    process_cwds: Callable[[], Mapping[int, Path]] | None = None,
+    git_runner: Callable[..., Any] | None = None,
+) -> int:
+    """The housekeeping step ``scratch-sweep-apply``: the apply core with no terminal question.
+
+    Plan 00627 R13, granted by the owner for this step alone (Plan 00474
+    ledger): every removal trails the archive store's hold window, so this
+    step acts without confirmation. It runs the same refusal, classification,
+    pressure and apply core as ``scratch-sweep --apply`` on the project's own
+    ``untracked/scratch``, so it acts only on what that core finds due; a
+    ``.scratch-keep`` entry, a live entry and one inside its TTL are never due.
+    It fails closed: a store refusal, or a classification that could not read
+    everything, removes nothing and says why. It prints entry names and archive
+    ids, never contents. The keyword parameters exist for tests.
+
+    Returns:
+        0 when the run completed (whatever it removed); 1 when it refused.
+    """
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+    from claude_code_hooks_daemon.daemon.housekeeping import SCRATCH_SWEEP_APPLY_STEP
+
+    def refused(reason: str) -> int:
+        print(
+            f"{SCRATCH_SWEEP_APPLY_STEP}: refused: {reason}; nothing was removed", file=sys.stderr
+        )
+        return 1
+
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    sweep_root = resolve_sweep_root(
+        repo / "untracked" / "scratch",
+        project_root=repo,
+        config=config.scratch,
+        reference_roots=tuple(config.reference_repos.roots),
+    )
+    refusal = _scratch_store_refusal(repo, sweep_root, applying=True, action=None)
+    if refusal:
+        return refused(refusal)
+    sources = _ScratchSources(
+        repo=repo,
+        config=config,
+        budget_seconds=SCRATCH_SWEEP_DEFAULT_SECONDS,
+        max_inodes=SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+        scandir=scandir,
+        wall_clock=wall_clock,
+        budget_clock=budget_clock,
+        process_cwds=process_cwds,
+        git_runner=git_runner,
+        store_checkout=_scratch_checkout(repo, repo)[1],
+    )
+    fresh = sources.classify(sweep_root)
+    if not fresh.complete:
+        return refused("the classification is incomplete: " + "; ".join(fresh.incomplete_reasons))
+    pressure = _scratch_pressure(sources, fresh, sweep_root.ttl_hours)
+    outcome = _scratch_apply_core(sources, sweep_root, pressure)
+    if isinstance(outcome, str):
+        return refused(outcome)
+    result, sessions = outcome
+    _record_scratch_inventory(sources, sources.classify(sweep_root))
+    relative = _scratch_relative_root(sources, sweep_root)[1]
+    parts = [(relative, result), *((f"{relative}/{name}", sub) for name, sub in sessions)]
+    _print_unconfirmed_apply(parts)
+    return 0
+
+
+def _print_unconfirmed_apply(parts: list[tuple[str, Any]]) -> None:
+    """What the housekeeping step removed: counts, paths and archive ids, never contents."""
+    from claude_code_hooks_daemon.core.scratch_archive_apply import (
+        OUTCOME_ARCHIVED,
+        RESTORE_COMMAND,
+    )
+    from claude_code_hooks_daemon.daemon.housekeeping import SCRATCH_SWEEP_APPLY_STEP
+
+    removed = [
+        (f"{root}/{entry.name}", entry.archive_id)
+        for root, result in parts
+        for entry in result.entries
+        if entry.outcome == OUTCOME_ARCHIVED
+    ]
+    noun = "entry" if len(removed) == 1 else "entries"
+    restore = RESTORE_COMMAND.format(archive_id="<archive id>")
+    print(
+        f"{SCRATCH_SWEEP_APPLY_STEP}: removed {len(removed)} {noun}, each archived and "
+        f"restorable with `{restore}`"
+    )
+    for path, archive_id in removed:
+        print(f"  - {path} archive {archive_id}")
+    for root, result in parts:
+        if not result.complete:
+            print(f"  {root}: INCOMPLETE: " + "; ".join(result.incomplete_reasons))
+        for expired in result.expired:
+            print(f"  expired past retention: {expired.archive_id} ({expired.outcome})")
+        for note in result.notes:
+            print(f"  note: {note}")
 
 
 def _scratch_store_status(store_path: Path, retention_hours: Mapping[str, float]) -> "StoreStatus":
@@ -7293,14 +7395,42 @@ def _scratch_relative_root(sources: _ScratchSources, sweep_root: Any) -> tuple[P
 def _scratch_apply(
     args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any, pressure: Any
 ) -> int:
-    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry.
+    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry, and print it.
 
-    The root's own entries first, then each session directory's children (one
-    archive per child, never the directory), all under one store lock.
     ``pressure`` is the mode the human consented to; it is never re-decided here.
     """
     import dataclasses
 
+    outcome = _scratch_apply_core(sources, sweep_root, pressure)
+    if isinstance(outcome, str):
+        print(f"scratch-sweep: refused: {outcome}", file=sys.stderr)
+        return 1
+    result, sessions = outcome
+    if args.json:
+        document = {
+            "root": str(sweep_root.path),
+            **dataclasses.asdict(result),
+            "sessions": [
+                {"root": str(Path(sweep_root.path) / name), **dataclasses.asdict(sub)}
+                for name, sub in sessions
+            ],
+        }
+        print(json.dumps(document, indent=2, default=str))
+        return 0
+    _print_apply(str(sweep_root.path), result)
+    for name, sub in sessions:
+        _print_apply(str(Path(sweep_root.path) / name), sub)
+    return 0
+
+
+def _scratch_apply_core(sources: _ScratchSources, sweep_root: Any, pressure: Any) -> Any:
+    """The apply core both entry points share: ``(result, [(session, result)])`` or a refusal.
+
+    The root's own entries first, then each session directory's children (one
+    archive per child, never the directory), all under one store lock. A
+    refusal is returned as its reason string; nothing is printed except the
+    linked-worktree and pressure-mode notices, on stderr.
+    """
     from claude_code_hooks_daemon.core.scratch_archive import (
         ArchiveStore,
         StoreBusy,
@@ -7323,8 +7453,7 @@ def _scratch_apply(
     try:
         tar = find_gnu_tar()
     except PackRefused as exc:
-        print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
-        return 1
+        return str(exc)
     resolved, relative = _scratch_relative_root(sources, sweep_root)
 
     def live_in(root: Path, relative_root: str) -> Callable[[str], bool]:
@@ -7391,23 +7520,8 @@ def _scratch_apply(
             result = apply_sweep(store, facts, settings)
             sessions = apply_sessions(store, facts, settings, for_session)
     except (StoreRefused, StoreBusy, OSError) as exc:
-        print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
-        return 1
-    if args.json:
-        document = {
-            "root": str(sweep_root.path),
-            **dataclasses.asdict(result),
-            "sessions": [
-                {"root": str(Path(sweep_root.path) / name), **dataclasses.asdict(sub)}
-                for name, sub in sessions
-            ],
-        }
-        print(json.dumps(document, indent=2, default=str))
-        return 0
-    _print_apply(str(sweep_root.path), result)
-    for name, sub in sessions:
-        _print_apply(str(Path(sweep_root.path) / name), sub)
-    return 0
+        return str(exc)
+    return result, sessions
 
 
 def _print_apply(root: str, result: Any) -> None:
@@ -11445,12 +11559,18 @@ def cmd_housekeeping(args: argparse.Namespace) -> int:
     except the idempotent formatters -- is released only by naming it on
     ``--apply``.
 
+    ``--run STEP`` is the one exception: it executes a step in-process, and
+    only a step in ``RUNNABLE_STEP_NAMES`` -- the unconfirmed scratch apply
+    (Plan 00627 R13), which is how that step acts with no terminal question.
+
     Returns:
         0 when the procedure (or ``--list``) was printed, 2 when ``--apply``
-        names an unknown step or the project root is not a directory.
+        names an unknown step, ``--run`` names a step it cannot run, or the
+        project root is not a directory; with ``--run``, the step's own code.
     """
     from claude_code_hooks_daemon.daemon.housekeeping import (
         HOUSEKEEPING_STEPS,
+        RUNNABLE_STEP_NAMES,
         UnknownStepError,
         plan_pass,
         render_procedure,
@@ -11459,6 +11579,17 @@ def cmd_housekeeping(args: argparse.Namespace) -> int:
     project_root = resolve_tree_root(args)
     if project_root is None:
         return 2
+
+    run_step: str | None = getattr(args, "run_step", None)
+    if run_step is not None:
+        if run_step not in RUNNABLE_STEP_NAMES:
+            print(
+                f"ERROR: --run cannot execute {run_step!r}; runnable steps: "
+                f"{', '.join(RUNNABLE_STEP_NAMES)}",
+                file=sys.stderr,
+            )
+            return 2
+        return run_scratch_sweep_apply_step(project_root)
 
     if bool(getattr(args, "list_steps", False)):
         for step in HOUSEKEEPING_STEPS:
@@ -14307,6 +14438,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="STEP",
         default=None,
         help="Release a confirmation-gated mutating step to act (repeatable; see --list)",
+    )
+    parser_housekeeping.add_argument(
+        "--run",
+        dest="run_step",
+        metavar="STEP",
+        default=None,
+        help="Execute one step in-process instead of printing the pass; only "
+        "scratch-sweep-apply (archives then removes the scratch entries the sweep finds due, "
+        "without confirmation; each is restorable with scratch-sweep restore)",
     )
     parser_housekeeping.add_argument(
         "--list",

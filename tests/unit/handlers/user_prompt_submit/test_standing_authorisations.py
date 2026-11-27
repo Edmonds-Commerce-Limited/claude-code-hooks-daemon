@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.standing_authorisation
     _SIGNAL_SUFFIX,
     _SOURCE_REINFORCEMENT,
     AUTHORISATION_COMMIT_PUSH_CADENCE,
+    AUTHORISATION_SCRATCH_EXPIRED_CLEANUP,
     AUTHORISATION_SUBAGENT_DELEGATION,
     AUTHORISATION_WORKFLOWS,
     SUPERVISOR_CHANNEL_HEADER,
@@ -127,6 +128,26 @@ class TestEnablingAnAuthorisation:
         )
         assert len(handler.handle(_hook_input()).context) == 3
 
+    def test_scratch_expired_cleanup_text_carries_its_bounds(self) -> None:
+        """Plan 00627 R13: the housekeeping step only, no other route, never a kept or live entry."""
+        handler = StandingAuthorisationsHandler()
+        _enable(handler, AUTHORISATION_SCRATCH_EXPIRED_CLEANUP)
+        text = " ".join(handler.handle(_hook_input()).context)
+        assert "hooks-daemon housekeeping --run scratch-sweep-apply" in text
+        assert "`rm`" in text
+        assert ".scratch-keep" in text
+        assert "live session" in text
+        assert "next message" in text
+        assert "scratch-sweep restore" in text
+
+    def test_scratch_expired_cleanup_short_form_keeps_the_bounds(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        _enable(handler, AUTHORISATION_SCRATCH_EXPIRED_CLEANUP)
+        short = " ".join(handler._resolve_entries(short=True))
+        assert "housekeeping --run scratch-sweep-apply" in short
+        assert ".scratch-keep" in short
+        assert "`rm`" in short
+
     def test_unknown_entry_id_is_ignored_not_crashed(self) -> None:
         handler = StandingAuthorisationsHandler()
         _enable(handler, "no-such-authorisation")
@@ -142,6 +163,7 @@ class TestTextIsARecordedRequestNeverACountermand:
             AUTHORISATION_SUBAGENT_DELEGATION,
             AUTHORISATION_WORKFLOWS,
             AUTHORISATION_COMMIT_PUSH_CADENCE,
+            AUTHORISATION_SCRATCH_EXPIRED_CLEANUP,
         ],
     )
     def test_no_entry_tells_the_agent_to_disregard_instructions(self, entry_id: str) -> None:
@@ -157,6 +179,7 @@ class TestTextIsARecordedRequestNeverACountermand:
             AUTHORISATION_SUBAGENT_DELEGATION,
             AUTHORISATION_WORKFLOWS,
             AUTHORISATION_COMMIT_PUSH_CADENCE,
+            AUTHORISATION_SCRATCH_EXPIRED_CLEANUP,
         ],
     )
     def test_every_entry_attributes_the_request_to_the_project(self, entry_id: str) -> None:
@@ -164,6 +187,43 @@ class TestTextIsARecordedRequestNeverACountermand:
         _enable(handler, entry_id)
         text = " ".join(handler.handle(_hook_input()).context).lower()
         assert "project" in text
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_OWNER_EVENT_ID = "$T1O7a8pMKCrwiKGvFfobDuWFxvcF8NsXhEFJN66jwUM"
+
+
+def _configured_authorisations(path: Path) -> dict[str, bool]:
+    import yaml
+
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    options = document["handlers"]["user_prompt_submit"]["standing_authorisations"]["options"]
+    return {str(entry["id"]): bool(entry["enabled"]) for entry in options["authorisations"]}
+
+
+class TestScratchExpiredCleanupConfig:
+    """Decision 3: off upstream, on only in this repo, on a verified owner ruling."""
+
+    def test_this_repo_enables_it(self) -> None:
+        configured = _configured_authorisations(_REPO_ROOT / ".claude" / "hooks-daemon.yaml")
+        assert configured[AUTHORISATION_SCRATCH_EXPIRED_CLEANUP] is True
+
+    def test_this_repo_cites_the_verified_owner_event(self) -> None:
+        text = (_REPO_ROOT / ".claude" / "hooks-daemon.yaml").read_text(encoding="utf-8")
+        before, found, _after = text.partition(f"- id: {AUTHORISATION_SCRATCH_EXPIRED_CLEANUP}")
+        assert found
+        # The comment directly above the entry carries the ruling's event id.
+        assert _OWNER_EVENT_ID in "\n".join(before.splitlines()[-4:])
+
+    def test_the_shipped_example_lists_it_disabled(self) -> None:
+        example = _REPO_ROOT / ".claude" / "hooks-daemon.yaml.example"
+        configured = _configured_authorisations(example)
+        assert configured[AUTHORISATION_SCRATCH_EXPIRED_CLEANUP] is False
+
+    def test_a_fresh_handler_does_not_enable_it(self) -> None:
+        assert AUTHORISATION_SCRATCH_EXPIRED_CLEANUP not in (
+            StandingAuthorisationsHandler()._enabled_ids()
+        )
 
 
 class TestMatches:

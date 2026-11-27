@@ -1010,6 +1010,10 @@ handlers:
             enabled: false
           - id: commit-push-cadence
             enabled: false
+          # Unconfirmed expired-scratch cleanup through the archiving
+          # housekeeping step only (`housekeeping --run scratch-sweep-apply`).
+          - id: scratch-expired-cleanup
+            enabled: false
 
     daemon_upgrade_detector:  # Notice the INSTALLED daemon version changing underneath a running process (Plan 00395)
       # Compares what this process loaded against `.daemon-metadata.json` in

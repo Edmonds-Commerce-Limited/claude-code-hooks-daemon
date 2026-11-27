@@ -3,8 +3,9 @@ contract (Plan 00330 Phase 3).
 
 Decision 5: report-only steps first, mutating steps after, `optimise` last
 because it restarts the daemon. Decision 6: only the idempotent formatters
-(`format-markdown`, `regenerate-docs`) act without confirmation; every other
-mutating step reports and acts only on explicit request. Decision 7: the same
+(`format-markdown`, `regenerate-docs`) and, by Plan 00627 R13, the archived
+`scratch-sweep-apply` act without confirmation; every other mutating step
+reports and acts only on explicit request. Decision 7: the same
 step list feeds the routed `housekeeping` command and the idle advisory.
 """
 
@@ -42,29 +43,38 @@ _REPORT_ONLY_EXPECTED = {
     "worktree-reap",
     "branch-sweep",
     "scratch-sweep",
-    # Advisory while `scratch-sweep --apply` needs a terminal (Plan 00627 Task 5.7):
-    # R13 makes it an unconfirmed mutating step once the owner removes that gate.
-    "scratch-sweep-apply",
     "skill-scan",
 }
 
 
 class TestScratchSweepSteps:
-    """Plan 00627 Task 5.7: the scratch sweep is in the pass and never applies unattended."""
+    """Plan 00627 Task 5.7 and R13: the report step, then the unconfirmed apply step.
 
-    def test_both_steps_run_the_dry_run_only(self) -> None:
+    The owner removed the per-run confirmation for the housekeeping step only
+    (Plan 00474 ledger): the step runs the sweep's apply core in-process, while
+    the ``scratch-sweep --apply`` verb keeps its terminal gate.
+    """
+
+    def test_the_report_step_is_the_dry_run(self) -> None:
         by_name = {s.name: s for s in HOUSEKEEPING_STEPS}
         assert by_name["scratch-sweep"].cli_argv == ("scratch-sweep",)
-        advisory = by_name["scratch-sweep-apply"]
-        assert "--apply" not in advisory.cli_argv
-        assert not advisory.mutates
-        assert "scratch-sweep --apply" in advisory.purpose
-        assert "scratch-sweep-apply" not in UNCONFIRMED_STEP_NAMES
+        assert not by_name["scratch-sweep"].mutates
+
+    def test_the_apply_step_mutates_without_confirmation(self) -> None:
+        step = {s.name: s for s in HOUSEKEEPING_STEPS}["scratch-sweep-apply"]
+        assert step.mutates
+        assert not step.confirmation_required
+        assert "scratch-sweep-apply" in UNCONFIRMED_STEP_NAMES
+
+    def test_the_apply_step_runs_through_housekeeping_not_the_gated_verb(self) -> None:
+        step = {s.name: s for s in HOUSEKEEPING_STEPS}["scratch-sweep-apply"]
+        assert step.cli_argv == ("housekeeping", "--run", "scratch-sweep-apply")
 
 
 _MUTATING_EXPECTED = {
     "format-markdown",
     "regenerate-docs",
+    "scratch-sweep-apply",
     "reconcile-settings",
     "remote-docs-refresh",
     "prune-venvs",
@@ -128,11 +138,12 @@ class TestOrdering:
 class TestDisposition:
     """Decision 6."""
 
-    def test_only_the_idempotent_formatters_act_without_confirmation(self) -> None:
+    def test_only_the_formatters_and_the_scratch_apply_act_without_confirmation(self) -> None:
         unconfirmed = {
             s.name for s in HOUSEKEEPING_STEPS if s.mutates and not s.confirmation_required
         }
-        assert unconfirmed == {"format-markdown", "regenerate-docs"} == set(UNCONFIRMED_STEP_NAMES)
+        expected = {"format-markdown", "regenerate-docs", "scratch-sweep-apply"}
+        assert unconfirmed == expected == set(UNCONFIRMED_STEP_NAMES)
 
     def test_report_only_steps_need_no_confirmation(self) -> None:
         assert all(not s.confirmation_required for s in report_only_steps())

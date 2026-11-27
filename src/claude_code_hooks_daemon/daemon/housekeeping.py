@@ -15,10 +15,12 @@ Three owner rulings shape the list:
   ``regenerate-docs``) act without confirmation. Every other mutating step is
   HELD: the pass reports what it would do and acts only when the step is
   named on ``--apply``. Plan 00627 R13 amends this for one step:
-  ``scratch-sweep-apply`` is to act without confirmation, because every
-  removal trails a hold window. While ``scratch-sweep --apply`` still refuses
-  without a terminal, that step is advisory: it prints the dry run and the
-  apply command for a human, and mutates nothing.
+  ``scratch-sweep-apply`` acts without confirmation, because every removal
+  trails a hold window (archived, restorable with ``scratch-sweep restore``).
+  The owner granted that for this step alone (Plan 00474 ledger): it runs
+  through ``housekeeping --run scratch-sweep-apply``, the sweep's own apply
+  core with no terminal question, while the ``scratch-sweep --apply`` verb
+  keeps its typed confirmation.
 - **Decision 7** -- each step is delegated to a sub-agent that returns what
   it CHANGED, never what it read, so the coordinator's context does not
   accumulate every step's output.
@@ -32,6 +34,13 @@ from enum import Enum
 from typing import Final
 
 _DEFAULT_REPORTS_DIR: Final[str] = "untracked/reports"
+
+#: The ``housekeeping`` flag that runs one step in-process instead of printing the pass.
+RUN_FLAG: Final[str] = "--run"
+#: The one step ``--run`` executes: the unconfirmed scratch apply (Plan 00627 R13).
+SCRATCH_SWEEP_APPLY_STEP: Final[str] = "scratch-sweep-apply"
+#: The steps ``housekeeping --run`` can execute in-process.
+RUNNABLE_STEP_NAMES: Final[tuple[str, ...]] = (SCRATCH_SWEEP_APPLY_STEP,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,12 +139,6 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
         "Scratch entries by verdict, what is due, and the caps (report only)",
         "scratch-sweep",
     ),
-    _report(
-        "scratch-sweep-apply",
-        "Advisory: the dry run of what is due; a human runs `hooks-daemon scratch-sweep --apply` "
-        "at a terminal (it refuses without one, so this step never applies unattended)",
-        "scratch-sweep",
-    ),
     _report("skill-scan", "Transcript mining for repeated workloads worth a skill", "skill-scan"),
     _mutating(
         "format-markdown",
@@ -148,6 +151,16 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
         "regenerate-docs",
         "Rewrite the generated HOOKS-DAEMON.md and CLAUDE.md block (idempotent; acts without confirmation)",
         "regenerate-docs",
+        confirm=False,
+    ),
+    _mutating(
+        SCRATCH_SWEEP_APPLY_STEP,
+        "Archive then remove the scratch entries the sweep finds due (acts without "
+        "confirmation; every removal is held in the archive store, restorable with "
+        "`scratch-sweep restore <id>`; never a .scratch-keep entry, a live one, or one in its TTL)",
+        "housekeeping",
+        RUN_FLAG,
+        SCRATCH_SWEEP_APPLY_STEP,
         confirm=False,
     ),
     _mutating(
@@ -187,7 +200,7 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
     ),
 )
 
-#: The mutating steps that act without confirmation (Decision 6).
+#: The mutating steps that act without confirmation (Decision 6, amended by R13).
 UNCONFIRMED_STEP_NAMES: Final[tuple[str, ...]] = tuple(
     step.name for step in HOUSEKEEPING_STEPS if step.mutates and not step.confirmation_required
 )
@@ -275,7 +288,7 @@ def render_procedure(
         if item.disposition is Disposition.HELD:
             status = f"HELD -- reports only; release with `--apply {step.name}`"
         elif step.mutates:
-            status = "RUN -- acts without confirmation (idempotent)"
+            status = "RUN -- acts without confirmation"
         else:
             status = "RUN -- report only"
         line = f"{index:2d}. `{step.name}` -- {step.purpose}\n    {command}\n    {status}"
