@@ -136,9 +136,13 @@ class TestEnablingAnAuthorisation:
         assert "hooks-daemon housekeeping --run scratch-sweep-apply" in text
         assert "`rm`" in text
         assert ".scratch-keep" in text
-        assert "live session" in text
         assert "next message" in text
         assert "scratch-sweep restore" in text
+        # Second review of PR 296: "in use" is a working directory, not an owner still running,
+        # and the step's expiry deletes archives for good.
+        assert "working directory" in text
+        assert "owner is still running" in text
+        assert "permanently deletes" in text.lower()
 
     def test_scratch_expired_cleanup_short_form_keeps_the_bounds(self) -> None:
         handler = StandingAuthorisationsHandler()
@@ -147,6 +151,8 @@ class TestEnablingAnAuthorisation:
         assert "housekeeping --run scratch-sweep-apply" in short
         assert ".scratch-keep" in short
         assert "`rm`" in short
+        assert "working directory" in short
+        assert "permanently deletes" in short.lower()
 
     def test_unknown_entry_id_is_ignored_not_crashed(self) -> None:
         handler = StandingAuthorisationsHandler()
@@ -481,7 +487,8 @@ class TestWriteStandingAuthSignal:
 
     def _read(self, session_id: str) -> dict[str, Any]:
         path = self._untracked / _SIGNAL_SUBDIR / f"{session_id}{_SIGNAL_SUFFIX}"
-        return json.loads(path.read_text(encoding="utf-8"))
+        document: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return document
 
     def test_writes_schema_fields(self) -> None:
         lines = ["auth line one", "auth line two"]

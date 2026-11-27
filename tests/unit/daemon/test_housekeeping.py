@@ -66,6 +66,11 @@ class TestScratchSweepSteps:
         assert not step.confirmation_required
         assert "scratch-sweep-apply" in UNCONFIRMED_STEP_NAMES
 
+    def test_the_apply_step_says_what_in_use_means_and_that_expiry_deletes(self) -> None:
+        purpose = {s.name: s for s in HOUSEKEEPING_STEPS}["scratch-sweep-apply"].purpose
+        assert "working directory" in purpose
+        assert "permanently delete archives" in purpose.lower()
+
     def test_the_apply_step_runs_through_housekeeping_not_the_gated_verb(self) -> None:
         step = {s.name: s for s in HOUSEKEEPING_STEPS}["scratch-sweep-apply"]
         assert step.cli_argv == ("housekeeping", "--run", "scratch-sweep-apply")

@@ -86,7 +86,7 @@ AUTHORISATION_WORKFLOWS: Final[str] = "workflow-orchestration"
 AUTHORISATION_COMMIT_PUSH_CADENCE: Final[str] = "commit-push-cadence"
 # Plan 00627 R13: running the unconfirmed scratch-apply housekeeping step
 # without asking first. Bounded to that one step: the step is the route that
-# archives every removal and never acts on a kept, live or in-TTL entry.
+# archives every removal and never acts on a kept, in-use or in-TTL entry.
 AUTHORISATION_SCRATCH_EXPIRED_CLEANUP: Final[str] = "scratch-expired-cleanup"
 
 # The one invocation the scratch entry authorises (see daemon/housekeeping.py).
@@ -143,10 +143,15 @@ _SCRATCH_EXPIRED_CLEANUP_TEXT: Final[str] = (
     "due, without asking each time. That housekeeping step is the only route "
     "this covers: do not use `rm` or any other command to remove scratch. The "
     "step archives every entry it removes (restorable with `hooks-daemon "
-    "scratch-sweep restore <archive id>`) and never acts on an entry holding a "
-    ".scratch-keep marker, a live session's directory, or an entry inside its "
-    "TTL; never remove any of those yourself. Report what it removed (the "
-    "count and the entry names it printed) in your next message. "
+    "scratch-sweep restore <archive id>` until the archive's retention ends), "
+    "and, as `scratch-sweep --apply` does, it permanently deletes archives "
+    "already past their retention. It never acts on an entry holding a "
+    ".scratch-keep marker, an entry inside its TTL, or an entry in use. In use "
+    "means a process has its working directory inside it or a recorded "
+    "background command names it, so an old, quiet session directory can be "
+    "archived even while its owner is still running elsewhere. Never remove "
+    "scratch yourself. Report what it removed and expired (the counts, entry "
+    "names and archive ids it printed) in your next message. "
     f"This request is recorded in {_CONFIG_LOCATION}, where it can be read "
     "and withdrawn."
 )
@@ -174,9 +179,12 @@ _WORKFLOWS_SHORT: Final[str] = (
 
 _SCRATCH_EXPIRED_CLEANUP_SHORT: Final[str] = (
     "STANDING AUTHORISATION (on file): expired-scratch cleanup is pre-requested "
-    f"for this project — `{_SCRATCH_STEP_COMMAND}` only, never `rm`, never a "
-    ".scratch-keep entry or a live session's directory; report what it removed "
-    "in your next message. Recorded in .claude/hooks-daemon.yaml."
+    f"for this project — `{_SCRATCH_STEP_COMMAND}` only, never `rm`. It skips "
+    ".scratch-keep, in-TTL and in-use entries (in use = a process's working "
+    "directory or a recorded background command), so a quiet session directory "
+    "can go while its owner still runs; it also permanently deletes archives "
+    "past retention. Report what it removed in your next message. Recorded in "
+    ".claude/hooks-daemon.yaml."
 )
 
 # The built-in set. Every entry ships DISABLED (Decision 3) — the set exists so

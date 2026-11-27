@@ -16,7 +16,9 @@ Three owner rulings shape the list:
   HELD: the pass reports what it would do and acts only when the step is
   named on ``--apply``. Plan 00627 R13 amends this for one step:
   ``scratch-sweep-apply`` acts without confirmation, because every removal
-  trails a hold window (archived, restorable with ``scratch-sweep restore``).
+  trails a hold window (archived, restorable with ``scratch-sweep restore``
+  until retention ends; like the CLI apply, it permanently deletes archives
+  past retention).
   The owner granted that for this step alone (Plan 00474 ledger): it runs
   through ``housekeeping --run scratch-sweep-apply``, the sweep's own apply
   core with no terminal question, while the ``scratch-sweep --apply`` verb
@@ -155,9 +157,11 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
     ),
     _mutating(
         SCRATCH_SWEEP_APPLY_STEP,
-        "Archive then remove the scratch entries the sweep finds due (acts without "
-        "confirmation; every removal is held in the archive store, restorable with "
-        "`scratch-sweep restore <id>`; never a .scratch-keep entry, a live one, or one in its TTL)",
+        "Archive then remove the scratch entries the sweep finds due, without confirmation "
+        "(restorable with `scratch-sweep restore <id>` until retention ends), and permanently "
+        "delete archives past retention; never a .scratch-keep entry, one in its TTL, or one "
+        "in use (a process's working directory or a recorded background command; an old, "
+        "quiet session directory can go while its owner still runs elsewhere)",
         "housekeeping",
         RUN_FLAG,
         SCRATCH_SWEEP_APPLY_STEP,

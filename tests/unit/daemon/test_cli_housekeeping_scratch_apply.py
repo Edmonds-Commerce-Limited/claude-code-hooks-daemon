@@ -216,6 +216,35 @@ class TestTheStepNeverUsesPressureMode:
             assert (tree.root / name / "a.txt").read_bytes() == b"alpha"
 
 
+class TestTheStepReadsTheProjectsOwnConfig:
+    """Second review of PR 296, minor 1: a ``.yml`` config is the daemon's config too."""
+
+    def test_a_yml_ttl_keeps_an_entry_the_default_ttl_would_remove(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yml").write_text(
+            'version: "2.0"\nscratch:\n  untracked_ttl:\n    scratch: "30d"\n'
+        )
+        _due(tree, "old", now)
+        assert _step(tree, now=now) == 0
+        assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
+        assert _archived(capsys.readouterr().out) == {}
+
+    def test_an_unreadable_config_removes_nothing(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text("scratch: [unclosed\n")
+        _due(tree, "old", now)
+        assert _step(tree, now=now) == 1
+        assert not _store(project).exists()
+        assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
+        assert "nothing was removed" in capsys.readouterr().err
+
+
 class TestTheStepFailsClosed:
     def test_a_store_refusal_removes_nothing(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
@@ -345,10 +374,6 @@ class TestTheHousekeepingRunFlag:
                 ):
                     offenders.append(name)
         assert offenders == []
-
-    def test_housekeeping_project_root_is_suppressed(self) -> None:
-        args = build_parser().parse_args(["housekeeping"])
-        assert "project_root" not in vars(args)
 
     @pytest.mark.parametrize(
         "extra", [("--list",), ("--apply", "prune-venvs")], ids=["list", "apply"]

@@ -59,10 +59,13 @@ its own skill entry point, exactly as an upgrade does.
 `format-markdown` and `regenerate-docs` are idempotent and reversible: running
 them twice produces the same tree, and `git diff` shows exactly what they did.
 `scratch-sweep-apply` removes only what the scratch sweep finds due, never a
-`.scratch-keep`, live or in-TTL entry, and archives every removal first
-(restorable with `scratch-sweep restore <id>`); it runs in-process, while
-`scratch-sweep --apply` itself still needs a human's typed confirmation at a
-terminal. Everything else in the mutating half changes config, settings, or deletes
+`.scratch-keep`, in-TTL or in-use entry, and archives every removal first
+(restorable with `scratch-sweep restore <id>` until retention ends). "In use"
+means a process's working directory or a recorded background command, so an
+old, quiet session directory can be archived while its owner still runs
+elsewhere. Like `scratch-sweep --apply`, it also permanently deletes archives
+past retention. It runs in-process, while `scratch-sweep --apply` itself still
+needs a human's typed confirmation at a terminal. Everything else in the mutating half changes config, settings, or deletes
 files — a single command that silently does all of that is worse than several
 explicit ones, so each of those steps reports what it would do and acts only
 when you name it on `--apply`. Consent is never inferred from the findings.

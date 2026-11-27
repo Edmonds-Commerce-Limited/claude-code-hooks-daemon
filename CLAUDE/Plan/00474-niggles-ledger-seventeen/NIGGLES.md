@@ -8943,7 +8943,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM as a class: harmless through `main()`, dangerous to any other caller, and nothing pinned it.
 
-**Status**: ✅ Fixed in PR 296 for this class's live risk: `housekeeping --project-root` now defaults to SUPPRESS; `housekeeping --run` refuses when no project root was named rather than fall back to the working directory; a test runs the real `main()` with the global flag before the verb; and a test walks every subcommand, nested ones included, and fails on a `--project-root` default other than None or SUPPRESS. The other None defaults are left as they are, because `main()` handles them.
+**Status**: ✅ Fixed in PR 296 for this class's live risk. The reported override could not be reproduced through `main()`: a test runs the real `main()` with the global flag before the verb and a throwaway root, and the step receives that root. So the incident's dropped root (N768) came from the fallback to the working directory when no root reached the command, which `housekeeping --run` now refuses. Also: `housekeeping --project-root` defaults to SUPPRESS, and a test walks every subcommand, nested ones included, and fails on a `--project-root` default other than None or SUPPRESS. The other None defaults are left as they are, because `main()` handles them.
 
 ### N767 — a symlinked `.scratch-keep` is honoured on a session directory but not on an entry root
 

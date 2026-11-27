@@ -6872,12 +6872,16 @@ def run_scratch_sweep_apply_step(
     step acts without confirmation. It runs the same refusal, classification
     and apply core as ``scratch-sweep --apply`` on the project's own
     ``untracked/scratch``, so it acts only on what that core finds due; a
-    ``.scratch-keep`` entry, a live entry and one inside its TTL are never due.
+    ``.scratch-keep`` entry, one inside its TTL and one in use (a process's
+    working directory, or a recorded background command) are never due. An
+    old, quiet session directory whose owner runs elsewhere is not in use.
+    The same core's expiry permanently deletes archives past retention.
     Pressure mode is never used: it packs idle entries still inside their TTL,
     which the ruling does not cover, so that widening stays behind the CLI
-    verb's human confirmation.
-    It fails closed: a store refusal, or a classification that could not read
-    everything, removes nothing and says why. It prints entry names and archive
+    verb's human confirmation. The config is read as the daemon reads it
+    (``.yaml``, then ``.yml``).
+    It fails closed: a store refusal, an unreadable config, or a classification
+    that could not read everything, removes nothing and says why. It prints entry names and archive
     ids, never contents. The keyword parameters exist for tests.
 
     Returns:
@@ -6892,7 +6896,10 @@ def run_scratch_sweep_apply_step(
         )
         return 1
 
-    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    try:
+        config = _project_config(repo)
+    except (OSError, ValueError) as exc:
+        return refused(f"the project's config could not be read: {exc}")
     sweep_root = resolve_sweep_root(
         repo / "untracked" / "scratch",
         project_root=repo,
@@ -6927,6 +6934,31 @@ def run_scratch_sweep_apply_step(
     parts = [(relative, result), *((f"{relative}/{name}", sub) for name, sub in sessions)]
     _print_unconfirmed_apply(parts)
     return 0
+
+
+#: The names the daemon looks for under ``.claude/``, in its order (``Config.find_and_load``).
+_PROJECT_CONFIG_NAMES: Final[tuple[str, ...]] = ("hooks-daemon.yaml", "hooks-daemon.yml")
+
+
+def _project_config(repo: Path) -> Config:
+    """``repo``'s own config, found by the daemon's file names and order; defaults when none.
+
+    Only ``repo/.claude`` is searched, never a parent: the root was named
+    explicitly. A config that exists but cannot be read raises, so a caller
+    that removes files can refuse rather than act on default TTLs.
+
+    Raises:
+        OSError: The config file could not be read.
+        ValueError: The config file is not valid.
+    """
+    from claude_code_hooks_daemon.utils.path_predicates import path_exists
+
+    for name in _PROJECT_CONFIG_NAMES:
+        path = repo / ".claude" / name
+        # An unreadable path counts as present, so the load below fails and the caller refuses.
+        if path_exists(path, unreadable_means=True):
+            return Config.load(path)
+    return Config()
 
 
 def _print_unconfirmed_apply(parts: list[tuple[str, Any]]) -> None:
@@ -14473,7 +14505,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Execute one step in-process instead of printing the pass; only "
         "scratch-sweep-apply (archives then removes the scratch entries the sweep finds due, "
-        "without confirmation; each is restorable with scratch-sweep restore)",
+        "without confirmation; each is restorable with scratch-sweep restore until retention "
+        "ends, and archives past retention are permanently deleted)",
     )
     parser_housekeeping.add_argument(
         "--list",
