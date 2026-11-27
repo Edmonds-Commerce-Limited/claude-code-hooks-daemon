@@ -8932,6 +8932,8 @@ The independent review of the branch (REQUEST CHANGES) found two blockers and tw
 - **Harmless switches denied**: switches that main allowed are allowed again. That covers output-only settings (`-c advice.*`/`color.*`, `--no-pager`, `-P`), an assignment that is not a `GIT_*` variable outside a short safe list (and not `HOME`), stdin into a plain switch, and `--conflict=<style>`. Any setting that can move the repository, index or worktree, or change pathspec matching, still denies.
 - **Performance**: the reading is made once per hook call and shared by `matches()` and `handle()`. Each distinct run is read once. Past four distinct one-operand checkouts the command is judged whole, and the scan target is cached. The quadratic segment loop is gone.
 
+A second independent review (REQUEST CHANGES) found one blocker, in N771 (5): a one-operand switch was checked against the commit `rev-parse` names rather than the one checkout switches to. Fixed test first, see N771.
+
 The review's harmless main gaps are recorded as N771.
 
 ### N765 — an `xargs` run that adds paths after a trailing `--` reaches the checkout restore unjudged
@@ -8959,7 +8961,7 @@ The review's harmless main gaps are recorded as N771.
 
 **Severity**:
 
-- MEDIUM: (1), (3), (4) and (5), which are discard routes the guard never sees.
+- MEDIUM: (1), (3), (4), (5) and (7), which are discard routes the guard never sees.
 - LOW: (6).
 
 **Status**: 🔄 In progress on branch `guard-n761-n764-n765-gaps`.
@@ -8978,13 +8980,27 @@ The review's harmless main gaps are recorded as N771.
     - a touched path carries an index flag that hides a change.
 
     The fuzz found two more ways a switch loses work, both closed by the same check: a tracked parent replaced by an untracked symlink, and a staged edit on a path the target removes.
+
+    The second review found that the target was the one `rev-parse` picks, which is not always the one checkout switches to, so three ordinary switches still lost an ignored file. The target is now resolved as checkout resolves it, and the switch check runs on that:
+
+    - a local branch first, so `git checkout amb` with a tag and a branch both named `amb` is checked against the branch;
+    - `A...B` (either side may be empty, meaning `HEAD`) as its merge base from `git merge-base --all`, denied when there is not exactly one;
+    - a name that is no commit and no path, as the remote-branch shortcut: the one `refs/remotes/*/<name>` that holds it, denied when two remotes do or git cannot list them.
+
+    A name that is no commit but names a path is a restore from the index and denied, as before.
+
+  - (7) `git reset --merge` and `git reset --keep` (and every prefix, `--mer`, `--kee`) rewrite the working tree: the review's fuzz lost an ignored file to `--mer HEAD~1` and a staged edit to `--kee HEAD~1`. Both now deny under R-GIT-RESET-HARD with `--hard`, with no proof attempted (fail closed); a reset that touches nothing is rare enough that the over-deny is accepted.
+
+  - Over-deny: `-c core.quotepath=<value>` only changes how paths are printed, and a switch carrying it is allowed again. `-c core.autocrlf=...` still denies (it changes what a checkout writes), as does `env -i` (the reading cannot see what the cleared environment does).
 - Open, fix test first:
   - Config-file aliases: resolve an unknown subcommand through `git config --get alias.<name>`, or deny an unknown subcommand that names an alias.
   - (3) for `branch` and `push`.
   - A `read-tree -u` rule.
-  - (5) for `git switch` and `git checkout -b <new> <start>` written as two operands. The second is judged as a path checkout and denied; `git switch` is not read at all.
-  - Raw bytes a filter hides: a CRLF file that `core.autocrlf` normalises reads as clean to git, and a switch rewrites it. The restore proof hashes raw bytes; the switch check does not. No fuzz run hit it.
+  - (5) for `git switch`, which is not read at all: `git switch feat` and `git switch remote-only` lose an ignored file the target tracks, on main and on this branch (confirmed by the second review). `git checkout -b <new> <start>` is not open: it is read as a switch to `<start>` and gets the switch check (`git checkout -b nb feat` in a clean repository is allowed).
+  - Raw bytes a filter hides: a CRLF file that `core.autocrlf` normalises reads as clean to git, and a switch rewrites it. The restore proof hashes raw bytes; the switch check does not. Confirmed by the second review on main and this branch.
   - (6): read `-b`/`-B` as taking the rest of the cluster.
+  - Performance, backtick chains: `` : `git checkout main` `` repeated N times grows by about 3x per doubling of N (the review measured 251 / 724 / 2321 / 7590 ms at N = 250 / 500 / 1000 / 2000, main 765 / 1669 / 3891 / 9982 ms). Faster than main at every size measured, but it scales worse. Fix: parse the backtick variant once rather than once per segment, or deny past a backtick count.
+- Out of scope, recorded so nobody assumes it is covered: a quoted command word (`g''it checkout -- f.txt`, `xargs g''it checkout HEAD --`) escapes every destructive-git rule, on main as well. Quote removal on the command word is not done, and an agent is not expected to write it; the threat model is an agent's ordinary mistakes, not evasion.
 
 ### N766 — a subcommand's own `--project-root` can stand in front of the wrapper's global root
 

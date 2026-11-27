@@ -685,6 +685,7 @@ class TestReviewMinorHarmlessSwitchesStayAllowed:
             "git --no-optional-locks checkout side",
             "git checkout --conflict=diff3 main",
             "git checkout --conflict diff3 main",
+            "git -c core.quotepath=off checkout side",
         ],
     )
     def test_the_switch_is_allowed(
@@ -742,6 +743,10 @@ class TestReviewMinorAbbreviatedLongOptions:
             ("git clean --fo -d", RuleID.GIT_CLEAN_FORCE),
             ("git switch --discard side", RuleID.GIT_SWITCH_FORCE),
             ("git switch --di side", RuleID.GIT_SWITCH_FORCE),
+            ("git reset --merge HEAD~1", RuleID.GIT_RESET_HARD),
+            ("git reset --mer HEAD~1", RuleID.GIT_RESET_HARD),
+            ("git reset --keep HEAD~1", RuleID.GIT_RESET_HARD),
+            ("git reset --kee HEAD~1", RuleID.GIT_RESET_HARD),
         ],
     )
     def test_the_abbreviation_is_denied(
@@ -937,6 +942,100 @@ class TestReviewMinorASwitchOverIgnoredFiles:
         _denied(handler, "git checkout feat", feat, RuleID.GIT_CHECKOUT_DISCARD)
 
 
+class TestSecondReviewTheSwitchTargetIsWhatCheckoutPicks:
+    """Second review, blocker 1: the switch check must compare HEAD with the commit git
+    actually switches to, not with whatever `rev-parse <operand>` picks."""
+
+    @pytest.fixture
+    def feat(self, repo: Path) -> Path:
+        """`ign.txt` is tracked on `feat` AND on the merge base of `feat` and `main`;
+        `main` stops tracking it, so on main it is an ignored local file."""
+        (repo / "ign.txt").write_text("tracked on the base\n")
+        _git(repo, "add", "ign.txt")
+        _git(repo, "commit", "-q", "-m", "the base tracks ign.txt")
+        _git(repo, "checkout", "-q", "-b", "feat")
+        (repo / "feat-only.txt").write_text("on feat\n")
+        _git(repo, "add", "feat-only.txt")
+        _git(repo, "commit", "-q", "-m", "feat moves on")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "rm", "-q", "--cached", "ign.txt")
+        (repo / "ign.txt").unlink()
+        (repo / "main-only.txt").write_text("on main\n")
+        _git(repo, "add", "main-only.txt")
+        _git(repo, "commit", "-q", "-m", "main stops tracking ign.txt")
+        (repo / ".git" / "info" / "exclude").write_text("ign.txt\n")
+        _git(repo, "config", "remote.origin.url", "/nonexistent")
+        _git(repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        _git(repo, "update-ref", "refs/remotes/origin/remote-only", "feat")
+        return repo
+
+    @staticmethod
+    def _ignored_in_the_way(repo: Path) -> None:
+        (repo / "ign.txt").write_text("ignored local work\n")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git checkout feat...main",
+            "git checkout main...feat",
+            "git checkout ...feat",
+            "git checkout remote-only",
+            "git checkout --guess remote-only",
+        ],
+    )
+    def test_a_merge_base_or_remote_shortcut_switch_over_an_ignored_file_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        self._ignored_in_the_way(feat)
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command", ["git checkout amb", "git checkout -q amb", "git checkout -b nb amb"]
+    )
+    def test_a_branch_named_like_a_tag_is_the_target(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        """`rev-parse amb` picks the tag at HEAD; checkout switches to the branch at feat."""
+        _git(feat, "tag", "amb", "HEAD")
+        _git(feat, "branch", "amb", "feat")
+        self._ignored_in_the_way(feat)
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command", ["git checkout feat...main", "git checkout remote-only", "git checkout amb"]
+    )
+    def test_the_same_switches_with_nothing_in_the_way_are_allowed(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        _git(feat, "tag", "amb", "HEAD")
+        _git(feat, "branch", "amb", "feat")
+        _allowed(handler, command, feat)
+
+    def test_a_shortcut_name_two_remotes_hold_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _git(feat, "update-ref", "refs/remotes/upstream/remote-only", "main")
+        _denied(handler, "git checkout remote-only", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_shortcut_name_that_is_also_a_path_is_a_restore_and_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        """Git takes the shortcut only when the operand names no path."""
+        (feat / "remote-only").write_text("tracked file\n")
+        _git(feat, "add", "remote-only")
+        _git(feat, "commit", "-q", "-m", "a file named like the remote branch")
+        (feat / "remote-only").write_text("my unsaved edit\n")
+        _denied(handler, "git checkout remote-only", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_merge_base_with_no_single_answer_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _git(feat, "checkout", "-q", "--orphan", "lone")
+        _git(feat, "commit", "-q", "--allow-empty", "-m", "unrelated root")
+        _git(feat, "checkout", "-q", "main")
+        _denied(handler, "git checkout lone...main", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+
 class TestReviewMinorTheReadingIsBounded:
     """Review of N764, minor 6: repeated runs share one reading and one set of git calls."""
 
@@ -986,4 +1085,7 @@ class TestReviewMinorTheReadingIsBounded:
         monkeypatch.setattr(destructive_git, "run_git", recording)
         command = " && ".join(f"git checkout b{index}" for index in range(400))
         _denied(handler, command, repo, RuleID.GIT_CHECKOUT_DISCARD)
-        assert len(calls) <= 2 * destructive_git._MAX_SWITCH_READINGS
+        # A name that resolves to nothing costs three questions: is it a branch or a
+        # remote-tracking branch, is it a commit, is it a path. The bound is per
+        # reading, never per operand.
+        assert len(calls) <= 3 * destructive_git._MAX_SWITCH_READINGS

@@ -267,8 +267,10 @@ _GIT_PUSH_DELETE_PATTERN = (
 # list prevents the pattern source from drifting between the two methods.
 _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     (
-        rf"{_GIT_INVOCATION}reset\s+.*{_long_option('hard')}",
-        "git reset --hard destroys all uncommitted changes permanently",
+        rf"{_GIT_INVOCATION}reset\s+.*(?:{_long_option('hard')}|{_long_option('merge')}"
+        rf"|{_long_option('keep')})",
+        "git reset --hard/--merge/--keep rewrites the working tree and can destroy "
+        "uncommitted changes and ignored files permanently",
     ),
     (
         # The force flag must START a whitespace-delimited token: `-f` inside the
@@ -1279,6 +1281,9 @@ _VALUE_SEPARATOR: Final[str] = "="
 # `git checkout -` switches to the previous branch (`@{-1}`).
 _PREVIOUS_BRANCH: Final[str] = "-"
 _PREVIOUS_BRANCH_REVISION: Final[str] = "@{-1}"
+# `A...B` names the merge base of A and B.
+_MERGE_BASE_MARK: Final[str] = "..."
+_REMOTES_PREFIX: Final[str] = "refs/remotes/"
 _HEAD: Final[str] = "HEAD"
 # The paths a switch writes: added, modified or retyped between HEAD and the target.
 _WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=ADMT"
@@ -1308,6 +1313,7 @@ _SWITCH_CONFIG_PREFIXES: Final[tuple[str, ...]] = (
     "column.",
     "pager.",
     "core.pager=",
+    "core.quotepath=",
     "user.",
 )
 _SWITCH_GIT_VARIABLES: Final[frozenset[str]] = frozenset(
@@ -1475,12 +1481,71 @@ def _undashed_may_restore(run: GitInvocation, cwd: Path | None) -> bool:
     previous = operands[0] == _PREVIOUS_BRANCH
     operand = _PREVIOUS_BRANCH_REVISION if previous else operands[0]
     with git_deadline(time.monotonic() + _CHECKOUT_PROOF_BUDGET):
-        if _LITERAL_COMMIT.match(operand) and _resolves(directory, operand, "commit"):
-            return _switch_overwrite(directory, operand) is not None
+        if _MERGE_BASE_MARK in operand:
+            return _merge_base_switch_may_restore(directory, operand)
+        if not _LITERAL_COMMIT.match(operand):
+            return _path_reading(directory, operand) is not None
         if previous:
+            if _resolves(directory, operand, "commit"):
+                return _switch_overwrite(directory, operand) is not None
             # No previous branch: git refuses the switch, so nothing is written.
             return False
-        return _path_reading(directory, operand) is not None
+        return _named_switch_may_restore(directory, operand)
+
+
+def _merge_base_switch_may_restore(directory: Path, operand: str) -> bool:
+    """Whether ``git checkout A...B`` may lose work: it switches to the one merge base.
+
+    Either side may be empty, meaning ``HEAD``. No single merge base, a side that is
+    not one literal revision, or a git failure counts as a possible loss.
+    """
+    left, _, right = operand.partition(_MERGE_BASE_MARK)
+    sides = [side or _HEAD for side in (left, right)]
+    if not all(_LITERAL_COMMIT.match(side) and _MERGE_BASE_MARK not in side for side in sides):
+        return True
+    bases = run_git(directory, "merge-base", "--all", *sides, timeout=Timeout.GIT_CONTEXT)
+    found = bases.stdout.split()
+    if bases.returncode != 0 or len(found) != 1:
+        return True
+    return _switch_overwrite(directory, found[0]) is not None
+
+
+def _named_switch_may_restore(directory: Path, name: str) -> bool:
+    """Whether ``git checkout <name>`` may lose work, resolved as checkout resolves it.
+
+    A local branch of that name wins over a same-named tag; then any commit; then a
+    path, which git restores from the index; then the remote-branch shortcut, the one
+    remote-tracking branch of that name. Two remotes holding it, or a git failure,
+    counts as a possible loss; a name that is none of these makes git refuse.
+    """
+    listed = run_git(
+        directory,
+        "for-each-ref",
+        "--format=%(refname)",
+        f"{HEADS_PREFIX}{name}",
+        f"{_REMOTES_PREFIX}*/{name}",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if listed.returncode != 0:
+        return True
+    refs = listed.stdout.split()
+    branch = f"{HEADS_PREFIX}{name}"
+    if branch in refs:
+        return _switch_overwrite(directory, branch) is not None
+    if _resolves(directory, name, "commit"):
+        return _switch_overwrite(directory, name) is not None
+    if _path_reading(directory, name) is not None:
+        return True
+    remotes = [
+        ref
+        for ref in refs
+        if ref.startswith(_REMOTES_PREFIX)
+        and ref.endswith(f"/{name}")
+        and len(ref) > len(_REMOTES_PREFIX) + len(name) + 1
+    ]
+    if len(remotes) > 1:
+        return True
+    return bool(remotes) and _switch_overwrite(directory, remotes[0]) is not None
 
 
 def _switch_overwrite(directory: Path, revision: str) -> str | None:
