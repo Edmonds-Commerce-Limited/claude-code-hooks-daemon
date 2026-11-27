@@ -1,6 +1,7 @@
 """DestructiveGitHandler - blocks destructive git commands that permanently destroy data."""
 
 import functools
+import itertools
 import logging
 import re
 import shlex
@@ -8,7 +9,7 @@ import stat
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -1321,7 +1322,9 @@ _WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=ADMT"
 _ADDED_STATUS: Final[str] = "A"
 _DELETED_STATUS: Final[str] = "D"
 # Paths named in one `git ls-files --others` call.
-_PATHS_PER_LISTING: Final[int] = 256
+_PATHS_PER_LISTING: Final[int] = 4096
+# ... and at most this many bytes of path, so a list is never one oversized command line.
+_PATH_BYTES_PER_LISTING: Final[int] = 64 * 1024
 # Runners that add words of their own to the command they run (N765).
 _ARGUMENT_FEEDERS: Final[frozenset[str]] = frozenset({"xargs", "parallel", "find", "fd", "fdfind"})
 # Prefixes that run the command they are given with its words unchanged.
@@ -1353,6 +1356,70 @@ _SWITCH_GIT_VARIABLES: Final[frozenset[str]] = frozenset(
 _GIT_VARIABLE_PREFIX: Final[str] = "GIT_"
 # Variables that move where git finds its configuration.
 _CONFIG_LOCATING_VARIABLES: Final[frozenset[str]] = frozenset({"HOME", "XDG_CONFIG_HOME"})
+# Statements that cannot change the refs, HEAD, config or environment a later switch is
+# read against (fourth review). Every other statement may, and denies the switch.
+_READ_ONLY_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "status",
+        "log",
+        "show",
+        "diff",
+        "rev-parse",
+        "ls-files",
+        "ls-tree",
+        "describe",
+        "cat-file",
+        "for-each-ref",
+        "show-ref",
+        "blame",
+        "grep",
+        "shortlog",
+        "merge-base",
+        "name-rev",
+        "rev-list",
+        "whatchanged",
+        "help",
+        "version",
+    }
+)
+# `git branch` with only these options lists branches; with anything else it may make one.
+_BRANCH_LISTING_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--list", "--show-current"}
+)
+_STATE_FREE_COMMANDS: Final[frozenset[str]] = frozenset(
+    # Readers that write no file of their own (no `-o`): `sort`, `uniq`, `awk` and `tee`
+    # can, so they are not here.
+    {
+        "cd",
+        "pushd",
+        "popd",
+        "echo",
+        "printf",
+        "true",
+        ":",
+        "pwd",
+        "ls",
+        "cat",
+        "test",
+        "[",
+        "grep",
+        "head",
+        "tail",
+        "wc",
+    }
+)
+_ENVIRONMENT_DECLARATIONS: Final[frozenset[str]] = frozenset(
+    {"export", "declare", "typeset", "readonly", "local"}
+)
+_HARMLESS_REDIRECT_TARGETS: Final[frozenset[str]] = frozenset(
+    {"/dev/null", "/dev/stdout", "/dev/stderr"}
+)
+# List operators under which the next statement runs at the same time as the one before.
+_BACKGROUND: Final[str] = "&"
+_CONCURRENT_OPERATORS: Final[frozenset[str]] = frozenset({_BACKGROUND, "|", "|&"})
+# The `_stale_readings` key for a run whose place in the command's order is not known
+# (`id()` of a live object is never negative).
+_ANY_STATEMENT: Final[int] = -1
 # Past this many distinct one-operand checkouts in one command, the command is judged as a
 # whole (and denied by the one-checkout rule) instead of asking git about each operand.
 _MAX_SWITCH_READINGS: Final[int] = 4
@@ -1409,6 +1476,89 @@ def _switch_operands(arguments: tuple[str, ...]) -> tuple[str, ...] | None:
                 if letter not in _SWITCH_SHORT_LETTERS:
                     return None
     return tuple(operands)
+
+
+def _may_change_what_a_switch_reads(step: SimpleCommand) -> bool:
+    """Whether ``step``, run before or beside a switch, may change refs, HEAD, config or the
+    environment git reads (fourth review): the switch is read against the repository as
+    it is before the command runs, so after such a statement that reading is stale.
+
+    Only a statement known to change none of them passes: a read-only git command, a
+    plain shell builtin or reader with no file-writing redirect, ``cd``, or an assignment
+    or ``export`` that names no ``GIT_*``, ``HOME`` or ``XDG_CONFIG_HOME``. Anything not
+    classified (``make``, a script, an alias) may change them (fail closed).
+    """
+    if any(target not in _HARMLESS_REDIRECT_TARGETS for _, target in step.redirects):
+        return True
+    words = step.words
+    assignments = 0
+    while assignments < len(words) and is_assignment_word(words[assignments]):
+        assignments += 1
+    rest = words[assignments:]
+    if not rest:
+        return any(_names_a_state_variable(word) for word in words)
+    # The command word decides first: `echo git checkout x` carries a parsed git run in
+    # its words, but what runs is `echo`.
+    head = command_word(rest[0])
+    if head in _STATE_FREE_COMMANDS:
+        return False
+    if step.git is not None and (head == _GIT_WORD or head in _PLAIN_WRAPPERS):
+        subcommand = step.git.subcommand
+        if subcommand == _BRANCH:
+            return not set(step.git.arguments) <= _BRANCH_LISTING_OPTIONS
+        return subcommand not in _READ_ONLY_GIT_SUBCOMMANDS
+    if head in _ENVIRONMENT_DECLARATIONS:
+        declared = rest[1:]
+        return any(word.startswith("-") or _names_a_state_variable(word) for word in declared)
+    return True
+
+
+def _stale_readings(steps: list[SimpleCommand]) -> dict[int, bool]:
+    """For each step of one parse (keyed by ``id``), whether a switch there would be read
+    against state another statement may change first: an earlier statement, or a later one
+    that runs at the same time (a pipeline partner, or anything after a backgrounded
+    switch). Under ``_ANY_STATEMENT``, whether any statement may change it at all: the
+    answer for a run found only by re-parsing a segment, whose place in the order is not
+    known.
+    """
+    changes = [_may_change_what_a_switch_reads(step) for step in steps]
+    stale: dict[int, bool] = {_ANY_STATEMENT: any(changes)}
+    changed_before = False
+    for index, step in enumerate(steps):
+        later = range(index + 1, len(steps))
+        backgrounded = index + 1 < len(steps) and steps[index + 1].operator == _BACKGROUND
+        partners = itertools.takewhile(
+            lambda later_index: steps[later_index].operator in _CONCURRENT_OPERATORS, later
+        )
+        concurrent = (
+            any(changes[j] for j in later) if backgrounded else any(changes[j] for j in partners)
+        )
+        stale[id(step)] = changed_before or concurrent
+        changed_before = changed_before or changes[index]
+    return stale
+
+
+def _chunk_bounds(names: Sequence[str]) -> list[tuple[int, int]]:
+    """``(start, end)`` slices of ``names``, each within the per-call path count and bytes."""
+    bounds: list[tuple[int, int]] = []
+    start = size = 0
+    for index, name in enumerate(names):
+        cost = len(name.encode()) + 1
+        if index > start and (
+            index - start >= _PATHS_PER_LISTING or size + cost > _PATH_BYTES_PER_LISTING
+        ):
+            bounds.append((start, index))
+            start, size = index, 0
+        size += cost
+    if start < len(names):
+        bounds.append((start, len(names)))
+    return bounds
+
+
+def _names_a_state_variable(word: str) -> bool:
+    """Whether the assignment or name ``word`` sets a variable git reads its state through."""
+    name = word.split(_VALUE_SEPARATOR, 1)[0]
+    return name.startswith(_GIT_VARIABLE_PREFIX) or name in _CONFIG_LOCATING_VARIABLES
 
 
 def _feeding_problem(step: SimpleCommand) -> str | None:
@@ -1719,8 +1869,8 @@ def _touched_local_changes(root: Path, names: list[str]) -> str | None:
     against ``HEAD`` in the working tree and in the index, and carry a plain index
     entry (an assume-unchanged or skip-worktree flag hides a change from ``git diff``).
     """
-    for start in range(0, len(names), _PATHS_PER_LISTING):
-        chunk = names[start : start + _PATHS_PER_LISTING]
+    for start, end in _chunk_bounds(names):
+        chunk = names[start:end]
         for compared, where in ((("diff",), "unstaged"), (("diff", "--cached"), "staged")):
             diff = run_git(
                 root,
@@ -1785,8 +1935,8 @@ def _untracked_content(root: Path, names: list[str]) -> str | None:
     risk: ``git ls-files --others`` with no exclude options lists untracked and ignored
     files alike. Asked in chunks, so a long list is never one oversized command.
     """
-    for start in range(0, len(names), _PATHS_PER_LISTING):
-        chunk = names[start : start + _PATHS_PER_LISTING]
+    for start, end in _chunk_bounds(names):
+        chunk = names[start:end]
         listed = run_git(
             root,
             _LITERAL_PATHSPECS,
@@ -1872,8 +2022,8 @@ def _index_records_by_name(directory: Path, names: list[str]) -> dict[str, list[
     """
     unique = list(dict.fromkeys(names))
     found: dict[str, list[_IndexEntry]] = {name: [] for name in unique}
-    for start in range(0, len(unique), _PATHS_PER_LISTING):
-        chunk = unique[start : start + _PATHS_PER_LISTING]
+    for start, end in _chunk_bounds(unique):
+        chunk = unique[start:end]
         asked = set(chunk)
         listed = run_git(
             directory,
@@ -1975,8 +2125,8 @@ def _raw_bytes_problem(directory: Path, present: list[tuple[str, _IndexEntry]]) 
     bytes are hashed with no filters, one ``hash-object`` call per chunk of files, and
     each hash is compared with the index object.
     """
-    for start in range(0, len(present), _PATHS_PER_LISTING):
-        chunk = present[start : start + _PATHS_PER_LISTING]
+    for start, end in _chunk_bounds([name for name, _ in present]):
+        chunk = present[start:end]
         hashed = run_git(
             directory,
             "hash-object",
@@ -2046,8 +2196,8 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
 
 def _paths_local_changes(directory: Path, paths: tuple[str, ...]) -> str | None:
     """Why any of ``paths`` holds a staged or unstaged change, asked in chunks, or None."""
-    for start in range(0, len(paths), _PATHS_PER_LISTING):
-        chunk = paths[start : start + _PATHS_PER_LISTING]
+    for start, end in _chunk_bounds(paths):
+        chunk = paths[start:end]
         for staged, where in ((False, "unstaged"), (True, "staged")):
             args = ("diff", "--cached") if staged else ("diff",)
             diff = run_git(
@@ -2546,6 +2696,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             return []
         found: set[str] = set()
         steps = simple_commands(blanked)
+        stale = _stale_readings(steps)
         # A segment is parsed with no `cd` before it, so its copy of a run the full parse
         # already holds (in the directory the chain reached) is not read a second time.
         parsed_words = {step.words for step in steps}
@@ -2576,7 +2727,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     continue
                 rule = _UNPATTERNED_RULES[run.subcommand]
                 key = (step.words, run.directory, run.moves_certain)
-                if rule in found or key in seen:
+                # A repeat is skipped only when nothing before it may have changed what it
+                # reads: `git checkout x && git checkout x` reads x after the first moved HEAD.
+                is_stale = stale.get(id(step), stale[_ANY_STATEMENT])
+                if rule in found or (key in seen and not is_stale):
                     continue
                 seen.add(key)
                 position = _COMMAND_POSITION_RUN[run.subcommand]
@@ -2587,7 +2741,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     if fed and _restores_worktree(run.arguments):
                         found.add(rule)
                     continue
-                if fed:
+                if fed or is_stale:
                     found.add(rule)
                     continue
                 readings += 1

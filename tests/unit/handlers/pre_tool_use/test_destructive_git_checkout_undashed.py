@@ -1062,8 +1062,15 @@ class TestReviewMinorTheReadingIsBounded:
         _allowed(handler, "git checkout side", repo)
         one_switch = len(calls)
         calls.clear()
-        _allowed(handler, " && ".join(["git checkout side"] * 50), repo)
-        assert len(calls) == one_switch
+        # Fourth review: a switch after another switch is judged against a HEAD the
+        # first one moved, so the chain is denied, and still without asking git again.
+        _denied(
+            handler,
+            " && ".join(["git checkout side"] * 50),
+            repo,
+            RuleID.GIT_CHECKOUT_DISCARD,
+        )
+        assert len(calls) <= one_switch
 
     def test_matches_and_handle_share_one_reading(
         self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -1314,3 +1321,125 @@ class TestThirdReviewManyPathsAreReadInBatches:
         (repo / "a.txt").write_text("my unsaved edit\n")
         names = [f"p{index}.txt" for index in range(600)] + ["a.txt"]
         _denied(handler, "git checkout v1 " + " ".join(names), repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+
+class TestFourthReviewAnEarlierStatementCanMoveTheTarget:
+    """Fourth review, blocker 1: a switch is read against the repository as it is BEFORE
+    the command runs, so a switch after a statement that may change refs, HEAD, config
+    or the environment is denied (fail closed)."""
+
+    @pytest.fixture
+    def feat(self, repo: Path) -> Path:
+        return _feat_tracks_an_ignored_file(repo)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git fetch -q origin && git checkout newb",
+            "git fetch -q && git checkout newb",
+            "git pull -q origin feat:newb2 ; git checkout newb2",
+            "git branch topic feat && git checkout topic",
+            "git branch -f feat2 feat && git checkout feat2",
+            "git tag tt feat && git checkout tt",
+            "git tag newb feat; git checkout newb",
+            "git update-ref refs/remotes/origin/newb feat && git checkout newb",
+            "git checkout feat && git checkout HEAD~1",
+            "git checkout feat; git checkout HEAD^",
+            "git config submodule.recurse true && git checkout main",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=submodule.recurse"
+            " GIT_CONFIG_VALUE_0=true; git checkout main",
+            "export GIT_CONFIG_PARAMETERS=\"'submodule.recurse'='true'\"; git checkout main",
+            "GIT_DIR=elsewhere; git checkout main",
+            "export HOME=/elsewhere; git checkout main",
+            "declare -x XDG_CONFIG_HOME=/elsewhere; git checkout main",
+            "make && git checkout main",
+            "./setup.sh && git checkout main",
+            "git log > out.log && git checkout main",
+            "git checkout main & git fetch -q",
+            "git fetch -q & git checkout main",
+        ],
+    )
+    def test_a_switch_after_a_statement_that_may_change_state_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git status && git checkout main",
+            "git log --oneline -1 && git checkout main",
+            "git diff --stat; git checkout main",
+            "git branch --show-current && git checkout main",
+            "git branch && git checkout main",
+            "git status > /dev/null && git checkout main",
+            "echo switching && git checkout main",
+            "cd sub && git checkout main",
+            "X=1; git checkout main",
+            "export FOO=1; git checkout main",
+            "git checkout main && git log --oneline -1",
+            "git checkout main && git fetch -q",
+        ],
+    )
+    def test_a_switch_after_read_only_statements_is_still_judged_and_allowed(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        """Nothing in the way and nothing before it that can move refs, HEAD or config."""
+        _git(feat, "checkout", "-q", "feat")
+        _allowed(handler, command, feat)
+
+    def test_a_read_only_statement_does_not_hide_an_ignored_file_in_the_way(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        (feat / "ign.txt").write_text("ignored local work\n")
+        _denied(handler, "git status && git checkout feat", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+
+class TestFourthReviewSubmoduleRecursionSetEarlier:
+    @pytest.fixture
+    def super_repo(self, tmp_path: Path) -> Path:
+        return _superproject_whose_branch_moves_a_submodule(tmp_path)
+
+    def test_recursion_switched_on_by_an_earlier_statement_is_denied(
+        self, handler: DestructiveGitHandler, super_repo: Path
+    ) -> None:
+        _denied(
+            handler,
+            "git config submodule.recurse true && git checkout smA",
+            super_repo,
+            RuleID.GIT_CHECKOUT_DISCARD,
+        )
+
+
+class TestFourthReviewMinorOneAWideSwitchIsReadInFewCalls:
+    """Fourth review, minor 1: a switch across thousands of paths asks git in a few calls,
+    chunked by path count and by bytes of path."""
+
+    def test_chunks_split_on_count_and_on_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(destructive_git, "_PATHS_PER_LISTING", 3)
+        monkeypatch.setattr(destructive_git, "_PATH_BYTES_PER_LISTING", 10)
+        assert destructive_git._chunk_bounds([]) == []
+        assert destructive_git._chunk_bounds(["a", "b", "c", "d"]) == [(0, 3), (3, 4)]
+        assert destructive_git._chunk_bounds(["aaaa", "bbbb", "cc"]) == [(0, 2), (2, 3)]
+        assert destructive_git._chunk_bounds(["x" * 50, "y"]) == [(0, 1), (1, 2)]
+
+    def test_a_switch_adding_two_thousand_paths_takes_a_few_git_calls(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git(repo, "checkout", "-q", "-b", "wide")
+        wide = repo / "wide"
+        wide.mkdir()
+        for index in range(2000):
+            (wide / f"p{index}.txt").write_text(f"{index}\n")
+        _git(repo, "add", "wide")
+        _git(repo, "commit", "-q", "-m", "wide adds 2000 files")
+        _git(repo, "checkout", "-q", "main")
+        calls: list[tuple[str, ...]] = []
+
+        def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", recording)
+        _allowed(handler, "git checkout wide", repo)
+        assert len(calls) <= 10
