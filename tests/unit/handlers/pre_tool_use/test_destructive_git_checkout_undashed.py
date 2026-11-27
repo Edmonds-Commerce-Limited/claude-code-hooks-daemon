@@ -1423,17 +1423,37 @@ class TestFourthReviewMinorOneAWideSwitchIsReadInFewCalls:
         assert destructive_git._chunk_bounds(["aaaa", "bbbb", "cc"]) == [(0, 2), (2, 3)]
         assert destructive_git._chunk_bounds(["x" * 50, "y"]) == [(0, 1), (1, 2)]
 
-    def test_a_switch_adding_two_thousand_paths_takes_a_few_git_calls(
-        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @staticmethod
+    def _wide_branch(repo: Path, count: int) -> None:
+        """Branch `wide` adds `count` files under `wide/`; main is checked out again."""
         _git(repo, "checkout", "-q", "-b", "wide")
         wide = repo / "wide"
         wide.mkdir()
-        for index in range(2000):
+        for index in range(count):
             (wide / f"p{index}.txt").write_text(f"{index}\n")
         _git(repo, "add", "wide")
-        _git(repo, "commit", "-q", "-m", "wide adds 2000 files")
+        _git(repo, "commit", "-q", "-m", f"wide adds {count} files")
         _git(repo, "checkout", "-q", "main")
+
+    @pytest.mark.parametrize("change", ["unstaged", "staged", "skip-worktree"])
+    def test_a_local_change_among_many_touched_paths_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, change: str
+    ) -> None:
+        """Past the named-pathspec limit the whole-tree listing must still see it."""
+        self._wide_branch(repo, destructive_git._NAMED_PATHSPECS_LIMIT + 36)
+        _git(repo, "checkout", "-q", "wide")
+        edited = repo / "wide" / "p7.txt"
+        if change == "skip-worktree":
+            _git(repo, "update-index", "--skip-worktree", "wide/p7.txt")
+        edited.write_text("my local edit\n")
+        if change == "staged":
+            _git(repo, "add", "wide/p7.txt")
+        _denied(handler, "git checkout main", repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_switch_adding_two_thousand_paths_takes_a_few_git_calls(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._wide_branch(repo, 2000)
         calls: list[tuple[str, ...]] = []
 
         def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:

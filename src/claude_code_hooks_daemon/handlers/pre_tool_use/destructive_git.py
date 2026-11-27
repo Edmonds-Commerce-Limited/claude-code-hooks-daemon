@@ -1325,6 +1325,8 @@ _DELETED_STATUS: Final[str] = "D"
 _PATHS_PER_LISTING: Final[int] = 4096
 # ... and at most this many bytes of path, so a list is never one oversized command line.
 _PATH_BYTES_PER_LISTING: Final[int] = 64 * 1024
+# Past this many touched paths, a whole-tree listing is cheaper than naming each one.
+_NAMED_PATHSPECS_LIMIT: Final[int] = 64
 # Runners that add words of their own to the command they run (N765).
 _ARGUMENT_FEEDERS: Final[frozenset[str]] = frozenset({"xargs", "parallel", "find", "fd", "fdfind"})
 # Prefixes that run the command they are given with its words unchanged.
@@ -1868,7 +1870,12 @@ def _touched_local_changes(root: Path, names: list[str]) -> str | None:
     removes was dropped (review fuzz, seed 777). So every touched path must be clean
     against ``HEAD`` in the working tree and in the index, and carry a plain index
     entry (an assume-unchanged or skip-worktree flag hides a change from ``git diff``).
+
+    Git matches each pathspec against every index entry, so past a few names one
+    whole-tree listing, matched here, is far cheaper than naming them all.
     """
+    if len(names) > _NAMED_PATHSPECS_LIMIT:
+        return _touched_local_changes_whole_tree(root, names)
     for start, end in _chunk_bounds(names):
         chunk = names[start:end]
         for compared, where in ((("diff",), "unstaged"), (("diff", "--cached"), "staged")):
@@ -1902,6 +1909,48 @@ def _touched_local_changes(root: Path, names: list[str]) -> str | None:
         for record in tags.stdout.split(_RECORD_SEPARATOR):
             if record and not record.startswith(_PLAIN_CACHED_TAG):
                 return f"`{record[2:]}` carries an index flag that hides its changes from git diff"
+    return None
+
+
+def _touched_local_changes_whole_tree(root: Path, names: list[str]) -> str | None:
+    """:func:`_touched_local_changes` read from whole-tree listings, for a long ``names``.
+
+    A listed path counts for a name when it is that name or lies under it, which is how
+    the literal pathspec ``name`` would have matched it.
+    """
+    touched = set(names)
+
+    def under_a_touched_name(path: str) -> bool:
+        parts = path.split(_PATH_SEPARATOR)
+        return any(
+            _PATH_SEPARATOR.join(parts[:depth]) in touched for depth in range(1, len(parts) + 1)
+        )
+
+    for compared, where in ((("diff",), "unstaged"), (("diff", "--cached"), "staged")):
+        listed = run_git(
+            root,
+            *compared,
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-relative",
+            _HEAD,
+            _OPTIONS_END,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listed.returncode != 0:
+            return f"git could not compare the paths the switch touches for {where} changes"
+        if any(
+            under_a_touched_name(path) for path in listed.stdout.split(_RECORD_SEPARATOR) if path
+        ):
+            return f"a path the switch writes or removes holds {where} changes"
+    tags = run_git(root, "ls-files", "-v", "-z", timeout=Timeout.GIT_CONTEXT)
+    if tags.returncode != 0:
+        return "git could not list the index entries the switch touches"
+    for record in tags.stdout.split(_RECORD_SEPARATOR):
+        if record and not record.startswith(_PLAIN_CACHED_TAG) and under_a_touched_name(record[2:]):
+            return f"`{record[2:]}` carries an index flag that hides its changes from git diff"
     return None
 
 
