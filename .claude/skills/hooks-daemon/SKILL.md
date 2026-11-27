@@ -87,8 +87,9 @@ daemon's own audits, the formatters, and `optimise` to close:
 
 Report-only steps run first, in parallel, one sub-agent each; mutating steps
 follow in a fixed order with `optimise` last because it restarts the daemon.
-Only `format-markdown` and `regenerate-docs` act without confirmation — every
-other mutating step is HELD and acts only when named on `--apply`. Each
+Only `format-markdown`, `regenerate-docs` and the archiving
+`scratch-sweep-apply` act without confirmation — every other mutating step is
+HELD and acts only when named on `--apply`. Each
 sub-agent reports what it CHANGED, never what it read.
 
 See [housekeeping.md](housekeeping.md) for the step list and the sub-agent

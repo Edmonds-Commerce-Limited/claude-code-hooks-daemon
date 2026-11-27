@@ -102,6 +102,9 @@ STEP_APPEND = "append"
 
 RESTORE_COMMAND = "hooks-daemon scratch-sweep restore {archive_id}"
 
+#: The :class:`EntryOutcome` outcome of an entry packed, recorded and removed.
+OUTCOME_ARCHIVED = "archived"
+
 
 @dataclass(frozen=True)
 class ApplyFacts:
@@ -772,7 +775,7 @@ def _archive_claimed(
         )
     except RemoveRefused as exc:
         return EntryOutcome(name, "left-claimed", str(exc), packed.archive_id)
-    return EntryOutcome(name, "archived", "", packed.archive_id)
+    return EntryOutcome(name, OUTCOME_ARCHIVED, "", packed.archive_id)
 
 
 def _record(row: EntryRow, packed: PackResult, settings: ApplySettings) -> ArchiveRecord:

@@ -8934,3 +8934,33 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 **Severity**: LOW to MEDIUM: needs a pipe into xargs; predates PR 293.
 
 **Status**: ⬜ Open. Fix, test first: deny a checkout or restore with a trailing `--` and no path when its input comes from xargs or any pipe.
+
+### N766 — a subcommand's own `--project-root` can stand in front of the wrapper's global root
+
+**Source**: the independent Opus review of PR 296, 2026-11-27, and the sweep its developer ran afterwards.
+
+**Evidence**: `bin/hooks-daemon` passes the global `--project-root` before the verb. argparse writes a subparser's defaults into the namespace whether or not the flag was given, so a subcommand that declares its own `--project-root` puts its default over that value. `main()` repairs this for every verb through `apply_global_project_root` (Plan 00374, a separate `global_project_root` dest), but only for a default of None or SUPPRESS, and only for a caller that goes through `main()`. A test that builds the parser and dispatches by hand skips the repair and gets the working directory, which is how N768 happened. The sweep found 45 top-level subcommands that declare `--project-root`: `check-config-migrations` and `check-truth-changes` with SUPPRESS, and every other one with None, so none overrides at the real entry: exceptions, write-venv-metadata, generate-docs, regenerate-docs, check-worktree-seed, check-post-upgrade-tasks, issue-report, reference-repos, find-plan, plan-qa, tool-report, block-report, explain-rule, explain-handler, defences, status-line-explained, explain-status-line, session-actions, run-routine, routine-qa, docs-qa, remote-docs, skill-scan, housekeeping, worktree-reap, inject-goal, clear-goal, signal, approve-plan-close, approve-merge, cron-pause, cron-resume, usage-pause, secret-meta, issue-validity, team-seat, probe, record-config-optimisation-run, transport-probe, repair-install, deploy-plan-workflow, deploy-core-docs, agents. No subcommand redefines `--pid-file` or `--socket`.
+
+**Severity**: MEDIUM as a class: harmless through `main()`, dangerous to any other caller, and nothing pinned it.
+
+**Status**: ✅ Fixed in PR 296 for this class's live risk. The reported override could not be reproduced through `main()`: a test runs the real `main()` with the global flag before the verb and a throwaway root, and the step receives that root. So the incident's dropped root (N768) came from the fallback to the working directory when no root reached the command, which `housekeeping --run` now refuses. Also: `housekeeping --project-root` defaults to SUPPRESS, and a test walks every subcommand, nested ones included, and fails on a `--project-root` default other than None or SUPPRESS. The other None defaults are left as they are, because `main()` handles them.
+
+### N767 — a symlinked `.scratch-keep` is honoured on a session directory but not on an entry root
+
+**Source**: the independent Opus review of PR 296, 2026-11-27.
+
+**Evidence**: the sweep archives an entry whose top-level `.scratch-keep` is a symlink, yet treats a symlinked marker on a session directory as kept. The two checks in the core disagree about the same marker (Plan 00627).
+
+**Severity**: LOW: predates PR 296; an agent cannot create the marker (R-SCRATCH-KEEP-MARKER), so only a human's symlinked marker is affected.
+
+**Status**: ⬜ Open, not fixed in PR 296. Fix, test first: one predicate for the marker, used by both checks, with the symlink case decided once (Plan 00627).
+
+### N768 — a reviewer's parse test archived 54 real scratch entries through a dropped project root
+
+**Source**: the coordinator, from the independent Opus review of PR 296, 2026-11-27.
+
+**Evidence**: the reviewer's test built the CLI parser, parsed `--project-root <synthetic> housekeeping --run scratch-sweep-apply` without `main()`'s root reconciliation (N766), and dispatched. The step resolved the working directory, this repository, and archived 54 real entries of its `untracked/scratch`. All were restored and verified; the archive store `untracked/scratch-archive` was kept. The `scratch-expired-cleanup` standing-authorisation text was already live in the lead session, so an agent reading it could have run the step the same way.
+
+**Severity**: HIGH as an incident, though nothing was lost: the hold window and `scratch-sweep restore` are what made it recoverable.
+
+**Status**: ✅ Fixed in PR 296: `housekeeping --run` refuses unless a project root was named explicitly, and never acts on a project found from the working directory; the step also no longer uses pressure mode, so it never removes an entry inside its TTL.

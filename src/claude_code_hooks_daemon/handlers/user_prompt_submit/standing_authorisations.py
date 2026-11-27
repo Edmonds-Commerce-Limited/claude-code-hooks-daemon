@@ -84,6 +84,13 @@ _KEY_ENABLED: Final[str] = "enabled"
 AUTHORISATION_SUBAGENT_DELEGATION: Final[str] = "subagent-delegation"
 AUTHORISATION_WORKFLOWS: Final[str] = "workflow-orchestration"
 AUTHORISATION_COMMIT_PUSH_CADENCE: Final[str] = "commit-push-cadence"
+# Plan 00627 R13: running the unconfirmed scratch-apply housekeeping step
+# without asking first. Bounded to that one step: the step is the route that
+# archives every removal and never acts on a kept, in-use or in-TTL entry.
+AUTHORISATION_SCRATCH_EXPIRED_CLEANUP: Final[str] = "scratch-expired-cleanup"
+
+# The one invocation the scratch entry authorises (see daemon/housekeeping.py).
+_SCRATCH_STEP_COMMAND: Final[str] = "hooks-daemon housekeeping --run scratch-sweep-apply"
 
 # Where a reader can audit and revoke any of this. Named in every entry's
 # text: an authorisation that cannot be found is not auditable, and one that
@@ -129,6 +136,26 @@ _WORKFLOWS_TEXT: Final[str] = (
     "and withdrawn."
 )
 
+_SCRATCH_EXPIRED_CLEANUP_TEXT: Final[str] = (
+    "STANDING AUTHORISATION (on file for this project). Cleaning up expired "
+    "scratch is pre-requested here: you may run `"
+    f"{_SCRATCH_STEP_COMMAND}` to remove the scratch entries the sweep finds "
+    "due, without asking each time. That housekeeping step is the only route "
+    "this covers: do not use `rm` or any other command to remove scratch. The "
+    "step archives every entry it removes (restorable with `hooks-daemon "
+    "scratch-sweep restore <archive id>` until the archive's retention ends), "
+    "and, as `scratch-sweep --apply` does, it permanently deletes archives "
+    "already past their retention. It never acts on an entry holding a "
+    ".scratch-keep marker, an entry inside its TTL, or an entry in use. In use "
+    "means a process has its working directory inside it or a recorded "
+    "background command names it, so an old, quiet session directory can be "
+    "archived even while its owner is still running elsewhere. Never remove "
+    "scratch yourself. Report what it removed and expired (the counts, entry "
+    "names and archive ids it printed) in your next message. "
+    f"This request is recorded in {_CONFIG_LOCATION}, where it can be read "
+    "and withdrawn."
+)
+
 # ── Short forms, used for every reinforcement after the first delivery ──────
 # The short form still names where the request is recorded, because an
 # authorisation that cannot be audited is not a request.
@@ -150,6 +177,16 @@ _WORKFLOWS_SHORT: Final[str] = (
     "in .claude/hooks-daemon.yaml."
 )
 
+_SCRATCH_EXPIRED_CLEANUP_SHORT: Final[str] = (
+    "STANDING AUTHORISATION (on file): expired-scratch cleanup is pre-requested "
+    f"for this project — `{_SCRATCH_STEP_COMMAND}` only, never `rm`. It skips "
+    ".scratch-keep, in-TTL and in-use entries (in use = a process's working "
+    "directory or a recorded background command), so a quiet session directory "
+    "can go while its owner still runs; it also permanently deletes archives "
+    "past retention. Report what it removed in your next message. Recorded in "
+    ".claude/hooks-daemon.yaml."
+)
+
 # The built-in set. Every entry ships DISABLED (Decision 3) — the set exists so
 # the options are discoverable and adopting one is a single flag, not so that
 # anything is authorised on a fresh install.
@@ -157,12 +194,14 @@ _BUILTIN_TEXTS: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: _SUBAGENT_DELEGATION_TEXT,
     AUTHORISATION_WORKFLOWS: _WORKFLOWS_TEXT,
     AUTHORISATION_COMMIT_PUSH_CADENCE: _COMMIT_PUSH_CADENCE_TEXT,
+    AUTHORISATION_SCRATCH_EXPIRED_CLEANUP: _SCRATCH_EXPIRED_CLEANUP_TEXT,
 }
 
 _BUILTIN_SHORT_TEXTS: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: _SUBAGENT_DELEGATION_SHORT,
     AUTHORISATION_WORKFLOWS: _WORKFLOWS_SHORT,
     AUTHORISATION_COMMIT_PUSH_CADENCE: _COMMIT_PUSH_CADENCE_SHORT,
+    AUTHORISATION_SCRATCH_EXPIRED_CLEANUP: _SCRATCH_EXPIRED_CLEANUP_SHORT,
 }
 
 # ── Cadence defaults (Plan 00283) ──────────────────────────────────────────
@@ -242,6 +281,7 @@ _SUPERVISOR_CHANNEL_NAMES: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: "sub-agent delegation",
     AUTHORISATION_WORKFLOWS: "multi-agent workflow orchestration",
     AUTHORISATION_COMMIT_PUSH_CADENCE: "frequent commit-and-push",
+    AUTHORISATION_SCRATCH_EXPIRED_CLEANUP: "expired-scratch cleanup via the housekeeping step",
 }
 _SUPERVISOR_CHANNEL_BODY: Final[str] = (
     "On file and still in effect: {names}. Audit or revoke in .claude/hooks-daemon.yaml."
@@ -498,7 +538,8 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
             "`handlers.user_prompt_submit.standing_authorisations.options.authorisations`, "
             "as a list of `{id, enabled}` entries. Built-in ids: "
             f"`{AUTHORISATION_SUBAGENT_DELEGATION}`, `{AUTHORISATION_WORKFLOWS}`, "
-            f"`{AUTHORISATION_COMMIT_PUSH_CADENCE}`.\n\n"
+            f"`{AUTHORISATION_COMMIT_PUSH_CADENCE}`, "
+            f"`{AUTHORISATION_SCRATCH_EXPIRED_CLEANUP}`.\n\n"
             "**Every entry ships disabled.** The handler is enabled so the "
             "options are discoverable, but nothing is authorised until the "
             "project turns it on — the daemon must never assert consent that "

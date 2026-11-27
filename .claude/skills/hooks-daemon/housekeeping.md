@@ -22,41 +22,50 @@ The order is the contract: report-only steps first, so every audit sees the
 tree and config the pass started with; mutating steps after; `optimise` last,
 because it restarts the daemon.
 
-| #   | Step                    | Command                        | Disposition                     |
-| --- | ----------------------- | ------------------------------ | ------------------------------- |
-| 1   | `plan-qa-sweep`         | `plan-qa --sweep`              | report only                     |
-| 2   | `docs-qa-sweep`         | `docs-qa --sweep`              | report only                     |
-| 3   | `check-worktree-seed`   | `check-worktree-seed`          | report only                     |
-| 4   | `audit-handler-keys`    | `audit-handler-keys`           | report only                     |
-| 5   | `check-permissions`     | `check-permissions`            | report only                     |
-| 6   | `disk-usage`            | `disk-usage`                   | report only                     |
-| 7   | `remote-docs-check`     | `remote-docs check`            | report only                     |
-| 8   | `verdicts`              | `verdicts`                     | report only                     |
-| 9   | `block-report`          | `block-report`                 | report only                     |
-| 10  | `harvest-background`    | `harvest-background`           | report only                     |
-| 11  | `worktree-reap`         | `worktree-reap` (no `--reap`)  | report only                     |
-| 12  | `branch-sweep`          | `branch-sweep` (no `--clean`)  | report only                     |
-| 13  | `skill-scan`            | `skill-scan`                   | report only                     |
-| 14  | `format-markdown`       | `format-markdown .`            | acts without confirmation       |
-| 15  | `regenerate-docs`       | `regenerate-docs`              | acts without confirmation       |
-| 16  | `reconcile-settings`    | `reconcile-settings`           | HELD until `--apply`            |
-| 17  | `remote-docs-refresh`   | `remote-docs refresh`          | HELD until `--apply`            |
-| 18  | `prune-venvs`           | `prune-venvs`                  | HELD until `--apply`            |
-| 19  | `check-permissions-fix` | `check-permissions --fix`      | HELD until `--apply`            |
-| 20  | `worktree-reap-reap`    | `worktree-reap --reap`         | HELD until `--apply`            |
-| 21  | `branch-sweep-clean`    | `branch-sweep --clean --apply` | HELD until `--apply`            |
-| 22  | `optimise`              | the `optimise` subcommand      | HELD until `--apply`; runs LAST |
+| #   | Step                    | Command                                  | Disposition                          |
+| --- | ----------------------- | ---------------------------------------- | ------------------------------------ |
+| 1   | `plan-qa-sweep`         | `plan-qa --sweep`                        | report only                          |
+| 2   | `docs-qa-sweep`         | `docs-qa --sweep`                        | report only                          |
+| 3   | `check-worktree-seed`   | `check-worktree-seed`                    | report only                          |
+| 4   | `audit-handler-keys`    | `audit-handler-keys`                     | report only                          |
+| 5   | `check-permissions`     | `check-permissions`                      | report only                          |
+| 6   | `disk-usage`            | `disk-usage`                             | report only                          |
+| 7   | `remote-docs-check`     | `remote-docs check`                      | report only                          |
+| 8   | `verdicts`              | `verdicts`                               | report only                          |
+| 9   | `block-report`          | `block-report`                           | report only                          |
+| 10  | `harvest-background`    | `harvest-background`                     | report only                          |
+| 11  | `worktree-reap`         | `worktree-reap` (no `--reap`)            | report only                          |
+| 12  | `branch-sweep`          | `branch-sweep` (no `--clean`)            | report only                          |
+| 13  | `scratch-sweep`         | `scratch-sweep`                          | report only                          |
+| 14  | `skill-scan`            | `skill-scan`                             | report only                          |
+| 15  | `format-markdown`       | `format-markdown .`                      | acts without confirmation            |
+| 16  | `regenerate-docs`       | `regenerate-docs`                        | acts without confirmation            |
+| 17  | `scratch-sweep-apply`   | `housekeeping --run scratch-sweep-apply` | acts without confirmation (archived) |
+| 18  | `reconcile-settings`    | `reconcile-settings`                     | HELD until `--apply`                 |
+| 19  | `remote-docs-refresh`   | `remote-docs refresh`                    | HELD until `--apply`                 |
+| 20  | `prune-venvs`           | `prune-venvs`                            | HELD until `--apply`                 |
+| 21  | `check-permissions-fix` | `check-permissions --fix`                | HELD until `--apply`                 |
+| 22  | `worktree-reap-reap`    | `worktree-reap --reap`                   | HELD until `--apply`                 |
+| 23  | `branch-sweep-clean`    | `branch-sweep --clean --apply`           | HELD until `--apply`                 |
+| 24  | `optimise`              | the `optimise` subcommand                | HELD until `--apply`; runs LAST      |
 
 Every command is the daemon CLI verb of the same name; the printed procedure
 carries the resolved wrapper path for this install. `optimise` has no CLI
 verb — it is a confirmation-driven review — so the pass invokes it through
 its own skill entry point, exactly as an upgrade does.
 
-## Why only two steps act on their own
+## Why only three steps act on their own
 
 `format-markdown` and `regenerate-docs` are idempotent and reversible: running
 them twice produces the same tree, and `git diff` shows exactly what they did.
-Everything else in the mutating half changes config, settings, or deletes
+`scratch-sweep-apply` removes only what the scratch sweep finds due, never a
+`.scratch-keep`, in-TTL or in-use entry, and archives every removal first
+(restorable with `scratch-sweep restore <id>` until retention ends). "In use"
+means a process's working directory or a recorded background command, so an
+old, quiet session directory can be archived while its owner still runs
+elsewhere. Like `scratch-sweep --apply`, it also permanently deletes archives
+past retention. It runs in-process, while `scratch-sweep --apply` itself still
+needs a human's typed confirmation at a terminal. Everything else in the mutating half changes config, settings, or deletes
 files — a single command that silently does all of that is worse than several
 explicit ones, so each of those steps reports what it would do and acts only
 when you name it on `--apply`. Consent is never inferred from the findings.

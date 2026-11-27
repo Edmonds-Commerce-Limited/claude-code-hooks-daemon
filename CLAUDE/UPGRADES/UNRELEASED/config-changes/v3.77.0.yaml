@@ -25,6 +25,27 @@ config_changes:
             ledger_path: .claude/branch-removals.jsonl
             bundle_dir: untracked/branch-rejects
             state_dir: untracked/branch-reject-state
+    - key: handlers.user_prompt_submit.standing_authorisations.options.authorisations.scratch-expired-cleanup
+      recommended: false
+      dormant: true
+      description: >-
+        NEW built-in standing-authorisation id `scratch-expired-cleanup` (Plan
+        00627 R13, Plan 00474). When a project enables it, the agent is told it
+        may run `hooks-daemon housekeeping --run scratch-sweep-apply` to remove
+        expired scratch without asking each time, by that step only (never
+        `rm`), never touching a `.scratch-keep`, in-TTL or in-use entry, and
+        reporting what it removed. In use means a process's working directory
+        or a recorded background command, so an old, quiet session directory
+        can be archived while its owner still runs elsewhere. The step also
+        permanently deletes archives past retention, as `scratch-sweep --apply`
+        does. Ships disabled like every standing authorisation: the daemon must
+        never assert consent nobody gave.
+      migration_note: >-
+        Opt in by adding `{id: scratch-expired-cleanup, enabled: true}` to the
+        authorisations list, and only where the owner has asked for unconfirmed
+        scratch cleanup. Every removal is archived and restorable with
+        `scratch-sweep restore` until its retention ends; the
+        `scratch-sweep --apply` verb keeps its terminal confirmation either way.
     - key: handlers.pre_tool_use.branch_reject_dispatch_gate
       recommended: true
       dormant: false
