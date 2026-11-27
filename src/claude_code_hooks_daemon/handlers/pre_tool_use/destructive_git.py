@@ -1283,6 +1283,8 @@ _HEAD: Final[str] = "HEAD"
 # The paths a switch writes: added, modified or retyped between HEAD and the target.
 _WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=AMT"
 _ADDED_STATUS: Final[str] = "A"
+# Paths named in one `git ls-files --others` call.
+_PATHS_PER_LISTING: Final[int] = 256
 # Runners that add words of their own to the command they run (N765).
 _ARGUMENT_FEEDERS: Final[frozenset[str]] = frozenset({"xargs", "parallel", "find", "fd", "fdfind"})
 # Prefixes that run the command they are given with its words unchanged.
@@ -1515,34 +1517,64 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
     if len(fields) % 2:
         return f"git's list of what switching to `{revision}` writes could not be read"
     root = Path(top.stdout.strip())
+    in_the_way: list[str] = []
     for status, name in zip(fields[::2], fields[1::2], strict=True):
-        problem = _written_path_problem(root, name, added=status == _ADDED_STATUS)
-        if problem is not None:
-            return problem
-    return None
+        try:
+            in_the_way.extend(_paths_in_the_way(root, name, added=status == _ADDED_STATUS))
+        except OSError as error:
+            return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
+    return _untracked_content(root, list(dict.fromkeys(in_the_way)))
 
 
-def _written_path_problem(root: Path, name: str, *, added: bool) -> str | None:
-    """Why writing ``name`` under ``root`` would replace something local, or None.
+def _paths_in_the_way(root: Path, name: str, *, added: bool) -> list[str]:
+    """The local paths writing ``name`` under ``root`` would replace (lstat errors raise).
 
-    Every parent must be absent or a real directory (lstat: a symlink is not one). The
-    path itself must be absent when ``added`` (git does not track it here), and must
-    not be a directory when it is modified or retyped (git tracks a file there).
+    A non-directory parent (lstat: a symlink is not a directory) is replaced to make room;
+    so is the path itself when it is ``added`` or is locally a directory. A modified or
+    retyped path that is a local file is tracked, and git refuses to drop a change to it.
     """
     parts = name.split(_PATH_SEPARATOR)
     for depth in range(1, len(parts) + 1):
+        prefix = _PATH_SEPARATOR.join(parts[:depth])
         try:
-            mode = root.joinpath(*parts[:depth]).lstat().st_mode
+            mode = (root / prefix).lstat().st_mode
         except FileNotFoundError:
             # Nothing there, so nothing below it either: the switch only creates.
-            break
-        except OSError as error:
-            return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
+            return []
         if depth < len(parts):
             if not stat.S_ISDIR(mode):
-                return f"`{name}` would replace a local non-directory parent of it"
+                return [prefix]
         elif added or stat.S_ISDIR(mode):
-            return f"`{name}` would be written over a local path git does not track"
+            return [prefix]
+    return []
+
+
+def _untracked_content(root: Path, names: list[str]) -> str | None:
+    """Why any of ``names`` holds content git does not track (ignored included), or None.
+
+    Git refuses to replace a modified tracked file, so only what it does not track is at
+    risk: ``git ls-files --others`` with no exclude options lists untracked and ignored
+    files alike. Asked in chunks, so a long list is never one oversized command.
+    """
+    for start in range(0, len(names), _PATHS_PER_LISTING):
+        chunk = names[start : start + _PATHS_PER_LISTING]
+        listed = run_git(
+            root,
+            _LITERAL_PATHSPECS,
+            "ls-files",
+            "-z",
+            "--others",
+            _OPTIONS_END,
+            *chunk,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listed.returncode != 0:
+            return "git could not list what the switch would replace"
+        untracked = [entry for entry in listed.stdout.split(_RECORD_SEPARATOR) if entry]
+        if untracked:
+            return (
+                f"`{untracked[0]}` is local content git does not track, which the switch replaces"
+            )
     return None
 
 

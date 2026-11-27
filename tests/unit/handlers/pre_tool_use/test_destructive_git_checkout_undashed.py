@@ -850,6 +850,32 @@ class TestReviewMinorASwitchOverIgnoredFiles:
         (repo / "sub").symlink_to(elsewhere)
         _denied(handler, "git checkout edits", repo, RuleID.GIT_CHECKOUT_DISCARD)
 
+    @pytest.fixture
+    def reshaped(self, repo: Path) -> Path:
+        """Branch `shape` turns the tracked file `a.txt` into a directory, and `sub` into a file."""
+        _git(repo, "checkout", "-q", "-b", "shape")
+        _git(repo, "rm", "-q", "-r", "a.txt", "sub")
+        (repo / "a.txt").mkdir()
+        (repo / "a.txt" / "x").write_text("now a directory\n")
+        (repo / "sub").write_text("now a file\n")
+        _git(repo, "add", "a.txt", "sub")
+        _git(repo, "commit", "-q", "-m", "reshape")
+        _git(repo, "checkout", "-q", "main")
+        return repo
+
+    def test_a_switch_that_reshapes_only_tracked_content_is_allowed(
+        self, handler: DestructiveGitHandler, reshaped: Path
+    ) -> None:
+        """Git replaces the clean tracked `a.txt` and `sub/c.txt` itself; nothing local is lost."""
+        _allowed(handler, "git checkout shape", reshaped)
+
+    def test_an_ignored_file_inside_a_tracked_directory_the_switch_replaces_is_denied(
+        self, handler: DestructiveGitHandler, reshaped: Path
+    ) -> None:
+        (reshaped / ".git" / "info" / "exclude").write_text("sub/local.txt\n")
+        (reshaped / "sub" / "local.txt").write_text("ignored local work\n")
+        _denied(handler, "git checkout shape", reshaped, RuleID.GIT_CHECKOUT_DISCARD)
+
     def test_the_previous_branch_is_read_the_same_way(
         self, handler: DestructiveGitHandler, feat: Path
     ) -> None:
