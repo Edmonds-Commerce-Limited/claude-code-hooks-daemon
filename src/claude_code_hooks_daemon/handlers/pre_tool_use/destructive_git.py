@@ -70,7 +70,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
 )
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
-from claude_code_hooks_daemon.utils.path_predicates import path_is_dir, path_is_file
+from claude_code_hooks_daemon.utils.path_predicates import path_exists, path_is_dir, path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -1202,7 +1202,7 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
         if not path_is_relative_to(base / name, top_level):
             return f"`{name}` is outside the repository"
         entries = _index_entries(directory, name)
-        if target.exists():
+        if path_exists(target, unreadable_means=True):
             problem = _present_file_problem(directory, name, entries)
             if problem is not None:
                 return problem
