@@ -232,6 +232,52 @@ class TestRealReadsStillDeny:
         assert _write(project.root / "plan.bash", content).decision == Decision.DENY
 
 
+_SG = _SECRET_GLOB
+
+
+class TestQuotedTextExemptionIsClosed:
+    """PR 291 review: every shape was DENY on main, so the exemption must not cover it.
+
+    The exemption holds only when the whole command is text-printing statements
+    and an allowlisted chain of filters, with no redirection, no variable-assigning
+    option, no definition and nothing that could run the text.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # A descriptor duplicate beside a later file redirect.
+            f"echo 'cat vault/{_SG}' 2>&1 > run.sh; bash run.sh",
+            f"echo 'cat {_SG}' >&2 2>run.sh",
+            f"git commit -m 'cat {_SG}' 2>&1 > run.sh",
+            # printf -v stores the text in a variable an unquoted expansion then globs.
+            f"printf -v x '%s' 'vault/{_SG}'; cat $x",
+            f"printf -vx '%s' 'vault/{_SG}'; cat $x",
+            # A text filter's own redirect or output option.
+            f"echo 'cat {_SG}' | tr a a > run.sh; bash run.sh",
+            f"echo 'cat {_SG}' | head > run.sh",
+            f"echo 'cat {_SG}' | cut -c1-80 >> run.sh",
+            f"echo 'cat {_SG}' | grep cat > run.sh",
+            f"echo 'cat {_SG}' | sort -o run.sh",
+            f"echo 'cat {_SG}' | awk '{{print > \"run.sh\"}}'",
+            f"echo 'cat {_SG}' | tee run.sh",
+            f"echo 'cat {_SG}' &> run.sh",
+            f"echo 'cat {_SG}' <> run.sh",
+            f"cat <(echo 'cat {_SG}')",
+            # A function or alias named like the printing command.
+            f"echo() {{ cat $1; }}; echo 'vault/{_SG}'",
+            f"function echo {{ cat $1; }}; echo 'vault/{_SG}'",
+            f"alias echo=cat; echo 'vault/{_SG}'",
+            # A later statement that pipes something to an interpreter.
+            f"git commit -m 'cat {_SG}' && git log -1 --format=%B | bash",
+            f"echo 'cat {_SG}' | bash",
+            f"teamchat send general 'cat {_SG}'; eval \"$(teamchat read general)\"",
+        ],
+    )
+    def test_shape_is_denied(self, project: Project, command: str) -> None:
+        assert _bash(command, project.vault).decision == Decision.DENY
+
+
 class TestDenyNamesClassAndPosition:
     """N757 c: the deny names the token's position and the pattern CLASS, never the glob."""
 

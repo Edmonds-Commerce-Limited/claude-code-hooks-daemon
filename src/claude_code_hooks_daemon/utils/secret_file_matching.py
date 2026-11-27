@@ -1818,8 +1818,11 @@ def find_protected_mention_detail(
     bash_tool_command: bool = False,
     cwds: tuple[str, ...] | None = None,
     index: "ProtectedFileIndex | None" = None,
+    whole_command: bool = False,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
+
+    ``whole_command`` -- see :func:`iter_protected_mentions`.
 
     The TOKEN is reported so a deny message can name the span it objected to
     (Plan 00356). Without it the only route to a diagnosis is bisecting the
@@ -1852,6 +1855,7 @@ def find_protected_mention_detail(
                 bash_tool_command=bash_tool_command,
                 cwds=cwds,
                 index=index,
+                whole_command=whole_command,
             ),
             None,
         )
@@ -2018,8 +2022,8 @@ def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, in
             # N757: echo/printf operands ARE their output, so piped to a shell or
             # written to a script (`echo 'cat d/*' | bash`) they may still be run.
             if head in _ECHO_HEADS and (
-                _opens_a_redirection(region, start, end)
-                or not _only_text_consumers_follow(region, segments, position)
+                _redirects_to_a_file(region)
+                or not _only_sent_text_filters_follow(region, segments, position)
             ):
                 spans = []
             operands.update(dict.fromkeys(spans, head))
@@ -2173,7 +2177,16 @@ _GIT_MESSAGE_FLAGS: Final[frozenset[str]] = frozenset({"-m", "--message"})
 #: Redirections that open no file: a descriptor duplicate and the null device.
 _INERT_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*[<>]&\d+|\d*>>?\s*/dev/null\b")
 _REDIRECTION_CHARS: Final[str] = "<>"
-_AMPERSAND_REDIRECT: Final[str] = "&>"
+#: Filters sent text may be piped through: none takes an output file or runs its input
+#: (not ``sort -o``, ``uniq IN OUT``, ``tee``, ``awk`` or ``rg --pre``).
+_SENT_TEXT_FILTERS: Final[frozenset[str]] = _GREP_HEADS | frozenset(
+    {"head", "tail", "cut", "tr", "wc"}
+)
+_PRINTF_HEAD: Final[str] = "printf"
+_GH_PROSE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"issue", "pr", "release"})
+#: Unquoted, any of these voids the exemption: a redirection or process
+#: substitution, a subshell, group or function definition, an expansion.
+_SENT_TEXT_VOIDING_CHARS: Final[frozenset[str]] = frozenset("<>(){}`$")
 _SENT_TEXT_PLACEHOLDER: Final[str] = "SENT_TEXT"
 
 
@@ -2227,30 +2240,82 @@ def _segment_sent_text_spans(segment: str) -> list[tuple[int, int]]:
     return found
 
 
-def _opens_a_redirection(text: str, start: int, end: int) -> bool:
-    """Whether ``text[start:end]`` redirects from or into a file (not ``2>&1`` or /dev/null).
+def _redirects_to_a_file(text: str) -> bool:
+    """Whether ``text`` holds an unquoted redirection other than ``N>&M`` or /dev/null.
 
-    The segment splitter cuts at ``&``, so the boundary is read too: a segment
-    ending in ``>`` right before ``&`` is a descriptor duplicate (``>&2``), and
-    one followed by ``&>`` writes its output to the file the next piece names.
+    Read over the WHOLE text, never one segment: the segment splitter cuts at
+    ``&``, so ``2>&1 > run.sh`` would leave the file redirect in a later piece.
     """
-    if text.startswith(_AMPERSAND_REDIRECT, end):
-        return True
-    segment = text[start:end]
-    if text.startswith("&", end) and segment.endswith(">"):
-        segment = segment[:-1]
-    unquoted = _INERT_REDIRECTION.sub(" ", mask_quoted(segment, keep_double=False))
+    unquoted = _INERT_REDIRECTION.sub(" ", mask_quoted(text, keep_double=False))
     return any(char in unquoted for char in _REDIRECTION_CHARS)
 
 
-def _sent_text_spans(command: str) -> list[tuple[int, int]]:
-    """Absolute spans of the quoted text a top-level sender only prints or posts (N757).
+def _only_sent_text_filters_follow(
+    region: str, segments: Sequence[tuple[int, int]], position: int
+) -> bool:
+    """Whether every pipe stage after ``segments[position]`` is a :data:`_SENT_TEXT_FILTERS` head."""
+    for later in range(position + 1, len(segments)):
+        separator = region[segments[later - 1][1] : segments[later][0]]
+        if "|" not in separator or "||" in separator:
+            return True
+        if segment_command_word(region[segments[later][0] : segments[later][1]]) not in (
+            _SENT_TEXT_FILTERS
+        ):
+            return False
+    return True
 
-    A segment is relaxed only when its output reaches nothing that may run or open
-    it (no pipe, or only text consumers after it), it has no file redirection, and
-    the span lies outside every substitution. A command whose substitutions cannot
-    be placed relaxes nothing.
+
+def _statement_may_send_text(segment: str) -> bool:
+    """Whether ``segment`` is a statement the sent-text exemption allows (PR 291 review).
+
+    Its first word IS its command word (no assignment, wrapper or ``eval`` before
+    it), and that word is a sender or an allowlisted filter. ``printf`` takes no
+    option (``-v`` assigns a variable); ``git`` must be ``git commit|tag|merge``
+    with no global option; ``gh`` must be ``gh issue|pr|release``.
     """
+    spans = shell_word_spans(segment)
+    if not spans:
+        return True
+    words = [segment[start:end] for start, end in spans]
+    head = segment_command_word(segment)
+    if head is None or words[0] != head:
+        return False
+    if head == _PRINTF_HEAD:
+        return not any(word.startswith("-") for word in words[1:])
+    if head in _SENDER_HEADS or head in _SENT_TEXT_FILTERS:
+        return True
+    if head == _GIT_HEAD:
+        return len(words) > 1 and words[1] in _GIT_MESSAGE_SUBCOMMANDS
+    if head == _GH_HEAD:
+        return len(words) > 1 and words[1] in _GH_PROSE_SUBCOMMANDS
+    return False
+
+
+def _command_only_sends_text(command: str) -> bool:
+    """Whether the WHOLE command is sender statements and filters, and nothing else (PR 291).
+
+    Closed by construction: any unquoted redirection, substitution, grouping,
+    definition or expansion character anywhere voids it, and so does any
+    statement :func:`_statement_may_send_text` does not allow, which is what
+    keeps a later ``| bash``, ``eval``, ``alias`` or ``source`` out.
+    """
+    unquoted = mask_quoted(command, keep_double=False)
+    if any(char in _SENT_TEXT_VOIDING_CHARS for char in unquoted):
+        return False
+    return all(
+        _statement_may_send_text(command[start:end])
+        for start, end in split_unquoted_spans(command, _SEGMENT_SEPARATORS)
+    )
+
+
+def _sent_text_spans(command: str) -> list[tuple[int, int]]:
+    """Absolute spans of the quoted text a sender only prints or posts (N757).
+
+    Nothing is relaxed unless :func:`_command_only_sends_text` holds for the whole
+    command, nor in a command whose substitutions cannot be placed.
+    """
+    if not _command_only_sends_text(command):
+        return []
     try:
         inner_regions = substitution_inner_spans(command)
     except UnplaceableSubstitutionError as exc:
@@ -2263,12 +2328,8 @@ def _sent_text_spans(command: str) -> list[tuple[int, int]]:
         return []
     segments = split_unquoted_spans(command, _SEGMENT_SEPARATORS)
     found: list[tuple[int, int]] = []
-    for position, (start, end) in enumerate(segments):
+    for start, end in segments:
         segment = command[start:end]
-        if _opens_a_redirection(command, start, end):
-            continue
-        if not _only_text_consumers_follow(command, segments, position):
-            continue
         for span_start, span_end in _segment_sent_text_spans(segment):
             absolute = (start + span_start, start + span_end)
             if not any(
@@ -3079,8 +3140,16 @@ def iter_protected_mentions(
     bash_tool_command: bool = False,
     cwds: tuple[str, ...] | None = None,
     index: "ProtectedFileIndex | None" = None,
+    whole_command: bool = False,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
+
+    ``whole_command`` (PR 291 review) is True only when ``command`` is the WHOLE
+    Bash command or script the guard judges. Only then is a glob inside text a
+    sender merely prints or posts relaxed (:func:`_sent_text_spans`). A caller
+    judging a FRAGMENT leaves it False: ``echo '<glob>'`` cut out of
+    ``alias echo=cat; echo '<glob>'`` would otherwise pass the whole-command
+    test it fails in place.
 
     ``index`` is the protected-file index (:mod:`protected_file_index`): a
     glob-shaped word is also a mention when it matches a protected file that
@@ -3223,7 +3292,12 @@ def iter_protected_mentions(
         """The pattern ``word`` mentions once the bare-dotted gate has judged it."""
         # N757: a GLOB in text a sender only prints or posts is not a mention.
         # A literal name there still is (Plan 00272 Decision 9 c).
-        if context == "bash" and _is_glob_shaped(word) and glob_gate.is_sent_text(word):
+        if (
+            whole_command
+            and context == "bash"
+            and _is_glob_shaped(word)
+            and glob_gate.is_sent_text(word)
+        ):
             return None
         found = _token_mention(
             word,

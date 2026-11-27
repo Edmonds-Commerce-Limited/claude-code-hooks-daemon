@@ -1711,6 +1711,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             normalised_words=shared_words,
             bash_tool_command=True,
             index=index,
+            whole_command=True,
         )
         if mention is None:
             # review 6 minor-2: an interpreter one-liner's own
@@ -1900,6 +1901,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 deadline=deadline,
                 cwd=cwd,
                 context=context,
+                whole_command=True,
             )
         except shell_expansion.UnresolvableBraceQuotingError:
             if context != "content":
@@ -2173,9 +2175,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "**A quoted message is not a mention.** A literal-quoted argument of "
             "`echo`, `printf` or `teamchat`, a `git commit|tag|merge -m` message "
             "and a `gh` body or title are only printed or sent, so a GLOB inside "
-            "one is not judged (a literal protected name still is). It ends where "
-            "the text could run: piped on to anything but a text filter, "
-            "redirected to or from a file, inside a substitution, or a `-F` file. "
+            "one is not judged (a literal protected name still is). Only when the "
+            "WHOLE command is such statements, each starting with its command "
+            "word, piped at most through `grep`/`head`/`tail`/`cut`/`tr`/`wc`: "
+            "any unquoted `<`, `>`, `(`, `)`, `{`, `}`, `$` or backtick, a "
+            "`printf` option, any other command, or a `-F` file voids it. "
             "A deny names the CLASS of path matched and the token's line and "
             "column, never the glob.\n\n"
             "**Authoring a script that references a protected path is also "
