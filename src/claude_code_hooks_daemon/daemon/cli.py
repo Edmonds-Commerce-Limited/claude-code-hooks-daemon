@@ -6869,10 +6869,13 @@ def run_scratch_sweep_apply_step(
 
     Plan 00627 R13, granted by the owner for this step alone (Plan 00474
     ledger): every removal trails the archive store's hold window, so this
-    step acts without confirmation. It runs the same refusal, classification,
-    pressure and apply core as ``scratch-sweep --apply`` on the project's own
+    step acts without confirmation. It runs the same refusal, classification
+    and apply core as ``scratch-sweep --apply`` on the project's own
     ``untracked/scratch``, so it acts only on what that core finds due; a
     ``.scratch-keep`` entry, a live entry and one inside its TTL are never due.
+    Pressure mode is never used: it packs idle entries still inside their TTL,
+    which the ruling does not cover, so that widening stays behind the CLI
+    verb's human confirmation.
     It fails closed: a store refusal, or a classification that could not read
     everything, removes nothing and says why. It prints entry names and archive
     ids, never contents. The keyword parameters exist for tests.
@@ -6914,8 +6917,8 @@ def run_scratch_sweep_apply_step(
     fresh = sources.classify(sweep_root)
     if not fresh.complete:
         return refused("the classification is incomplete: " + "; ".join(fresh.incomplete_reasons))
-    pressure = _scratch_pressure(sources, fresh, sweep_root.ttl_hours)
-    outcome = _scratch_apply_core(sources, sweep_root, pressure)
+    # pressure=None: due entries only, never the in-TTL ones pressure mode would pack.
+    outcome = _scratch_apply_core(sources, sweep_root, None)
     if isinstance(outcome, str):
         return refused(outcome)
     result, sessions = outcome
@@ -6951,10 +6954,13 @@ def _print_unconfirmed_apply(parts: list[tuple[str, Any]]) -> None:
     for root, result in parts:
         if not result.complete:
             print(f"  {root}: INCOMPLETE: " + "; ".join(result.incomplete_reasons))
-        for expired in result.expired:
-            print(f"  expired past retention: {expired.archive_id} ({expired.outcome})")
-        for note in result.notes:
-            print(f"  note: {note}")
+    # Each root's pass runs the store's expiry, so the same archive can be reported per root.
+    expiries = {item.archive_id: item for _root, result in parts for item in result.expired}
+    for item in expiries.values():
+        reason = f": {item.reason}" if item.reason else ""
+        print(f"  archive {item.archive_id}: {item.outcome}{reason}")
+    for note in dict.fromkeys(note for _root, result in parts for note in result.notes):
+        print(f"  note: {note}")
 
 
 def _scratch_store_status(store_path: Path, retention_hours: Mapping[str, float]) -> "StoreStatus":
@@ -11549,6 +11555,28 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _housekeeping_run_refusal(
+    args: argparse.Namespace, run_step: str, runnable: tuple[str, ...]
+) -> str:
+    """Why ``housekeeping --run STEP`` may not run; "" when it may.
+
+    A mutating step never falls back to auto-detecting the project from the
+    working directory (Plan 00474 N768): a parse that lost the root would
+    otherwise act on whichever checkout the caller stood in. ``bin/hooks-daemon``
+    always names it.
+    """
+    if run_step not in runnable:
+        return f"--run cannot execute {run_step!r}; runnable steps: {', '.join(runnable)}"
+    if getattr(args, "list_steps", False) or getattr(args, "apply", None):
+        return "--run cannot be combined with --list or --apply; run it on its own"
+    if getattr(args, "project_root", None) is None:
+        return (
+            "--run needs an explicit --project-root (bin/hooks-daemon passes one); "
+            "it never acts on a project found from the working directory"
+        )
+    return ""
+
+
 def cmd_housekeeping(args: argparse.Namespace) -> int:
     """Print the full housekeeping pass as a procedure (Plan 00330 Phase 3).
 
@@ -11576,19 +11604,18 @@ def cmd_housekeeping(args: argparse.Namespace) -> int:
         render_procedure,
     )
 
+    run_step: str | None = getattr(args, "run_step", None)
+    if run_step is not None:
+        refusal = _housekeeping_run_refusal(args, run_step, RUNNABLE_STEP_NAMES)
+        if refusal:
+            print(f"ERROR: {refusal}", file=sys.stderr)
+            return 2
+
     project_root = resolve_tree_root(args)
     if project_root is None:
         return 2
 
-    run_step: str | None = getattr(args, "run_step", None)
     if run_step is not None:
-        if run_step not in RUNNABLE_STEP_NAMES:
-            print(
-                f"ERROR: --run cannot execute {run_step!r}; runnable steps: "
-                f"{', '.join(RUNNABLE_STEP_NAMES)}",
-                file=sys.stderr,
-            )
-            return 2
         return run_scratch_sweep_apply_step(project_root)
 
     if bool(getattr(args, "list_steps", False)):
@@ -14460,12 +14487,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Where each step's report file goes (default: untracked/reports)",
     )
+    # SUPPRESS, not None (Plan 00474 N766): nothing here can stand in for the
+    # global --project-root that bin/hooks-daemon passes before the verb.
     parser_housekeeping.add_argument(
         "--project-root",
         dest="project_root",
         metavar="PATH",
-        default=None,
-        help="Project root override (default: auto-detected)",
+        default=argparse.SUPPRESS,
+        help="Project root override (default: the global --project-root; --run needs one)",
     )
     parser_housekeeping.set_defaults(func=cmd_housekeeping)
 

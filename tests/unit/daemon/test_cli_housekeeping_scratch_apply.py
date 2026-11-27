@@ -20,11 +20,13 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from tests.support.scratch_tree import ScratchTree, build_git_project
 
+from claude_code_hooks_daemon.core.scratch_archive_expire import ExpiryOutcome
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.cli import (
     build_parser,
@@ -177,6 +179,43 @@ class TestTheStepNeverTouchesWhatTheSweepProtects:
         assert (tree.root / "young" / "a.txt").read_bytes() == b"alpha"
 
 
+class TestTheStepNeverUsesPressureMode:
+    """Review of PR 296, blocking 1: pressure mode packs IN-TTL entries, which the ruling excludes."""
+
+    def test_caps_at_block_with_fresh_entries_remove_nothing(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Ahead of the real clock so each entry is idle (born days ago, touched an hour ago):
+        # the shape pressure mode packs. Inside the TTL, so the step must leave them.
+        now = time.time() + 3 * _DAY
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\nscratch:\n  caps:\n    entries:\n      warn: 2\n      block: 3\n'
+        )
+        for name in ("one", "two", "three", "four"):
+            tree.file(f"{name}/a.txt", b"alpha", mtime=now - _HOUR)
+        assert _step(tree, now=now) == 0
+        for name in ("one", "two", "three", "four"):
+            assert (tree.root / name / "a.txt").read_bytes() == b"alpha"
+        assert _archived(capsys.readouterr().out) == {}
+
+    def test_caps_at_block_still_remove_only_the_due_entry(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\nscratch:\n  caps:\n    entries:\n      warn: 2\n      block: 3\n'
+        )
+        for name in ("one", "two", "three"):
+            tree.file(f"{name}/a.txt", b"alpha", mtime=now - _HOUR)
+        _due(tree, "old", now)
+        assert _step(tree, now=now) == 0
+        assert set(_archived(capsys.readouterr().out)) == {"untracked/scratch/old"}
+        for name in ("one", "two", "three"):
+            assert (tree.root / name / "a.txt").read_bytes() == b"alpha"
+
+
 class TestTheStepFailsClosed:
     def test_a_store_refusal_removes_nothing(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
@@ -226,6 +265,17 @@ class TestTheCliVerbKeepsItsGate:
         assert not any(key in {"run", "unconfirmed", "yes"} for key in vars(args))
 
 
+class _Recorder:
+    """A stand-in step that records the root it was given and does nothing."""
+
+    def __init__(self) -> None:
+        self.roots: list[Path] = []
+
+    def __call__(self, repo: Path) -> int:
+        self.roots.append(repo)
+        return 0
+
+
 def _housekeeping_args(root: Path, *argv: str) -> argparse.Namespace:
     args = build_parser().parse_args(["housekeeping", *argv])
     args.project_root = str(root)
@@ -247,9 +297,107 @@ class TestTheHousekeepingRunFlag:
         assert cmd_housekeeping(args) == 0
         assert seen == [tmp_path]
 
+    def test_the_global_project_root_reaches_the_step_through_main(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review of PR 296, blocking 2: the real entry, global flag BEFORE the verb."""
+        seen: list[Path] = []
+
+        def fake(repo: Path) -> int:
+            seen.append(repo)
+            return 0
+
+        monkeypatch.setattr(cli, "run_scratch_sweep_apply_step", fake)
+        argv = ["claude-hooks-daemon", "--project-root", str(tmp_path), "housekeeping"]
+        monkeypatch.setattr("sys.argv", [*argv, "--run", "scratch-sweep-apply"])
+        assert cli.main() == 0
+        assert seen == [tmp_path]
+
+    def test_run_refuses_without_a_named_project_root(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """N768: a parse that dropped the root must never fall back to the working directory."""
+        step = _Recorder()
+        monkeypatch.setattr(cli, "run_scratch_sweep_apply_step", step)
+        monkeypatch.chdir(tmp_path)
+        args = build_parser().parse_args(["housekeeping", "--run", "scratch-sweep-apply"])
+        assert cmd_housekeeping(args) == 2
+        assert step.roots == []
+        assert "--project-root" in capsys.readouterr().err
+
+    def test_every_subcommand_project_root_leaves_room_for_the_global_anchor(self) -> None:
+        """N766: a subparser default other than None or SUPPRESS would beat the wrapper's root."""
+        parser = build_parser()
+        (top,) = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+        pending = list(top.choices.items())
+        offenders: list[str] = []
+        while pending:
+            name, sub = pending.pop()
+            for action in sub._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    pending.extend((f"{name} {n}", p) for n, p in action.choices.items())
+                elif "--project-root" in action.option_strings and action.default not in (
+                    None,
+                    argparse.SUPPRESS,
+                ):
+                    offenders.append(name)
+        assert offenders == []
+
+    def test_housekeeping_project_root_is_suppressed(self) -> None:
+        args = build_parser().parse_args(["housekeeping"])
+        assert "project_root" not in vars(args)
+
+    @pytest.mark.parametrize(
+        "extra", [("--list",), ("--apply", "prune-venvs")], ids=["list", "apply"]
+    )
+    def test_run_refuses_to_combine_with_list_or_apply(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        extra: tuple[str, ...],
+    ) -> None:
+        step = _Recorder()
+        monkeypatch.setattr(cli, "run_scratch_sweep_apply_step", step)
+        args = _housekeeping_args(tmp_path, "--run", "scratch-sweep-apply", *extra)
+        assert cmd_housekeeping(args) == 2
+        assert step.roots == []
+        assert "--run cannot be combined" in capsys.readouterr().err
+
     def test_run_refuses_a_step_it_cannot_run_in_process(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         args = _housekeeping_args(tmp_path, "--run", "prune-venvs")
         assert cmd_housekeeping(args) == 2
         assert "scratch-sweep-apply" in capsys.readouterr().err
+
+
+class TestTheExpiryReport:
+    """Review of PR 296, minor: label each expiry by its outcome, and say it once."""
+
+    @staticmethod
+    def _result(*expired: ExpiryOutcome) -> SimpleNamespace:
+        return SimpleNamespace(
+            complete=True, incomplete_reasons=(), entries=(), expired=expired, notes=()
+        )
+
+    def test_a_held_archive_is_not_called_expired_and_each_is_listed_once(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        held = ExpiryOutcome("a-1", "held", "still named")
+        gone = ExpiryOutcome("a-2", "expired", "")
+        parts = [
+            ("untracked/scratch", self._result(held, gone)),
+            (f"untracked/scratch/{_SESSION}", self._result(held, gone)),
+        ]
+        cli._print_unconfirmed_apply(parts)
+        out = capsys.readouterr().out
+        assert out.count("a-1") == 1
+        assert out.count("a-2") == 1
+        held_line = next(line for line in out.splitlines() if "a-1" in line)
+        assert "held" in held_line
+        assert "expired" not in held_line
+        assert "still named" in held_line
