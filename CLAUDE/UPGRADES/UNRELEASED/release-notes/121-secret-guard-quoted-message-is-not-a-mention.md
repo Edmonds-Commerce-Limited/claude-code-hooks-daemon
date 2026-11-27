@@ -3,4 +3,17 @@
 **Plan**: 00474
 **Audience**: everyone
 
-A literal-quoted argument of `echo`, `printf` or `teamchat`, a `git commit|tag|merge -m` message, and a `gh` body or title are only printed or sent, so a glob inside one is no longer treated as a mention of a protected path. A literal protected name inside one still denies. Before this change, a teamchat message quoting a permission rule, a commit message naming the secret-file glob, and a message holding `*` or `**` were all denied with R-SECRET-BASH-MENTION. The relaxation holds only when the WHOLE command consists of such statements, each starting with its own command word, piped at most through `grep`, `head`, `tail`, `cut`, `tr` or `wc`. Any of the following voids it, and the command is judged as before: an unquoted redirection, process substitution, subshell, group, function definition, `$` or backtick anywhere in the command; a `printf` option (`-v`); any other command (`alias`, `eval`, `| bash`); a `-F` message file; or an option value of `teamchat`. Related tightening: an `echo`/`printf` argument piped to a shell, or written to a script, is now judged again (`echo 'cat dir/*' | bash` was allowed). The deny now names the CLASS of path that matched (for example "a secret-named file", entry N of M in the effective list) and the token's line and column, never the glob itself. A deny caused by a link out of the project or by the directory cap no longer also claims that the word matched a protected glob.
+A command that is ONE statement, either `echo` with no option, `git commit` with a single `-m` message, or `gh issue|pr create` with a `--body` and/or `--title`, only prints or posts its quoted text. A glob inside that literal-quoted text is therefore no longer treated as a mention of a protected path. A literal protected name inside it still denies. Before this change, a commit message or echo that quoted a permission rule, named the secret-file glob, or held `*` or `**` was denied with R-SECRET-BASH-MENTION.
+
+The exemption is deliberately narrow, and anything outside it is judged exactly as before:
+
+- a pipe, chain or redirect
+- a substitution or a backslash
+- any other word or option, including a doubled flag such as `-m -m`
+- a non-ASCII character outside the quotes
+- `printf`, which can assign a variable with `-v`
+- `teamchat`, whose message verbs read the text from stdin, so a teamchat heredoc or pipe is NOT covered
+
+Related tightening: an `echo`/`printf` argument piped to a shell, or written to a script, is now judged again (`echo 'cat dir/*' | bash` was allowed).
+
+The deny now names the CLASS of path that matched (for example "a secret-named file", entry N of M in the effective list) and the token's line and column, never the glob itself. A deny caused by a link out of the project, or by the directory cap, no longer also claims that the word matched a protected glob.

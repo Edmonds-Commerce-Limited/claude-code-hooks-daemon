@@ -121,23 +121,22 @@ def _tool(tool_name: str, field: str, path: Path) -> GatingResult:
 class TestQuotedTextIsNotAMention:
     """The four N757 shapes are allowed."""
 
-    def test_teamchat_message_quoting_a_permission_rule(self, project: Project) -> None:
+    @pytest.mark.parametrize("head", ["echo", "git commit -m"])
+    def test_message_quoting_a_permission_rule(self, project: Project, head: str) -> None:
         """Denied before the fix on the bare double star (the token named in the deny)."""
         command = (
-            "teamchat send general 'the deny `Bash(open -a *com.example.App*)` is in force, "
+            f"{head} 'the deny `Bash(open -a *com.example.App*)` is in force, "
             f"and the allow covers {project.root}/**'"
         )
         assert _bash(command, project.root).decision == Decision.ALLOW
 
     @pytest.mark.parametrize("text", ["x * y", "x ** y", "see vault/** here"])
-    def test_teamchat_message_holding_a_glob_over_the_protected_file(
-        self, project: Project, text: str
-    ) -> None:
+    def test_echo_holding_a_glob_over_the_protected_file(self, project: Project, text: str) -> None:
         """Each was denied before the fix: ``*`` at the root reaches a link to the file."""
-        assert _bash(f'teamchat send general "{text}"', project.root).decision == Decision.ALLOW
+        assert _bash(f'echo "{text}"', project.root).decision == Decision.ALLOW
 
-    def test_teamchat_message_naming_the_secret_glob(self, project: Project) -> None:
-        command = f'teamchat send general "the secret-file glob {_SECRET_GLOB} matched my word"'
+    def test_non_ascii_prose_inside_the_quotes_is_still_text(self, project: Project) -> None:
+        command = f"git commit -m 'guard {_EM_DASH} stop matching {_SECRET_GLOB} in prose' -a"
         assert _bash(command, project.root).decision == Decision.ALLOW
 
     def test_echo_naming_the_secret_glob_in_single_quotes(self, project: Project) -> None:
@@ -149,11 +148,14 @@ class TestQuotedTextIsNotAMention:
         assert _bash(command, project.root).decision == Decision.ALLOW
 
     def test_gh_body_naming_the_secret_glob(self, project: Project) -> None:
-        command = f'gh issue comment 12 --body "the glob {_SECRET_GLOB} matched"'
+        command = f"gh issue create --title 'guard' --body \"the glob {_SECRET_GLOB} matched\""
         assert _bash(command, project.root).decision == Decision.ALLOW
 
     def test_printf_to_stderr_with_a_bracket_in_its_format(self, project: Project) -> None:
-        """``>&2`` duplicates a descriptor; it is not a file the text is written to."""
+        """``>&2`` duplicates a descriptor; it is not a file the text is written to.
+
+        Allowed by the older N269 text-operand gate, as on main: printf is not
+        in the N757 exemption, and this format names no protected glob."""
         command = "printf '[FATAL] no %s in *\\n' x >&2"
         assert _bash(command, project.root).decision == Decision.ALLOW
 
@@ -233,6 +235,11 @@ class TestRealReadsStillDeny:
 
 
 _SG = _SECRET_GLOB
+#: Built by code point so this source file stays plain ASCII.
+_LINE_SEPARATOR = chr(0x2028)
+_FULLWIDTH_GREATER = chr(0xFF1E)
+_FULLWIDTH_BAR = chr(0xFF5C)
+_EM_DASH = chr(0x2014)
 
 
 class TestQuotedTextExemptionIsClosed:
@@ -272,10 +279,76 @@ class TestQuotedTextExemptionIsClosed:
             f"git commit -m 'cat {_SG}' && git log -1 --format=%B | bash",
             f"echo 'cat {_SG}' | bash",
             f"teamchat send general 'cat {_SG}'; eval \"$(teamchat read general)\"",
+            # Round two: a quoted printf option, whose array subscript runs a command.
+            f"printf '-v' 'a[$(cat vault/{_SG})]' x",
+            f"printf \"-v\" 'a[$(cat vault/{_SG} >&2)]' x",
+            f"printf \\-v 'a[$(cat vault/{_SG})]' x",
+            f"printf '-v' 'a[`cat vault/{_SG}`]' x",
+            f"printf -- '-v' 'a[$(cat vault/{_SG})]' x",
+            f"echo x; printf '-v' 'a[$(cat vault/{_SG})]' x",
+            # Round two: teamchat runs a program; its words are not message text.
+            f"teamchat run --plain --kind other -- bash -c 'cat $1' x 'vault/{_SG}'",
+            f"teamchat send general 'vault/{_SG}'",
+            # Round two: a doubled text flag turns the glob into a pathspec or positional.
+            f"git commit -m -m 'vault/{_SG}'",
+            f"git commit --message '-m' 'vault/{_SG}'",
+            f"git tag -m -m 'vault/{_SG}'",
+            f"git merge -m -m 'vault/{_SG}'",
+            f"gh release create -n -n 'vault/{_SG}'",
+            f"gh issue create -t -t 'vault/{_SG}'",
+            f"gh issue create --title 'x' --title 'vault/{_SG}'",
+            # Shrink: an echo option, a wrapper, an assignment, a file positional.
+            f"echo -e 'vault/{_SG}'",
+            f"echo '-e' 'vault/{_SG}'",
+            f"command echo 'vault/{_SG}'",
+            f"X=1 echo 'vault/{_SG}'",
+            f"git commit -m 'x' 'vault/{_SG}'",
+            f"git commit -F 'vault/{_SG}'",
+            f"printf '%s' 'vault/{_SG}'",
+            # Round three (differential corpus): an escape, a control or Unicode separator.
+            f"echo 'vault/{_SG}' \\> o",
+            f"echo 'vault/{_SG}'\rcat 'vault/{_SG}'",
+            f"echo 'vault/{_SG}'\tbash",
+            f"echo 'vault/{_SG}'{_LINE_SEPARATOR}alias echo=cat",
+            f"echo 'vault/{_SG}'\x00cat 'vault/{_SG}'",
+            f"echo 'vault/{_SG}' {_FULLWIDTH_GREATER} o",
+            f"echo 'vault/{_SG}' {_FULLWIDTH_BAR} o",
         ],
     )
     def test_shape_is_denied(self, project: Project, command: str) -> None:
         assert _bash(command, project.vault).decision == Decision.DENY
+
+
+#: The reviewers' dangerous commands, run old-versus-new (PR 291): each reads or
+#: can read the protected file and was DENY on main, so it must stay DENY.
+_DANGEROUS_CORPUS: tuple[str, ...] = (
+    f"echo 'cat vault/{_SG}' 2>&1 > run.sh; bash run.sh",
+    f"printf -v x '%s' 'vault/{_SG}'; cat $x",
+    f"echo 'cat {_SG}' | tr a a > run.sh; bash run.sh",
+    f"echo 'cat {_SG}' | sort -o run.sh",
+    f"echo() {{ cat $1; }}; echo 'vault/{_SG}'",
+    f"alias echo=cat; echo 'vault/{_SG}'",
+    f"git commit -m 'cat {_SG}' && git log -1 --format=%B | bash",
+    f"printf '-v' 'a[$(cat vault/{_SG})]' x",
+    f"teamchat run --plain --kind other -- bash -c 'cat $1' x 'vault/{_SG}'",
+    f"git commit -m -m 'vault/{_SG}'",
+    f"cat vault/{_SG}",
+    "cat vault/" + _PROTECTED_NAME,
+    "echo vault/" + _PROTECTED_NAME,
+    "head -c1 vault/*",
+)
+
+
+class TestDifferentialCorpus:
+    """Every command of the checked-in dangerous corpus is denied."""
+
+    def test_no_dangerous_command_is_allowed(self, project: Project) -> None:
+        allowed = [
+            command
+            for command in _DANGEROUS_CORPUS
+            if _bash(command, project.root).decision != Decision.DENY
+        ]
+        assert allowed == []
 
 
 class TestDenyNamesClassAndPosition:

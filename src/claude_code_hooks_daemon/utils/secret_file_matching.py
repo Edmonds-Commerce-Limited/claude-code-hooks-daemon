@@ -2167,13 +2167,47 @@ def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[i
     ]
 
 
-#: Heads that only PRINT or SEND a quoted argument as words (ledger 00474 N757):
-#: they open no file it names and run none of it. ``teamchat`` posts a message.
-_TEAMCHAT_HEAD: Final[str] = "teamchat"
-_SENDER_HEADS: Final[frozenset[str]] = _ECHO_HEADS | frozenset({_TEAMCHAT_HEAD})
-#: ``git`` subcommands whose ``-m``/``--message`` value is prose. ``-F`` is absent: it reads a file.
-_GIT_MESSAGE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"commit", "tag", "merge"})
-_GIT_MESSAGE_FLAGS: Final[frozenset[str]] = frozenset({"-m", "--message"})
+#: The N757 exemption, shrunk by the PR 291 reviews to the reported false
+#: positives: ONE statement that is ``echo`` with no option, ``git commit`` with
+#: one ``-m`` message, or ``gh issue|pr create`` with a body and/or title. Left
+#: out on purpose: ``printf`` (``-v`` assigns, and an array subscript in the
+#: name runs a command), ``teamchat`` (its message verbs read the text from
+#: stdin, so no argument of one is message text, and ``teamchat run`` runs a
+#: program), ``git tag|merge`` (each takes a positional), pipes and chains.
+_ECHO_HEAD: Final[str] = "echo"
+_GIT_COMMIT: Final[str] = "commit"
+_GH_CREATE: Final[str] = "create"
+_GH_CREATE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"issue", "pr"})
+_GIT_MESSAGE_FLAG: Final[str] = "-m"
+_GH_BODY_FLAG: Final[str] = "--body"
+_GH_TITLE_FLAG: Final[str] = "--title"
+#: Each spelling of a text flag, to the one flag it is: a flag given twice voids.
+_GIT_COMMIT_TEXT_FLAGS: Final[dict[str, str]] = {
+    "-m": _GIT_MESSAGE_FLAG,
+    "--message": _GIT_MESSAGE_FLAG,
+    "-am": _GIT_MESSAGE_FLAG,
+}
+_GH_CREATE_TEXT_FLAGS: Final[dict[str, str]] = {
+    "--body": _GH_BODY_FLAG,
+    "-b": _GH_BODY_FLAG,
+    "--title": _GH_TITLE_FLAG,
+    "-t": _GH_TITLE_FLAG,
+}
+#: Value-less ``git commit`` options a sent message may sit beside; any other word voids.
+_GIT_COMMIT_PLAIN_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-a", "--all", "-q", "--quiet", "-s", "--signoff", "-n", "--no-verify", "--allow-empty"}
+)
+#: Unquoted, any of these voids the exemption: a separator, pipe or background
+#: job, a redirection or process substitution, a subshell, group or definition,
+#: an expansion, an escape.
+_SENT_TEXT_VOIDING_CHARS: Final[frozenset[str]] = frozenset("<>(){}`$|;&\n\\")
+#: The printable ASCII range: an unquoted character outside it voids the exemption.
+_PRINTABLE_FIRST: Final[str] = " "
+_PRINTABLE_LAST: Final[str] = "~"
+#: Unquoted, any of these in an ``echo`` word that is not one literal quoted
+#: word voids it: a glob, a tilde, or quoting mixed with bare text.
+_ECHO_BARE_WORD_VOIDING_CHARS: Final[frozenset[str]] = frozenset("*?[~'\"")
+_QUOTE_REMOVAL: Final[dict[int, int | None]] = str.maketrans("", "", "'\"\\")
 #: Redirections that open no file: a descriptor duplicate and the null device.
 _INERT_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*[<>]&\d+|\d*>>?\s*/dev/null\b")
 _REDIRECTION_CHARS: Final[str] = "<>"
@@ -2182,62 +2216,59 @@ _REDIRECTION_CHARS: Final[str] = "<>"
 _SENT_TEXT_FILTERS: Final[frozenset[str]] = _GREP_HEADS | frozenset(
     {"head", "tail", "cut", "tr", "wc"}
 )
-_PRINTF_HEAD: Final[str] = "printf"
-_GH_PROSE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"issue", "pr", "release"})
-#: Unquoted, any of these voids the exemption: a redirection or process
-#: substitution, a subshell, group or function definition, an expansion.
-_SENT_TEXT_VOIDING_CHARS: Final[frozenset[str]] = frozenset("<>(){}`$")
 _SENT_TEXT_PLACEHOLDER: Final[str] = "SENT_TEXT"
 
 
-def _is_flag_value(word: str, previous: str, flags: frozenset[str]) -> bool:
-    """Whether ``word`` is the value of one of ``flags``, separate or ``--flag=value``."""
-    return previous in flags or word.partition("=")[0] in flags
+def _dequoted_word(word: str) -> str:
+    """``word`` with its quotes and backslashes removed, as an option parser reads it."""
+    return word.translate(_QUOTE_REMOVAL)
 
 
-def _segment_sent_text_spans(segment: str) -> list[tuple[int, int]]:
-    """``(start, end)`` within ``segment`` of each quoted argument it only sends as text.
+def _is_sent_value(word: str) -> bool:
+    """A literal quoted word that is not an option once its quotes are removed."""
+    return _is_literal_quoted_word(word) and not _dequoted_word(word).startswith("-")
 
-    An echo/printf/teamchat argument, a git commit/tag/merge ``-m`` message and a
-    gh body or title. Each must be a literal quoted word (:func:`_is_literal_quoted_word`):
-    bash expands nothing in it and runs no substitution. A teamchat option's value
-    may name a file, so only its positional words count.
-    """
-    head = segment_command_word(segment) or ""
-    spans = shell_word_spans(segment)
-    words = [segment[start:end] for start, end in spans]
-    found: list[tuple[int, int]] = []
-    if head in _SENDER_HEADS:
-        for index, word in enumerate(words):
-            previous = words[index - 1] if index else ""
-            if word.startswith("-") or not _is_literal_quoted_word(word):
-                continue
-            if head == _TEAMCHAT_HEAD and previous.startswith("-"):
-                continue
-            found.append(spans[index])
-        return found
-    if head == _GIT_HEAD:
-        git_index = next(
-            (index for index, word in enumerate(words) if word.rsplit("/", 1)[-1] == _GIT_HEAD),
-            None,
-        )
-        subcommand = None if git_index is None else git_subcommand_index(words, git_index)
-        if subcommand is None or words[subcommand] not in _GIT_MESSAGE_SUBCOMMANDS:
-            return []
-        flags = _GIT_MESSAGE_FLAGS
-        first = subcommand + 1
-    elif head == _GH_HEAD:
-        flags = _GH_TEXT_FLAGS
-        first = 1
-    else:
-        return []
-    for index in range(first, len(words)):
-        if words[index] == _END_OF_OPTIONS:
-            break
+
+def _echo_text_indexes(words: Sequence[str]) -> list[int] | None:
+    """Indexes of the literal quoted words of an option-less ``echo``, or None when it voids."""
+    found: list[int] = []
+    for index in range(1, len(words)):
         word = words[index]
-        if _is_flag_value(word, words[index - 1], flags) and _is_literal_quoted_word(word):
-            found.append(spans[index])
+        if _dequoted_word(word).startswith("-"):
+            return None
+        if _is_literal_quoted_word(word):
+            found.append(index)
+        elif any(char in word for char in _ECHO_BARE_WORD_VOIDING_CHARS):
+            return None
     return found
+
+
+def _flag_value_indexes(
+    words: Sequence[str], first: int, flags: dict[str, str], plain: frozenset[str]
+) -> list[int] | None:
+    """Indexes of each text flag's value from ``first`` on, or None when the statement voids.
+
+    Every word must be a text flag followed by a :func:`_is_sent_value`, or a
+    value-less option in ``plain``. A flag given twice, a positional, an
+    attached ``--flag=value`` or any other option voids it.
+    """
+    found: list[int] = []
+    seen: set[str] = set()
+    index = first
+    while index < len(words):
+        option = _dequoted_word(words[index])
+        flag = flags.get(option)
+        if flag is None:
+            if option not in plain:
+                return None
+            index += 1
+            continue
+        if flag in seen or index + 1 >= len(words) or not _is_sent_value(words[index + 1]):
+            return None
+        seen.add(flag)
+        found.append(index + 1)
+        index += 2
+    return found or None
 
 
 def _redirects_to_a_file(text: str) -> bool:
@@ -2265,78 +2296,40 @@ def _only_sent_text_filters_follow(
     return True
 
 
-def _statement_may_send_text(segment: str) -> bool:
-    """Whether ``segment`` is a statement the sent-text exemption allows (PR 291 review).
-
-    Its first word IS its command word (no assignment, wrapper or ``eval`` before
-    it), and that word is a sender or an allowlisted filter. ``printf`` takes no
-    option (``-v`` assigns a variable); ``git`` must be ``git commit|tag|merge``
-    with no global option; ``gh`` must be ``gh issue|pr|release``.
-    """
-    spans = shell_word_spans(segment)
-    if not spans:
-        return True
-    words = [segment[start:end] for start, end in spans]
-    head = segment_command_word(segment)
-    if head is None or words[0] != head:
-        return False
-    if head == _PRINTF_HEAD:
-        return not any(word.startswith("-") for word in words[1:])
-    if head in _SENDER_HEADS or head in _SENT_TEXT_FILTERS:
-        return True
-    if head == _GIT_HEAD:
-        return len(words) > 1 and words[1] in _GIT_MESSAGE_SUBCOMMANDS
-    if head == _GH_HEAD:
-        return len(words) > 1 and words[1] in _GH_PROSE_SUBCOMMANDS
-    return False
-
-
-def _command_only_sends_text(command: str) -> bool:
-    """Whether the WHOLE command is sender statements and filters, and nothing else (PR 291).
-
-    Closed by construction: any unquoted redirection, substitution, grouping,
-    definition or expansion character anywhere voids it, and so does any
-    statement :func:`_statement_may_send_text` does not allow, which is what
-    keeps a later ``| bash``, ``eval``, ``alias`` or ``source`` out.
-    """
-    unquoted = mask_quoted(command, keep_double=False)
-    if any(char in _SENT_TEXT_VOIDING_CHARS for char in unquoted):
-        return False
-    return all(
-        _statement_may_send_text(command[start:end])
-        for start, end in split_unquoted_spans(command, _SEGMENT_SEPARATORS)
-    )
-
-
 def _sent_text_spans(command: str) -> list[tuple[int, int]]:
-    """Absolute spans of the quoted text a sender only prints or posts (N757).
+    """Spans of the quoted text a SINGLE sender statement only prints or posts (N757).
 
-    Nothing is relaxed unless :func:`_command_only_sends_text` holds for the whole
-    command, nor in a command whose substitutions cannot be placed.
+    Closed by construction (PR 291 reviews): the whole command must be one
+    statement holding none of :data:`_SENT_TEXT_VOIDING_CHARS` unquoted, whose
+    first word is its command word (no assignment, wrapper, ``eval`` or
+    ``command`` before it), and every word of which the statement's grammar
+    accounts for. Anything else relaxes nothing and is judged as before.
     """
-    if not _command_only_sends_text(command):
+    # A backslash anywhere, or an unquoted character outside printable ASCII
+    # (a tab, carriage return, NUL, a Unicode separator or look-alike), voids it:
+    # how a shell and this reader split such text is not proven to agree.
+    if "\\" in command or any(
+        char in _SENT_TEXT_VOIDING_CHARS or not _PRINTABLE_FIRST <= char <= _PRINTABLE_LAST
+        for char in mask_quoted(command, keep_double=False)
+    ):
         return []
-    try:
-        inner_regions = substitution_inner_spans(command)
-    except UnplaceableSubstitutionError as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason="a substitution that cannot be placed could hold any sender, so no quoted text is relaxed and every word stays judged (fail closed)",
-            level=logging.DEBUG,
-        )
+    spans = shell_word_spans(command)
+    words = [command[start:end] for start, end in spans]
+    if not words or segment_command_word(command) != words[0]:
         return []
-    segments = split_unquoted_spans(command, _SEGMENT_SEPARATORS)
-    found: list[tuple[int, int]] = []
-    for start, end in segments:
-        segment = command[start:end]
-        for span_start, span_end in _segment_sent_text_spans(segment):
-            absolute = (start + span_start, start + span_end)
-            if not any(
-                inner_start <= absolute[0] < inner_end for inner_start, inner_end in inner_regions
-            ):
-                found.append(absolute)
-    return found
+    indexes: list[int] | None = None
+    if words[0] == _ECHO_HEAD:
+        indexes = _echo_text_indexes(words)
+    elif words[0] == _GIT_HEAD and len(words) > 1 and words[1] == _GIT_COMMIT:
+        indexes = _flag_value_indexes(words, 2, _GIT_COMMIT_TEXT_FLAGS, _GIT_COMMIT_PLAIN_OPTIONS)
+    elif (
+        words[0] == _GH_HEAD
+        and len(words) > 2
+        and words[1] in _GH_CREATE_SUBCOMMANDS
+        and words[2] == _GH_CREATE
+    ):
+        indexes = _flag_value_indexes(words, 3, _GH_CREATE_TEXT_FLAGS, frozenset())
+    return [spans[index] for index in indexes or ()]
 
 
 def _without_sent_text(command: str) -> str:
