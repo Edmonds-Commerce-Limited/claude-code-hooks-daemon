@@ -785,11 +785,13 @@ class TestContentScan:
 
 
 class TestDenyReason:
-    def test_reason_names_glob_never_content(self) -> None:
+    def test_reason_names_class_never_glob_or_content(self) -> None:
+        """Ledger 00474 N757 c: the class is named, never the glob a reader would repeat."""
         handler = _handler()
         result = handler.handle(_hook_input("Read", {"file_path": "/proj/.vault-pass"}))
         assert result.reason is not None
-        assert ".vault-pass*" in result.reason
+        assert "Matched protected-path class: a vault password file" in result.reason
+        assert ".vault-pass*" not in result.reason
         assert "secret-meta" in result.reason
 
     def test_reason_states_no_escape_hatch(self) -> None:

@@ -181,7 +181,7 @@ class TestAFindingStillDenies:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert result.reason is not None
-        assert "Matched protected glob" in result.reason
+        assert "Matched protected-path class" in result.reason
         assert SECRET_MESSAGE not in result.reason
 
     def test_an_unhashable_transcript_path_still_denies(self) -> None:

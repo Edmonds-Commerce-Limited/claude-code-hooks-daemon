@@ -153,6 +153,28 @@ DEFAULT_PROTECTED_PATTERNS: Final[tuple[str, ...]] = (
     "id_ed25519",
 )
 
+#: What each shipped default protects, so a deny names the CLASS and never the
+#: glob itself (ledger 00474 N757 c): an echoed glob is repeated by the reader
+#: in their next message, which is a mention of its own.
+_SECRET_NAMED_CLASS: Final[str] = "a secret-named file"
+_VAULT_PASSWORD_CLASS: Final[str] = "a vault password file"
+_SSH_KEY_CLASS: Final[str] = "an SSH private key"
+DEFAULT_PATTERN_CLASSES: Final[dict[str, str]] = dict(
+    zip(
+        DEFAULT_PROTECTED_PATTERNS,
+        (
+            _SECRET_NAMED_CLASS,
+            _VAULT_PASSWORD_CLASS,
+            _VAULT_PASSWORD_CLASS,
+            _VAULT_PASSWORD_CLASS,
+            _SSH_KEY_CLASS,
+            _SSH_KEY_CLASS,
+        ),
+        strict=True,
+    )
+)
+CONFIGURED_PATTERN_CLASS: Final[str] = "a project-configured protected path"
+
 # Delimiters that end a shell WORD for mention-detection purposes. Quotes are
 # included so `open('.vault-pass')` and `"$HOME/.vault-pass"` both yield a
 # clean path token; `=` so `P=.vault-pass` yields the assigned value.
@@ -1796,8 +1818,11 @@ def find_protected_mention_detail(
     bash_tool_command: bool = False,
     cwds: tuple[str, ...] | None = None,
     index: "ProtectedFileIndex | None" = None,
+    whole_command: bool = False,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
+
+    ``whole_command`` -- see :func:`iter_protected_mentions`.
 
     The TOKEN is reported so a deny message can name the span it objected to
     (Plan 00356). Without it the only route to a diagnosis is bisecting the
@@ -1830,6 +1855,7 @@ def find_protected_mention_detail(
                 bash_tool_command=bash_tool_command,
                 cwds=cwds,
                 index=index,
+                whole_command=whole_command,
             ),
             None,
         )
@@ -1993,6 +2019,13 @@ def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, in
             head, spans = _segment_text_operands(segment, offset + region_start + start)
             if head == _FIND_HEAD and not _only_text_consumers_follow(region, segments, position):
                 spans = []
+            # N757: echo/printf operands ARE their output, so piped to a shell or
+            # written to a script (`echo 'cat d/*' | bash`) they may still be run.
+            if head in _ECHO_HEADS and (
+                _redirects_to_a_file(region)
+                or not _only_sent_text_filters_follow(region, segments, position)
+            ):
+                spans = []
             operands.update(dict.fromkeys(spans, head))
             program = _shell_dash_c_program_span(segment, head)
             if program is not None:
@@ -2134,6 +2167,187 @@ def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[i
     ]
 
 
+#: The N757 exemption, shrunk by the PR 291 reviews to the reported false
+#: positives: ONE statement that is ``echo`` with no option, ``git commit`` with
+#: one ``-m`` message, or ``gh issue|pr create`` with a body and/or title. Left
+#: out on purpose: ``printf`` (``-v`` assigns, and an array subscript in the
+#: name runs a command), ``teamchat`` (its message verbs read the text from
+#: stdin, so no argument of one is message text, and ``teamchat run`` runs a
+#: program), ``git tag|merge`` (each takes a positional), pipes and chains.
+_ECHO_HEAD: Final[str] = "echo"
+_GIT_COMMIT: Final[str] = "commit"
+_GH_CREATE: Final[str] = "create"
+_GH_CREATE_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"issue", "pr"})
+_GIT_MESSAGE_FLAG: Final[str] = "-m"
+_GH_BODY_FLAG: Final[str] = "--body"
+_GH_TITLE_FLAG: Final[str] = "--title"
+#: Each spelling of a text flag, to the one flag it is: a flag given twice voids.
+_GIT_COMMIT_TEXT_FLAGS: Final[dict[str, str]] = {
+    "-m": _GIT_MESSAGE_FLAG,
+    "--message": _GIT_MESSAGE_FLAG,
+    "-am": _GIT_MESSAGE_FLAG,
+}
+_GH_CREATE_TEXT_FLAGS: Final[dict[str, str]] = {
+    "--body": _GH_BODY_FLAG,
+    "-b": _GH_BODY_FLAG,
+    "--title": _GH_TITLE_FLAG,
+    "-t": _GH_TITLE_FLAG,
+}
+#: Value-less ``git commit`` options a sent message may sit beside; any other word voids.
+_GIT_COMMIT_PLAIN_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-a", "--all", "-q", "--quiet", "-s", "--signoff", "-n", "--no-verify", "--allow-empty"}
+)
+#: Unquoted, any of these voids the exemption: a separator, pipe or background
+#: job, a redirection or process substitution, a subshell, group or definition,
+#: an expansion, an escape.
+_SENT_TEXT_VOIDING_CHARS: Final[frozenset[str]] = frozenset("<>(){}`$|;&\n\\")
+#: The printable ASCII range: an unquoted character outside it voids the exemption.
+_PRINTABLE_FIRST: Final[str] = " "
+_PRINTABLE_LAST: Final[str] = "~"
+#: Unquoted, any of these in an ``echo`` word that is not one literal quoted
+#: word voids it: a glob, a tilde, or quoting mixed with bare text.
+_ECHO_BARE_WORD_VOIDING_CHARS: Final[frozenset[str]] = frozenset("*?[~'\"")
+_QUOTE_REMOVAL: Final[dict[int, int | None]] = str.maketrans("", "", "'\"\\")
+#: Redirections that open no file: a descriptor duplicate and the null device.
+_INERT_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*[<>]&\d+|\d*>>?\s*/dev/null\b")
+_REDIRECTION_CHARS: Final[str] = "<>"
+#: Filters sent text may be piped through: none takes an output file or runs its input
+#: (not ``sort -o``, ``uniq IN OUT``, ``tee``, ``awk`` or ``rg --pre``).
+_SENT_TEXT_FILTERS: Final[frozenset[str]] = _GREP_HEADS | frozenset(
+    {"head", "tail", "cut", "tr", "wc"}
+)
+_SENT_TEXT_PLACEHOLDER: Final[str] = "SENT_TEXT"
+
+
+def _dequoted_word(word: str) -> str:
+    """``word`` with its quotes and backslashes removed, as an option parser reads it."""
+    return word.translate(_QUOTE_REMOVAL)
+
+
+def _is_sent_value(word: str) -> bool:
+    """A literal quoted word that is not an option once its quotes are removed."""
+    return _is_literal_quoted_word(word) and not _dequoted_word(word).startswith("-")
+
+
+def _echo_text_indexes(words: Sequence[str]) -> list[int] | None:
+    """Indexes of the literal quoted words of an option-less ``echo``, or None when it voids."""
+    found: list[int] = []
+    for index in range(1, len(words)):
+        word = words[index]
+        if _dequoted_word(word).startswith("-"):
+            return None
+        if _is_literal_quoted_word(word):
+            found.append(index)
+        elif any(char in word for char in _ECHO_BARE_WORD_VOIDING_CHARS):
+            return None
+    return found
+
+
+def _flag_value_indexes(
+    words: Sequence[str], first: int, flags: dict[str, str], plain: frozenset[str]
+) -> list[int] | None:
+    """Indexes of each text flag's value from ``first`` on, or None when the statement voids.
+
+    Every word must be a text flag followed by a :func:`_is_sent_value`, or a
+    value-less option in ``plain``. A flag given twice, a positional, an
+    attached ``--flag=value`` or any other option voids it.
+    """
+    found: list[int] = []
+    seen: set[str] = set()
+    index = first
+    while index < len(words):
+        option = _dequoted_word(words[index])
+        flag = flags.get(option)
+        if flag is None:
+            if option not in plain:
+                return None
+            index += 1
+            continue
+        if flag in seen or index + 1 >= len(words) or not _is_sent_value(words[index + 1]):
+            return None
+        seen.add(flag)
+        found.append(index + 1)
+        index += 2
+    return found or None
+
+
+def _redirects_to_a_file(text: str) -> bool:
+    """Whether ``text`` holds an unquoted redirection other than ``N>&M`` or /dev/null.
+
+    Read over the WHOLE text, never one segment: the segment splitter cuts at
+    ``&``, so ``2>&1 > run.sh`` would leave the file redirect in a later piece.
+    """
+    unquoted = _INERT_REDIRECTION.sub(" ", mask_quoted(text, keep_double=False))
+    return any(char in unquoted for char in _REDIRECTION_CHARS)
+
+
+def _only_sent_text_filters_follow(
+    region: str, segments: Sequence[tuple[int, int]], position: int
+) -> bool:
+    """Whether every pipe stage after ``segments[position]`` is a :data:`_SENT_TEXT_FILTERS` head."""
+    for later in range(position + 1, len(segments)):
+        separator = region[segments[later - 1][1] : segments[later][0]]
+        if "|" not in separator or "||" in separator:
+            return True
+        if segment_command_word(region[segments[later][0] : segments[later][1]]) not in (
+            _SENT_TEXT_FILTERS
+        ):
+            return False
+    return True
+
+
+def _sent_text_spans(command: str) -> list[tuple[int, int]]:
+    """Spans of the quoted text a SINGLE sender statement only prints or posts (N757).
+
+    Closed by construction (PR 291 reviews): the whole command must be one
+    statement holding none of :data:`_SENT_TEXT_VOIDING_CHARS` unquoted, whose
+    first word is its command word (no assignment, wrapper, ``eval`` or
+    ``command`` before it), and every word of which the statement's grammar
+    accounts for. Anything else relaxes nothing and is judged as before.
+    """
+    # A backslash anywhere, or an unquoted character outside printable ASCII
+    # (a tab, carriage return, NUL, a Unicode separator or look-alike), voids it:
+    # how a shell and this reader split such text is not proven to agree.
+    if "\\" in command or any(
+        char in _SENT_TEXT_VOIDING_CHARS or not _PRINTABLE_FIRST <= char <= _PRINTABLE_LAST
+        for char in mask_quoted(command, keep_double=False)
+    ):
+        return []
+    spans = shell_word_spans(command)
+    words = [command[start:end] for start, end in spans]
+    if not words or segment_command_word(command) != words[0]:
+        return []
+    indexes: list[int] | None = None
+    if words[0] == _ECHO_HEAD:
+        indexes = _echo_text_indexes(words)
+    elif words[0] == _GIT_HEAD and len(words) > 1 and words[1] == _GIT_COMMIT:
+        indexes = _flag_value_indexes(words, 2, _GIT_COMMIT_TEXT_FLAGS, _GIT_COMMIT_PLAIN_OPTIONS)
+    elif (
+        words[0] == _GH_HEAD
+        and len(words) > 2
+        and words[1] in _GH_CREATE_SUBCOMMANDS
+        and words[2] == _GH_CREATE
+    ):
+        indexes = _flag_value_indexes(words, 3, _GH_CREATE_TEXT_FLAGS, frozenset())
+    return [spans[index] for index in indexes or ()]
+
+
+def _without_sent_text(command: str) -> str:
+    """``command`` with every span :func:`_sent_text_spans` finds replaced by a placeholder."""
+    if "'" not in command and '"' not in command:
+        return command
+    pieces: list[str] = []
+    copied_to = 0
+    for span_start, span_end in sorted(_sent_text_spans(command)):
+        if span_start < copied_to:
+            continue
+        pieces.append(command[copied_to:span_start])
+        pieces.append(_SENT_TEXT_PLACEHOLDER)
+        copied_to = span_end
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
+
+
 class _GlobExpansionGate:
     """Whether a token's text is something bash can glob-expand.
 
@@ -2150,6 +2364,21 @@ class _GlobExpansionGate:
         self._tokenise = tokenise
         self._expandable: set[str] | None = None
         self._resolved = False
+        self._unsent: set[str] | None = None
+        self._sent_resolved = False
+
+    def is_sent_text(self, token: str) -> bool:
+        """True only when ``token`` occurs solely inside text a sender prints or posts (N757).
+
+        Such text is not opened, expanded or run, so a glob's own spelling there
+        names no file. A token also present outside that text stays judged.
+        """
+        if not self._sent_resolved:
+            view = _without_sent_text(self._command)
+            if view != self._command:
+                self._unsent = set(self._tokenise(view))
+            self._sent_resolved = True
+        return self._unsent is not None and token not in self._unsent
 
     def expands(self, token: str) -> bool:
         """False only when ``token`` occurs solely inside text operands."""
@@ -2904,8 +3133,17 @@ def iter_protected_mentions(
     bash_tool_command: bool = False,
     cwds: tuple[str, ...] | None = None,
     index: "ProtectedFileIndex | None" = None,
+    whole_command: bool = False,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
+
+    ``whole_command`` (PR 291 review) is True only when ``command`` is the WHOLE
+    Bash tool command the guard judges. Never for authored Write/Edit content: an
+    Edit is a fragment of a file, and a script is RUN, not sent. Only then is a glob inside text a
+    sender merely prints or posts relaxed (:func:`_sent_text_spans`). A caller
+    judging a FRAGMENT leaves it False: ``echo '<glob>'`` cut out of
+    ``alias echo=cat; echo '<glob>'`` would otherwise pass the whole-command
+    test it fails in place.
 
     ``index`` is the protected-file index (:mod:`protected_file_index`): a
     glob-shaped word is also a mention when it matches a protected file that
@@ -3046,6 +3284,15 @@ def iter_protected_mentions(
 
     def judge(word: str) -> str | None:
         """The pattern ``word`` mentions once the bare-dotted gate has judged it."""
+        # N757: a GLOB in text a sender only prints or posts is not a mention.
+        # A literal name there still is (Plan 00272 Decision 9 c).
+        if (
+            whole_command
+            and context == "bash"
+            and _is_glob_shaped(word)
+            and glob_gate.is_sent_text(word)
+        ):
+            return None
         found = _token_mention(
             word,
             patterns,

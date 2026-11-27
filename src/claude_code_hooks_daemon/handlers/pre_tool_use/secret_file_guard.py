@@ -122,9 +122,18 @@ _VERBOSE_TEMPLATE: Final[str] = (
     # line -- repeating one of those in Bash is itself denied.
     "To see which globs are actually in force, run "
     f"`{_EXPLAIN_HANDLER_PLACEHOLDER} secret_file_guard` — it prints the "
-    "effective list. Do NOT grep for the glob above: repeating it in a Bash "
-    "command is itself a mention, and is denied."
+    "effective list. This message names only the CLASS of path that matched, "
+    "never its glob: a glob repeated as a command argument is itself a mention, "
+    "though one inside a quoted message (echo, teamchat, a commit message) is not."
 )
+_CLASS_LINE: Final[str] = (
+    "Matched protected-path class: {cls} (entry {number} of {total} in the effective list)"
+)
+_TOKEN_LINE: Final[str] = "Matched on this token from your input, at {where}: `{token}`"
+_CAUSED_TOKEN_LINE: Final[str] = (
+    "No protected name matched; the word denied for the reason above, at {where}: `{token}`"
+)
+_UNPLACED_TOKEN: Final[str] = "a decoded form of a word"
 
 
 def _wrapper(subcommand: str) -> str:
@@ -244,6 +253,27 @@ def _judged_bash_command(command: str) -> str:
     One source for the decision and for the deny reason's cause (review 2 F4 c).
     """
     return strip_quoted_heredoc_bodies(command, text_readers_only=True)
+
+
+def _class_line(pattern: str, patterns: tuple[str, ...]) -> str:
+    """The deny line naming ``pattern``'s class and its place in the list, never the glob (N757 c)."""
+    cls = sfm.DEFAULT_PATTERN_CLASSES.get(pattern, sfm.CONFIGURED_PATTERN_CLASS)
+    number = patterns.index(pattern) + 1 if pattern in patterns else len(patterns)
+    return _CLASS_LINE.format(cls=cls, number=number, total=len(patterns))
+
+
+def _token_position(haystack: str, token: str) -> str:
+    """``line L, column C`` of ``token``'s first occurrence in ``haystack`` (1-based).
+
+    A token the scan decoded (quotes removed, an escape resolved) may not occur
+    as written; that is said instead of a position that would be wrong.
+    """
+    at = haystack.find(token)
+    if at < 0:
+        return _UNPLACED_TOKEN
+    line = haystack.count("\n", 0, at) + 1
+    column = at - (haystack.rfind("\n", 0, at) + 1) + 1
+    return f"line {line}, column {column}"
 
 
 def _linked_cwd(cwd: str | None) -> str:
@@ -1681,6 +1711,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             normalised_words=shared_words,
             bash_tool_command=True,
             index=index,
+            whole_command=True,
         )
         if mention is None:
             # review 6 minor-2: an interpreter one-liner's own
@@ -1908,7 +1939,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
         The deny is verbose-first/terse-after, decided per (transcript_path,
         rule_id) via the shared DisclosureTracker (Plan 00116, Decision G). The
-        matched glob is appended on every fire — it changes per invocation, so
+        matched class is appended on every fire — it changes per invocation, so
         it is not part of the static teaching content. A finding is never lost to
         a defect in building its message: that falls back to the short form.
         """
@@ -1929,7 +1960,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             rule = _rules_by_route()["read" if route == _SEARCH_ROUTE else route]
             return GatingResult(
                 decision=Decision.DENY,
-                reason=f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\nMatched protected glob: `{pattern}`",
+                reason=f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\n{_class_line(pattern, self._patterns())}",
                 rule=rule.rule_id,
             )
 
@@ -1949,8 +1980,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             )
         cause = self._link_cause(hook_input, token)
         if cause is not None:
+            # N759: a link or the directory cap denied it, not a protected name,
+            # so no class is claimed for the word.
             message += f"\n\n{cause}"
-        message += f"\n\nMatched protected glob: `{pattern}`"
+        else:
+            message += f"\n\n{_class_line(pattern, self._patterns())}"
         if route == _SEARCH_ROUTE and cause is None:
             message += f"\n{_SEARCH_REMEDY}"
         # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
@@ -1963,7 +1997,15 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         # Grep case reaches that route having DISCOVERED a protected filename
         # in the index, which the caller never typed and must not learn.
         if route in _TOKEN_ECHO_ROUTES and token and token != pattern:
-            message += f"\nMatched on this token from your input: `{token}`"
+            tool_input = hook_input.get(HookInputField.TOOL_INPUT) or {}
+            haystack = str(
+                tool_input.get(_FIELD_COMMAND)
+                or tool_input.get(_FIELD_CONTENT)
+                or tool_input.get(_FIELD_NEW_STRING)
+                or ""
+            )
+            line = _TOKEN_LINE if cause is None else _CAUSED_TOKEN_LINE
+            message += "\n" + line.format(where=_token_position(haystack, token), token=token)
 
         return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
@@ -2129,6 +2171,17 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "is allowed. To work around a false positive: ask the "
             "user, scope the search to exclude the protected file, or have a "
             "human narrow the config (`mode: replace` with a tighter list).\n\n"
+            "**A quoted message is not a mention, narrowly (Bash commands "
+            "only; authored script content never).** When the WHOLE Bash "
+            "command is ONE statement, a GLOB inside its literal-quoted text is "
+            "not judged (a literal protected name still is): `echo` with no "
+            "option, `git commit` with one `-m` message (beside `-a`/`-s`/`-q`/"
+            "`-n`/`--allow-empty` only), or `gh issue|pr create` with one `--body` "
+            "and/or `--title`. A pipe, chain, redirect, substitution, backslash, "
+            "any other word or option, or a non-ASCII character outside the "
+            "quotes voids it. `printf` and `teamchat` are not covered (teamchat "
+            "reads its message from stdin). A deny names the CLASS of path matched and the token's line and "
+            "column, never the glob.\n\n"
             "**Authoring a script that references a protected path is also "
             "denied** (the write-then-execute route). Markdown/prose naming a "
             "protected file stays writable.\n\n"
