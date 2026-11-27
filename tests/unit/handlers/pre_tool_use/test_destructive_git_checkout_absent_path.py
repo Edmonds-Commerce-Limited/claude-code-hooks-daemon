@@ -197,6 +197,161 @@ class TestLocalChangesStayDenied:
         outside.mkdir()
         _denied(handler, f"git checkout {_OLD} -- gone.txt", outside)
 
+    def test_an_ignored_path_that_exists_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / ".gitignore").write_text("gone.txt\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-q", "-m", "ignore")
+        (repo / "gone.txt").write_text("ignored local work\n")
+        _denied(handler, "git checkout HEAD~2 -- gone.txt", repo)
+
+    def test_an_untracked_directory_at_the_path_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "gone.txt").mkdir()
+        (repo / "gone.txt" / "x").write_text("untracked local work\n")
+        _denied(handler, f"git checkout {_OLD} -- gone.txt", repo)
+
+    def test_an_intent_to_add_path_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "gone.txt").write_text("intent to add\n")
+        _git(repo, "add", "-N", "gone.txt")
+        _denied(handler, f"git checkout {_OLD} -- gone.txt", repo)
+
+    def test_a_symlink_pointing_outside_the_repository_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        (tmp_path / "secret.txt").write_text("outside\n")
+        (repo / "gone.txt").symlink_to(tmp_path / "secret.txt")
+        _denied(handler, f"git checkout {_OLD} -- gone.txt", repo)
+
+    def test_a_submodule_with_local_work_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "module-source"
+        _git(tmp_path, "init", "-q", "-b", "main", str(source))
+        (source / "f").write_text("module\n")
+        _git(source, "add", "f")
+        _git(source, "commit", "-q", "-m", "module")
+        _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(source), "mod")
+        _git(repo, "commit", "-q", "-m", "submodule")
+        (repo / "mod" / "f").write_text("local module work\n")
+        _denied(handler, "git checkout HEAD -- mod", repo)
+        _denied(handler, "git checkout HEAD~1 -- mod", repo)
+
+
+class TestIndexFlagsThatHideChangesStayDenied:
+    """Review of PR 293: `git diff` skips these entries, so a clean diff proves nothing."""
+
+    def test_an_assume_unchanged_edit_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _git(repo, "update-index", "--assume-unchanged", "a.txt")
+        _denied(handler, f"git checkout {_OLD} -- a.txt", repo)
+        _denied(handler, "git checkout HEAD -- a.txt", repo)
+
+    def test_a_skip_worktree_edit_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _git(repo, "update-index", "--skip-worktree", "a.txt")
+        _denied(handler, f"git checkout {_OLD} -- a.txt", repo)
+        _denied(handler, "git checkout HEAD -- a.txt", repo)
+
+    def test_an_assume_unchanged_flag_alone_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """The flag is denied whatever the content: the checkout would clear it."""
+        _git(repo, "update-index", "--assume-unchanged", "a.txt")
+        _denied(handler, "git checkout HEAD -- a.txt", repo)
+
+    def test_a_sparse_path_outside_the_cone_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        _git(repo, "sparse-checkout", "set", "--no-cone", "/a.txt")
+        (repo / "sub").mkdir(exist_ok=True)
+        (repo / "sub" / "c.txt").write_text("local work outside the cone\n")
+        _denied(handler, f"git checkout {_OLD} -- sub/c.txt", repo)
+
+    def test_a_sparse_path_outside_the_cone_and_absent_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        _git(repo, "sparse-checkout", "set", "--no-cone", "/a.txt")
+        _denied(handler, f"git checkout {_OLD} -- sub/c.txt", repo)
+
+    def test_an_unmerged_path_is_denied(self, handler: DestructiveGitHandler, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "-b", "other", _OLD)
+        (repo / "a.txt").write_text("other side\n")
+        _git(repo, "commit", "-q", "-a", "-m", "other")
+        _git(repo, "checkout", "-q", "main")
+        (repo / "a.txt").write_text("main side\n")
+        _git(repo, "commit", "-q", "-a", "-m", "main")
+        merge = subprocess.run(
+            ["git", *_GIT_IDENTITY, "merge", "-q", "other"], cwd=repo, capture_output=True
+        )
+        assert merge.returncode != 0
+        _denied(handler, "git checkout HEAD -- a.txt", repo)
+
+    def test_an_unparseable_index_listing_denies(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def garbled(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "ls-files" in args:
+                return subprocess.CompletedProcess(["git", *args], 0, "not a listing\0", "")
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", garbled)
+        _denied(handler, f"git checkout {_OLD} -- a.txt", repo)
+
+
+class TestBytesTheDiffCannotSeeStayDenied:
+    def test_crlf_endings_normalised_away_by_autocrlf_are_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """Review of PR 293: under `core.autocrlf=input` the diff is clean, the bytes are not."""
+        _git(repo, "config", "core.autocrlf", "input")
+        (repo / "a.txt").write_bytes(b"content of a.txt\r\n")
+        _denied(handler, "git checkout HEAD -- a.txt", repo)
+        _denied(handler, f"git checkout {_OLD} -- a.txt", repo)
+
+    def test_an_exec_bit_hidden_by_filemode_false_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        _git(repo, "config", "core.fileMode", "false")
+        (repo / "a.txt").chmod(0o755)
+        _denied(handler, "git checkout HEAD -- a.txt", repo)
+
+    def test_a_hash_object_failure_denies(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def hash_fails(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "hash-object" in args:
+                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: broken")
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", hash_fails)
+        _denied(handler, f"git checkout {_OLD} -- a.txt", repo)
+
+
+class TestAnUnreadablePathDeniesCleanly:
+    def test_a_name_too_long_for_the_filesystem_is_denied_not_raised(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """Review of PR 293: `exists()` raised OSError out of handle()."""
+        _denied(handler, f"git checkout {_OLD} -- {'x' * 300}", repo)
+
+    def test_a_filesystem_error_on_a_probe_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def broken(self: Path) -> bool:
+            raise PermissionError("probe refused")
+
+        monkeypatch.setattr(Path, "is_symlink", broken)
+        _denied(handler, f"git checkout {_OLD} -- gone.txt", repo)
+
 
 class TestShapesThisReadingCannotSettleStayDenied:
     @pytest.mark.parametrize(

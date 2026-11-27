@@ -1043,8 +1043,116 @@ def _checkout_restore_loss(
         return _checkout_paths_loss(directory, paths)
 
 
+class _CheckoutUnproven(Exception):
+    """A checkout path whose local state the proof could not show is empty of changes."""
+
+
+@dataclass(frozen=True)
+class _IndexEntry:
+    """One index entry of ``git ls-files --stage -v``: what a checkout would replace."""
+
+    tag: str
+    mode: str
+    object_id: str
+    stage: str
+    path: str
+
+
+# `git ls-files --stage -v -z` record: tag, mode, object id, stage, a TAB, then the path.
+_INDEX_RECORD: Final[re.Pattern[str]] = re.compile(
+    r"(?P<tag>\S) (?P<mode>[0-7]{6}) (?P<object_id>[0-9a-f]{40,64}) (?P<stage>[0-3])\t(?P<path>.+)",
+    re.DOTALL,
+)
+_RECORD_SEPARATOR: Final[str] = "\0"
+# `H` is a plain cached entry. Every other tag hides worktree state from `git diff`: a
+# lowercase tag is assume-unchanged, `S`/`s` is skip-worktree, `M` is unmerged.
+_PLAIN_CACHED_TAG: Final[str] = "H"
+_MERGED_STAGE: Final[str] = "0"
+# Regular-file index modes, mapped to whether the file is executable.
+_REGULAR_FILE_MODES: Final[dict[str, bool]] = {"100644": False, "100755": True}
+_EXECUTABLE_BITS: Final[int] = 0o111
+
+
+def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
+    """Every index entry ``name`` names, each a plain merged entry, else _CheckoutUnproven."""
+    listed = run_git(
+        directory,
+        _LITERAL_PATHSPECS,
+        "ls-files",
+        "--stage",
+        "-v",
+        "-z",
+        _OPTIONS_END,
+        name,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if listed.returncode != 0:
+        raise _CheckoutUnproven(f"git could not list `{name}` in the index")
+    entries: list[_IndexEntry] = []
+    for record in listed.stdout.split(_RECORD_SEPARATOR):
+        if not record:
+            continue
+        found = _INDEX_RECORD.fullmatch(record)
+        if found is None:
+            raise _CheckoutUnproven(f"git's index listing for `{name}` could not be read")
+        entry = _IndexEntry(**found.groupdict())
+        if entry.tag != _PLAIN_CACHED_TAG:
+            raise _CheckoutUnproven(
+                f"`{entry.path}` carries index tag `{entry.tag}` (assume-unchanged, "
+                "skip-worktree or unmerged), which hides its changes from `git diff`"
+            )
+        if entry.stage != _MERGED_STAGE:
+            raise _CheckoutUnproven(f"`{entry.path}` is unmerged")
+        entries.append(entry)
+    return entries
+
+
+def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]) -> str | None:
+    """Why the existing ``name`` holds bytes or a mode its index entry lacks, or None.
+
+    ``git diff`` compares after clean filters and line-ending conversion and may ignore
+    the executable bit, so the raw bytes are hashed with no filters and compared with
+    the index object, and the executable bit with the index mode.
+    """
+    target = directory / name
+    if not path_is_file(target, unreadable_means=False):
+        return f"`{name}` is not one regular file"
+    if not entries:
+        return f"`{name}` is untracked work the checkout would overwrite"
+    if len(entries) != 1 or entries[0].path != name:
+        return f"`{name}` is not one tracked file"
+    entry = entries[0]
+    executable = _REGULAR_FILE_MODES.get(entry.mode)
+    if executable is None:
+        return f"`{name}` is not a regular file in the index"
+    if bool(target.stat().st_mode & _EXECUTABLE_BITS) != executable:
+        return f"`{name}` has an executable bit the index does not record"
+    hashed = run_git(
+        directory, "hash-object", "--no-filters", _OPTIONS_END, name, timeout=Timeout.GIT_CONTEXT
+    )
+    if hashed.returncode != 0:
+        return f"git could not hash `{name}`"
+    if hashed.stdout.strip() != entry.object_id:
+        return f"`{name}` holds bytes (line endings or filtered content) the index does not"
+    return None
+
+
 def _checkout_paths_loss(directory: Path, paths: tuple[str, ...]) -> str | None:
-    """Why checking out ``paths`` in ``directory`` may lose local state, or None."""
+    """Why checking out ``paths`` in ``directory`` may lose local state, or None.
+
+    Any filesystem error on a probe (a name too long, a permission refusal) is a path
+    whose state is unknown, so it denies with the reason rather than escaping.
+    """
+    try:
+        return _checkout_paths_proof(directory, paths)
+    except _CheckoutUnproven as unproven:
+        return str(unproven)
+    except OSError as error:
+        return f"a named path could not be read ({error.strerror or type(error).__name__})"
+
+
+def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None:
+    """:func:`_checkout_paths_loss` without its error translation."""
     top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
     if top.returncode != 0 or not top.stdout.strip():
         return f"`{directory}` is not in a git working tree git could read"
@@ -1058,25 +1166,12 @@ def _checkout_paths_loss(directory: Path, paths: tuple[str, ...]) -> str | None:
             return f"`{name}` passes through a symlink"
         if not path_is_relative_to(base / name, top_level):
             return f"`{name}` is outside the repository"
-        listed = run_git(
-            directory,
-            _LITERAL_PATHSPECS,
-            "ls-files",
-            "--cached",
-            "-z",
-            _OPTIONS_END,
-            name,
-            timeout=Timeout.GIT_CONTEXT,
-        )
-        if listed.returncode != 0:
-            return f"git could not list `{name}` in the index"
-        indexed = bool(listed.stdout)
+        entries = _index_entries(directory, name)
         if target.exists():
-            if not path_is_file(target, unreadable_means=False):
-                return f"`{name}` is not one regular file"
-            if not indexed:
-                return f"`{name}` is untracked work the checkout would overwrite"
-        elif indexed:
+            problem = _present_file_problem(directory, name, entries)
+            if problem is not None:
+                return problem
+        elif entries:
             return f"`{name}` is deleted in the working tree but still in the index"
     for staged, where in ((False, "unstaged"), (True, "staged")):
         args = ("diff", "--cached") if staged else ("diff",)
