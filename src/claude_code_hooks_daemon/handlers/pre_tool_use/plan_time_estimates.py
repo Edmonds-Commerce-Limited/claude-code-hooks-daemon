@@ -84,20 +84,26 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         r"\brate\s+limit",
     ]
 
-    #: A duration figure; the unit alone never decides, its clause's words do.
-    _DURATION_RE: ClassVar[re.Pattern[str]] = re.compile(
-        r"\b\d+(?:-\d+)?\s*(?:hour|hr|minute|min|second|sec|day|week|month)s?\b", re.IGNORECASE
+    #: Second, minute and hour figures: the only durations a parameter word can excuse.
+    _SHORT_DURATION_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"\b\d+(?:-\d+)?\s*(?:h|hrs?|hours?|mins?|minutes?|s|secs?|seconds?)\b", re.IGNORECASE
     )
-    #: Words that make a duration an effort or schedule statement.
-    _EFFORT_RE: ClassVar[re.Pattern[str]] = re.compile(
-        r"\b(?:takes?|estimates?|estimated|effort|ETA|deadline|sprint|due|"
-        r"(?:days?|hours?|weeks?)\s+of\s+work|of\s+(?:work|implementation|development))\b",
+    #: Day-scale or longer figures and effort units: never excused by a parameter word.
+    _LONG_DURATION_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"\b\d+(?:-\d+)?\s*(?:d|days?|wks?|weeks?|months?|years?|"
+        r"(?:person|man)-days?|sprints?|story\s+points?)\b",
         re.IGNORECASE,
     )
-    #: Words that make a duration a behaviour parameter of the thing being built.
+    #: Words that make a short duration an effort or schedule statement.
+    _EFFORT_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"\b(?:takes?|estimat\w*|effort|ETA|deadline|due|sprint|work|implement\w*|develop\w*|"
+        r"phase\s+\d+|total|overall|combined)\b",
+        re.IGNORECASE,
+    )
+    #: Words that make a short duration a behaviour parameter of the thing being built.
     _PARAMETER_RE: ClassVar[re.Pattern[str]] = re.compile(
-        r"\b(?:timeouts?|cooldowns?|windows?|intervals?|TTL|delays?|limits?|expiry|expires?|"
-        r"retry|retries|backoff|periods?|debounce|grace|heartbeats?|jitter|poll(?:s|ing)?)\b",
+        r"\b(?:cooldowns?|windows?|intervals?|TTL|backoff|jitter|timeouts?|debounce|grace|"
+        r"expiry|period)\b",
         re.IGNORECASE,
     )
     _CLAUSE_BOUNDARY_RE: ClassVar[re.Pattern[str]] = re.compile(r"[;,]|\.\s")
@@ -184,31 +190,24 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
     def _all_durations_are_parameters(self, line: str) -> bool:
         """Return True when every duration on the line states a behaviour parameter.
 
-        A duration is a parameter when its own clause carries a parameter word
-        (cooldown, interval, backoff, ...) and no effort or schedule word.
-        A matched line with no duration at all (a bare date) is never one.
+        Only second, minute and hour figures can be a parameter: a clause with
+        a day, week, month, year or sprint figure always counts as an estimate.
+        A short-unit clause is a parameter when it carries a parameter word and
+        no effort word. A table row, a heading, or a line with no duration at
+        all (a bare date) is never exempt. The line is split into clauses once.
         """
-        durations = list(self._DURATION_RE.finditer(line))
-        if not durations:
+        if line.lstrip().startswith(("|", "#")):
             return False
-        for duration in durations:
-            clause = self._clause_around(line, duration.start())
+        found_parameter = False
+        for clause in self._CLAUSE_BOUNDARY_RE.split(line):
+            if self._LONG_DURATION_RE.search(clause):
+                return False
+            if not self._SHORT_DURATION_RE.search(clause):
+                continue
             if self._EFFORT_RE.search(clause) or not self._PARAMETER_RE.search(clause):
                 return False
-        return True
-
-    @classmethod
-    def _clause_around(cls, line: str, position: int) -> str:
-        """Return the clause of ``line`` (split on ; , and sentence stops) holding ``position``."""
-        start = 0
-        end = len(line)
-        for boundary in cls._CLAUSE_BOUNDARY_RE.finditer(line):
-            if boundary.end() <= position:
-                start = boundary.end()
-            else:
-                end = boundary.start()
-                break
-        return line[start:end]
+            found_parameter = True
+        return found_parameter
 
     def _line_has_estimate(self, line: str) -> bool:
         """Return True if the line matches any blocked estimate pattern."""

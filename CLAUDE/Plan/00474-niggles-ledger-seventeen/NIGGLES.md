@@ -8831,7 +8831,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW: a false positive with a workaround that hides the real wording.
 
-**Status**: ✅ Fixed on branch niggle-n755-time-estimate-behaviour-parameter. Each duration is judged by its own clause: a parameter word (cooldown, window, interval, TTL, backoff, ...) without an effort or schedule word passes; effort wording and dated targets still block. Tests: `TestBehaviourParameterDurations`. Release note 123.
+**Status**: 🟡 Not reproduced as reported: the seat's sentence passed on main (its line holds the words "usage" and "session", which the existing technical-term exemption accepts). Fixed on branch niggle-n755-time-estimate-behaviour-parameter for the two variants that did flag on main ("a cooldown of about 8 minutes", "needs about 8 minutes of cooldown"): only second, minute and hour figures are excused, by a parameter word with no effort word in the same clause; day-scale figures, table rows and headings are never excused. Tests: `TestBehaviourParameterDurations`. Release note 123. Awaiting the exact refused text from the seat.
 
 ### N756 — no route for an owner-approved in-place redaction of a journal entry
 
