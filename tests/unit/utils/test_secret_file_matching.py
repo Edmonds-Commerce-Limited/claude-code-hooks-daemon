@@ -1060,10 +1060,8 @@ class TestPythonDashCImportStatements:
     def test_a_quoted_import_without_the_dash_c_flag_is_still_a_mention(self) -> None:
         """Scoped to the ``-c`` shape specifically, not to any quoted text
         starting with the word "import" -- proves the exemption did not
-        widen into a general quote-anchored amnesty. ``cat`` opens its operand,
-        so the bare dotted word counts on its own (N749: under ``echo`` the
-        last quoted word is no longer misread as glued to its closing quote)."""
-        command = 'cat "import mykeys.secret"'
+        widen into a general quote-anchored amnesty."""
+        command = 'echo "import mykeys.secret"'
         assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
 
     def test_a_dash_c_import_does_not_hide_a_separate_real_argument(self) -> None:

@@ -2570,6 +2570,34 @@ def _is_underscore_identifier_mention(token: str, pattern: str) -> bool:
     )
 
 
+def _every_move_is_placed(cwds: tuple[str, ...]) -> bool:
+    """Whether every directory move of the command landed somewhere known (N749 review 2).
+
+    A plain tuple carries no such record, so it answers False (fail closed).
+    """
+    return (
+        isinstance(cwds, CwdSet)
+        and not cwds.computed
+        and not cwds.unscanned
+        and not cwds.overflowed
+    )
+
+
+def may_hold_underscore_identifier_mention(command: str, patterns: tuple[str, ...]) -> bool:
+    """Whether ``command`` holds every literal piece of some wildcard underscore pattern.
+
+    Only then can :func:`_is_underscore_identifier_mention` gate a word, which is
+    when the Bash route needs the protected-file index (N749 review minor 5).
+    """
+    for pattern in patterns:
+        if "_" not in pattern or not any(char in _PATTERN_WILDCARDS for char in pattern):
+            continue
+        pieces = [piece for piece in re.split(r"[*?]|\[[^\]]*\]", pattern) if piece]
+        if pieces and all(piece in command for piece in pieces):
+            return True
+    return False
+
+
 def _is_spaced_word(token: str) -> bool:
     """True for a multi-word string with no path separator in it."""
     return len(token.split()) > 1 and "/" not in token and "\\" not in token
@@ -3018,9 +3046,10 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
             after = command[end : end + 1]
             if not (before_ok and (after == "" or after.isspace() or after == quote_char)):
                 return True
-            # The last word of a quoted string ends at its closing quote, so the
-            # character after the WORD is the one after that quote (N749).
-            word_start, word_end = quote_index, end + 1 if after == quote_char else end
+            # The last word of a quoted string is left counted: it may end a
+            # spaced file NAME (`pr 'add x.secret.key'`), which only the whole
+            # quoted word spells (N749 review blocker 1).
+            word_start, word_end = quote_index, end
     before = command[word_start - 1] if word_start > 0 else ""
     after_char = command[word_end] if word_end < len(command) else ""
     if before and not before.isspace() and before not in _COMMAND_SEPARATOR_CHARS:
@@ -3121,6 +3150,21 @@ def _is_indexed_name(token: str, index: "ProtectedFileIndex", cwds: tuple[str, .
     return any(entry.relpath.rsplit("/", 1)[-1] == token for entry in index.files)
 
 
+def _names_a_present_file(
+    token: str,
+    *,
+    index: "ProtectedFileIndex | None",
+    cwds: tuple[str, ...],
+    cwd: str | None,
+    project_root: str | None,
+) -> bool:
+    """Whether ``token`` names a file under any base the command may run in, or an indexed one."""
+    bases = {base for base in (*cwds, cwd, project_root) if base}
+    if any(os.path.lexists(Path(base) / token) for base in bases):
+        return True
+    return index is not None and _is_indexed_name(token, index, cwds)
+
+
 def _bare_dotted_counts(
     token: str,
     command: str,
@@ -3132,10 +3176,7 @@ def _bare_dotted_counts(
     project_root: str | None,
 ) -> bool:
     """Whether a bare dotted ``token`` that matched a pattern is a real mention."""
-    bases = {base for base in (*cwds, cwd, project_root) if base}
-    if any(os.path.lexists(Path(base) / token) for base in bases):
-        return True
-    if index is not None and _is_indexed_name(token, index, cwds):
+    if _names_a_present_file(token, index=index, cwds=cwds, cwd=cwd, project_root=project_root):
         return True
     check = _bash_occurrence_counts if context == "bash" else _content_occurrence_counts
     occurrences = [m.span() for m in re.finditer(re.escape(token), command)]
@@ -3364,7 +3405,13 @@ def iter_protected_mentions(
             return None
         if (
             found is not None
-            and (_is_bare_dotted(core) or _is_underscore_identifier_mention(core, found))
+            and (
+                _is_bare_dotted(core)
+                or (
+                    _is_underscore_identifier_mention(core, found)
+                    and (context != "bash" or _every_move_is_placed(effective))
+                )
+            )
             and not _bare_dotted_counts(
                 core,
                 command,
@@ -3401,8 +3448,15 @@ def iter_protected_mentions(
             if pattern is not None and _is_spaced_word(token):
                 # A quoted multi-word argument: its words are judged one by one
                 # (the ordinary stream yields them too), so one that names no
-                # file does not make the whole string a mention.
+                # file does not make the whole string a mention -- unless the
+                # whole string itself names a file that is there or indexed
+                # (N749 review blocker 1: `pr 'add x_vault_pass'`).
+                whole = pattern
                 pattern = next((p for p in map(judge, token.split()) if p is not None), None)
+                if pattern is None and _names_a_present_file(
+                    token, index=index, cwds=effective, cwd=cwd, project_root=project_root
+                ):
+                    pattern = whole
             mention_cache[token] = pattern
         if views_only and pattern != PROCESS_VIEW_PATTERN:
             continue
@@ -5569,6 +5623,7 @@ class CwdSet(tuple[str, ...]):
     link_dirs: tuple[str, ...]
     overflowed: bool
     unscanned: bool
+    computed: bool
     named: LinkNames | None
     _by_name: dict[str, list[str]]
     _existing: tuple[str, ...]
@@ -5582,8 +5637,12 @@ class CwdSet(tuple[str, ...]):
         unscanned: bool = False,
         scanned: Sequence[str] = (),
         named: LinkNames | None = None,
+        computed: bool = False,
     ) -> "CwdSet":
         instance = super().__new__(cls, tuple(dict.fromkeys(lexical)))
+        # A move landed somewhere not known (N749 review important 2): a word
+        # gated on "exists here" cannot be cleared, since "here" is unknown.
+        instance.computed = computed
         instance.link_dirs = tuple(existing[:LINK_DIRECTORY_CAP])
         # Past the scan cap the holding directories are judged by name, never one by
         # one, so the set is past LINK_DIRECTORY_CAP whatever ``existing`` holds.
@@ -5742,6 +5801,8 @@ class _DirectoryWalk:
         self.scanned: dict[str, None] = {}
         # Past the scan cap: the project's link paths, judged by name (N669/N670).
         self.named: LinkNames | None = None
+        # A move whose landing place is not known: computed, or found through CDPATH.
+        self.computed = cdpath
         if cwd is not None and Path(cwd).is_absolute():
             self._add(cwd)
 
@@ -5764,6 +5825,7 @@ class _DirectoryWalk:
         that also placed the move (git's top level, ``~``) still fails closed:
         its placement rests on state the command can change.
         """
+        self.computed = True
         root = resolve_project_root()
         if root:
             self._add(os.path.normpath(root))
@@ -5900,6 +5962,7 @@ class _DirectoryWalk:
             unscanned=self.unscanned,
             scanned=tuple(self.scanned),
             named=self.named,
+            computed=self.computed,
         )
 
 

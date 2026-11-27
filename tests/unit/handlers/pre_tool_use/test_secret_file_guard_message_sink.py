@@ -222,17 +222,53 @@ class TestUnderscoreIdentifierNarrowing:
         content = f"def {_IDENTIFIER}() -> None:\n    assert True\n"
         assert _write(project.root / "test_x.py", content).decision == Decision.ALLOW
 
-    @pytest.mark.parametrize("quote", ["", "'"])
-    def test_identifier_printed_by_echo_is_allowed(self, project: Project, quote: str) -> None:
-        command = f"echo {quote}add {_IDENTIFIER}{quote}"
+    @pytest.mark.parametrize(
+        "command",
+        [f"echo add {_IDENTIFIER}", f"echo 'add {_IDENTIFIER} now'", f"echo {_IDENTIFIER}"],
+    )
+    def test_identifier_printed_by_echo_is_allowed(self, project: Project, command: str) -> None:
         assert _bash(command, project.root).decision == Decision.ALLOW
 
-    def test_the_last_quoted_word_is_placed_like_any_other(self, project: Project) -> None:
-        """A bare dotted word ending a quoted string is gated as one in the middle is."""
-        dotted = "cfg" + _SUFFIX + ".key"
-        assert _bash(f"echo 'see {dotted}'", project.root).decision == Decision.ALLOW
-        assert _bash(f"cat 'see {dotted}'", project.root).decision == Decision.DENY
-        assert _bash(f"echo 'see {dotted}' > out", project.root).decision == Decision.ALLOW
+    def test_the_last_word_of_a_quoted_string_still_counts(self, project: Project) -> None:
+        """Review blocker 1: that word may end a spaced file NAME, so it is not relaxed."""
+        assert _bash(f"echo 'add {_IDENTIFIER}'", project.root).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "add kept2_" + _VAULT_STEM,
+            "kept2_" + _VAULT_STEM + " more",
+            "add z" + _SUFFIX + ".key",
+            "z" + _SUFFIX + ".key more",
+            "two words" + _SUFFIX,
+        ],
+    )
+    @pytest.mark.parametrize("reader", ["pr", "expand", "nice pr", "command pr", "iconv -f utf-8"])
+    @pytest.mark.parametrize("quote", ["'", '"'])
+    def test_a_spaced_protected_name_that_exists_is_denied(
+        self, project: Project, name: str, reader: str, quote: str
+    ) -> None:
+        """Review blocker 1: the WHOLE quoted word names a file, whatever its words do."""
+        (project.root / name).write_bytes(b"DUMMY\n")
+        command = f"{reader} {quote}{name}{quote}"
+        assert _bash(command, project.root).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "move",
+        ['cd "$(echo ../ext)"', "CDPATH=.. cd ext", 'cd "$D"', "cd -", "cd"],
+    )
+    def test_an_identifier_after_an_unplaced_cd_is_denied(
+        self, project: Project, move: str
+    ) -> None:
+        """Review important 2: where the word is read from is not known, so it counts."""
+        outside = project.root.parent / "ext"
+        outside.mkdir(exist_ok=True)
+        (outside / ("ext_" + _VAULT_STEM)).write_bytes(b"DUMMY\n")
+        command = f"{move} && pr ext_{_VAULT_STEM}"
+        assert _bash(command, project.root).decision == Decision.DENY
+
+    def test_an_identifier_after_a_literal_cd_is_still_gated(self, project: Project) -> None:
+        assert _bash(f"cd vault && pr ext_{_VAULT_STEM}", project.root).decision == (Decision.ALLOW)
 
     def test_identifier_as_a_commit_message_is_still_judged_as_a_pathspec(
         self, project: Project
@@ -259,45 +295,23 @@ class TestUnderscoreIdentifierNarrowing:
         assert _bash(command, project.root).decision == Decision.DENY
 
 
-class TestDenyPlacesTheWordInsideALongToken:
-    """N760: a deny on a long quoted token says WHICH word in it matched, by position."""
+#: An exact-name pattern holding an underscore, assembled.
+_KEY_NAME = "id_" + "rs" + "a"
 
-    def test_the_word_number_and_place_are_reported(self, project: Project) -> None:
-        token = f"notes and more {_SG} words"
-        haystack = f"x\nprintf '{token}'"
-        line = guard_module._word_in_token(haystack, token, _SECRET_GLOB)
-        assert line == "The matched word is word 4 of that token, at line 2, column 24."
-        assert _SECRET_GLOB not in (line or "")
 
-    def test_a_token_the_input_does_not_hold_verbatim_gets_the_number_only(
-        self, project: Project
-    ) -> None:
-        line = guard_module._word_in_token("other", f"a {_SG}", _SECRET_GLOB)
-        assert line == "The matched word is word 2 of that token."
+class TestTheIndexIsBuiltOnlyWhenAnIdentifierCouldMatch:
+    """Review minor 5: an underscore alone does not cost an index build."""
 
-    @pytest.mark.parametrize("token", ["vault/" + _PROTECTED_NAME, "a b c"])
-    def test_no_line_for_one_word_or_no_matching_word(self, project: Project, token: str) -> None:
-        assert guard_module._word_in_token(token, token, _SECRET_GLOB) is None
+    @pytest.mark.parametrize("command", ["ls -la my_dir", "FOO_BAR=1 make", "echo $HOME_X"])
+    def test_no_underscore_pattern_stem_needs_no_index(self, command: str) -> None:
+        patterns = SecretFileGuardHandler()._patterns()
+        assert sfm.may_hold_underscore_identifier_mention(command, patterns) is False
 
-    def test_a_deny_on_a_one_word_token_carries_no_word_line(self, project: Project) -> None:
-        result = _bash("cat 'vault/" + _PROTECTED_NAME + "'", project.root)
-        assert result.decision == Decision.DENY
-        assert "The matched word is" not in (result.reason or "")
+    @pytest.mark.parametrize("command", [f"echo {_IDENTIFIER}", f"pr x_{_VAULT_STEM}"])
+    def test_an_underscore_pattern_stem_needs_the_index(self, command: str) -> None:
+        patterns = SecretFileGuardHandler()._patterns()
+        assert sfm.may_hold_underscore_identifier_mention(command, patterns) is True
 
-    def test_the_deny_appends_the_word_line_for_a_long_token(
-        self, project: Project, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The whole-token report N760 saw, forced: the ordinary stream names one word first."""
-        token = f"notes and more vault/{_PROTECTED_NAME} words"
-        handler = SecretFileGuardHandler()
-        monkeypatch.setattr(
-            handler, "_take_cached_matched", lambda _hook_input: (_SECRET_GLOB, token, "bash")
-        )
-        hook_input = {
-            "tool_name": ToolName.BASH,
-            "tool_input": {"command": f"printf '{token}'"},
-            "cwd": str(project.root),
-        }
-        reason = handler.handle(hook_input).reason or ""
-        assert "The matched word is word 4 of that token, at line 1, column 24." in reason
-        assert _SECRET_GLOB not in reason
+    def test_an_exact_name_pattern_never_asks_for_it(self) -> None:
+        command = "echo " + _KEY_NAME
+        assert sfm.may_hold_underscore_identifier_mention(command, (_KEY_NAME,)) is False

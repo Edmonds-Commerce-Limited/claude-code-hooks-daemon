@@ -66,7 +66,9 @@ _HEREDOC_TAIL: Final[re.Pattern[str]] = re.compile(
     r" +<<(?:'(?P<single>[A-Za-z_][A-Za-z0-9_]*)'|\"(?P<double>[A-Za-z_][A-Za-z0-9_]*)\")$"
 )
 #: A single-quoted here-string ending the command.
-_HERE_STRING_TAIL: Final[re.Pattern[str]] = re.compile(r" +<<< *'[^']*'\s*$")
+_HERE_STRING_TAIL: Final[re.Pattern[str]] = re.compile(r" +<<< *'[^']*'[ \t\n]*\Z")
+#: What bash treats as blank around a statement; never Unicode whitespace.
+_BASH_BLANKS: Final[str] = " \t\n"
 #: The one pipe a producer may use: a lone ``|`` between spaces.
 _PIPE: Final[re.Pattern[str]] = re.compile(r" +\| +")
 
@@ -107,7 +109,7 @@ def _heredoc_view(command: str) -> str | None:
     if delimiter not in lines:
         return None
     after = lines[lines.index(delimiter) + 1 :]
-    if any(line.strip() for line in after):
+    if any(line.strip(_BASH_BLANKS) for line in after):
         return None
     return _view(first[: tail.start()])
 
@@ -141,7 +143,7 @@ def _is_literal_producer(text: str) -> bool:
 
 
 def _pipe_view(command: str) -> str | None:
-    body = command.rstrip()
+    body = command.rstrip(_BASH_BLANKS)
     pipes = list(_PIPE.finditer(body))
     if not pipes:
         return None

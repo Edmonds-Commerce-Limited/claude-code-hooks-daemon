@@ -16,6 +16,11 @@ import pytest
 
 from claude_code_hooks_daemon.utils.message_sink import MESSAGE_SINK_VERBS, message_sink_view
 
+#: Unicode blanks bash does NOT treat as blank, built by code point (plain ASCII source).
+_NBSP = chr(0x00A0)
+_LINE_SEPARATOR = chr(0x2028)
+_IDEOGRAPHIC_SPACE = chr(0x3000)
+_EM_SPACE = chr(0x2003)
 _BODY = "prose that quotes a glob such as x.y*z and a/b/** and a name like k_e_y"
 
 
@@ -56,6 +61,20 @@ class TestAcceptedShapes:
     )
     def test_shape_gives_the_view(self, command: str, view: str) -> None:
         assert message_sink_view(command) == view
+
+    @pytest.mark.parametrize("tail", ["\n", "\n \t\n", "\n\n"])
+    def test_ascii_blank_lines_after_the_closer_are_allowed(self, tail: str) -> None:
+        assert message_sink_view(f"teamchat report <<'EOF'\nx\nEOF{tail}") == "teamchat report"
+
+    @pytest.mark.parametrize("tail", [" ", "\t"])
+    def test_a_closer_with_trailing_blanks_is_not_the_closer(self, tail: str) -> None:
+        """Bash closes only on a line exactly equal to the delimiter."""
+        assert message_sink_view(f"teamchat report <<'EOF'\nx\nEOF{tail}") is None
+
+    @pytest.mark.parametrize("tail", ["\n", "\n \t\n", "  ", "\t\n"])
+    def test_ascii_blanks_after_the_feed_are_allowed(self, tail: str) -> None:
+        assert message_sink_view(f"teamchat report <<< 'x'{tail}") == "teamchat report"
+        assert message_sink_view(f"printf 'x' | teamchat report{tail}") == "teamchat report"
 
     def test_a_body_line_that_only_starts_like_the_closer_is_body(self) -> None:
         command = f"teamchat report <<'EOF'\nEOF but not the closer\n{_BODY}\nEOF"
@@ -144,6 +163,13 @@ class TestRejectedShapes:
             "printf 'x' 'y' 2>o | teamchat report",
             "(printf 'x') | teamchat report",
             "printf 'x' | printf 'y' | teamchat report",
+            # Review minor 6: only space, tab and newline are blank to bash.
+            f"teamchat report <<'EOF'\n{_BODY}\nEOF\n{_NBSP}",
+            f"teamchat report <<'EOF'\n{_BODY}\nEOF\n{_LINE_SEPARATOR}",
+            f"teamchat report <<< '{_BODY}'{_NBSP}",
+            f"teamchat report <<< '{_BODY}'{_IDEOGRAPHIC_SPACE}",
+            f"printf 'x' | teamchat report{_NBSP}",
+            f"printf 'x' | teamchat report{_EM_SPACE}",
             # Unterminated quotes.
             "printf 'x | teamchat report",
             f"teamchat say --to 'a <<'EOF'\n{_BODY}\nEOF",
