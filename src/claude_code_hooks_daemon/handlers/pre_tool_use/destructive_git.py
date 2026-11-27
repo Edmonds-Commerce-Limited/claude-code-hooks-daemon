@@ -2,6 +2,9 @@
 
 import logging
 import re
+import stat
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -59,10 +62,15 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
     placement_problem,
 )
-from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    HEADS_PREFIX,
+    branch_ref,
+    git_deadline,
+    run_git,
+)
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
-from claude_code_hooks_daemon.utils.path_predicates import path_is_dir, path_is_file
+from claude_code_hooks_daemon.utils.path_predicates import path_exists, path_is_dir, path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -445,7 +453,12 @@ _VERBOSE_OVERRIDES: Final[dict[str, str]] = {
 
 #: Rules with a lossless case: allowed when the containment proof passes (section 11).
 _LOSSLESS_WHEN_PROVEN: Final[frozenset[str]] = frozenset(
-    {RuleID.GIT_BRANCH_FORCE_DELETE, RuleID.GIT_WORKTREE_REMOVE_FORCE, RuleID.GIT_RESTORE}
+    {
+        RuleID.GIT_BRANCH_FORCE_DELETE,
+        RuleID.GIT_WORKTREE_REMOVE_FORCE,
+        RuleID.GIT_RESTORE,
+        RuleID.GIT_CHECKOUT_DISCARD,
+    }
 )
 _MODE_OFF: Final[str] = "off"
 _MODE_WARN: Final[str] = "warn"
@@ -928,6 +941,288 @@ def _restore_command_loss(command: str, cwd: Path) -> str | None:
         restores += 1
     if restores == 0:
         return "no `git restore` in the command could be read"
+    return None
+
+
+_CHECKOUT: Final[str] = "checkout"
+_DASH_C: Final[str] = "-C"
+#: One wall-clock bound on every git call of the checkout proof (module-level for tests).
+_CHECKOUT_PROOF_BUDGET: float = Timeout.GIT_CHECKOUT_RESTORE_PROOF
+# A commit word safe to hand to git as one argument: no option, glob, variable or escape.
+_LITERAL_COMMIT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_@][A-Za-z0-9._/@~^{}+-]*$")
+_PATH_SEPARATOR: Final[str] = "/"
+# Path components that do not name one entry: `a//b`, `a/.`, `a/../b`, a trailing `/`.
+_NON_NAMING_COMPONENTS: Final[frozenset[str]] = frozenset({"", ".", ".."})
+_DIFF_CLEAN: Final[int] = 0
+_DIFF_DIFFERS: Final[int] = 1
+# Pathspec magic is off for the proof's git calls; `_NOT_A_LITERAL_PATH` has already
+# refused every word where that changes the meaning, so the proof reads the same paths.
+_LITERAL_PATHSPECS: Final[str] = "--literal-pathspecs"
+
+
+def _checkout_note(command: str, cwd: Path) -> tuple[str, str] | None:
+    """None when ``command`` is one checkout with nothing local to lose, else (rule, why)."""
+    if _SUBSTITUTION.search(command):
+        return RuleID.GIT_CHECKOUT_DISCARD, _with_principle(
+            _unverified("a command or process substitution can name a path this reading misses")
+        )
+    loss = _checkout_command_loss(command, cwd)
+    if loss is None:
+        return None
+    return RuleID.GIT_CHECKOUT_DISCARD, _with_principle(
+        f"Not restored: {loss}. Only a command that is ONE plain "
+        "`git checkout <commit> -- <paths>` is allowed, and only when every literal path is "
+        "absent from the working tree and the index or is a tracked regular file, and "
+        "`git diff` and `git diff --cached` are both clean for them, since that discards "
+        "nothing local. `git show <commit>:<path>` reads a file without writing it."
+    )
+
+
+def _checkout_command_loss(command: str, cwd: Path) -> str | None:
+    """Why ``command`` as a whole may lose content, or None when it provably loses none.
+
+    It must be exactly one simple command: any other statement in a chain (``&&``,
+    ``;``, ``||``, a newline, a pipe) could change or recreate a path between this
+    reading and the checkout, so only a lone checkout is judged.
+    """
+    steps = simple_commands(command)
+    if len(steps) != 1:
+        return "the command runs more than the one `git checkout`"
+    step = steps[0]
+    if step.git is None or step.git.subcommand != _CHECKOUT:
+        return "no plain `git checkout` in the command could be read"
+    if step.words[0] != "git":
+        return "the checkout is run through a wrapper"
+    if step.redirects:
+        return "the command also writes a file by redirect"
+    return _checkout_restore_loss(step.git, cwd)
+
+
+def _checkout_restore_loss(
+    run: GitInvocation, cwd: Path, clock: Callable[[], float] = time.monotonic
+) -> str | None:
+    """Why ``run`` (one ``git checkout``) may lose content, or None when it loses none.
+
+    It loses none when it is ``git checkout <commit> -- <paths>`` and every path is
+    literal, inside the repository, and has no local state git would overwrite.
+    """
+    if run.assignments:
+        return f"`{run.assignments[0]}` changes what git reads"
+    options = iter(run.global_options)
+    for option in options:
+        if option == _DASH_C:
+            next(options, None)
+        elif not option.startswith(_DASH_C):
+            return f"`{option}` changes how git reads the command"
+    problem = placement_problem(run, cwd)
+    if problem is not None:
+        return problem
+    directory = invocation_directory(run, cwd)
+    if not path_is_dir(directory, unreadable_means=False):
+        return f"`{directory}` is not a directory"
+    if _OPTIONS_END not in run.arguments:
+        return "it names no `--`, so a path cannot be told from a commit"
+    split = run.arguments.index(_OPTIONS_END)
+    before, paths = run.arguments[:split], run.arguments[split + 1 :]
+    if not before:
+        return "it names no commit, so it restores from the index and discards unstaged changes"
+    for word in before:
+        if word.startswith("-"):
+            return f"`{word}` changes what `git checkout` overwrites"
+    if len(before) != 1 or not _LITERAL_COMMIT.match(before[0]):
+        return "it must name exactly one literal commit before `--`"
+    if not paths:
+        return "it names no path"
+    for name in paths:
+        if _NOT_A_LITERAL_PATH.search(name) or name.startswith(_PATH_SEPARATOR):
+            return f"`{name}` is not one literal relative path"
+        if any(part in _NON_NAMING_COMPONENTS for part in name.split(_PATH_SEPARATOR)):
+            return f"`{name}` is not one literal relative path"
+    # Every git call below shares one deadline: a call past it reports a timeout, which
+    # each check reads as "not proven", so a slow git denies instead of stalling.
+    with git_deadline(clock() + _CHECKOUT_PROOF_BUDGET, clock):
+        return _checkout_paths_loss(directory, paths)
+
+
+class _CheckoutUnproven(Exception):
+    """A checkout path whose local state the proof could not show is empty of changes."""
+
+
+@dataclass(frozen=True)
+class _IndexEntry:
+    """One index entry of ``git ls-files --stage -v``: what a checkout would replace."""
+
+    tag: str
+    mode: str
+    object_id: str
+    stage: str
+    path: str
+
+
+# `git ls-files --stage -v -z` record: tag, mode, object id, stage, a TAB, then the path.
+_INDEX_RECORD: Final[re.Pattern[str]] = re.compile(
+    r"(?P<tag>\S) (?P<mode>[0-7]{6}) (?P<object_id>[0-9a-f]{40,64}) (?P<stage>[0-3])\t(?P<path>.+)",
+    re.DOTALL,
+)
+_RECORD_SEPARATOR: Final[str] = "\0"
+# `H` is a plain cached entry. Every other tag hides worktree state from `git diff`: a
+# lowercase tag is assume-unchanged, `S`/`s` is skip-worktree, `M` is unmerged.
+_PLAIN_CACHED_TAG: Final[str] = "H"
+_MERGED_STAGE: Final[str] = "0"
+# Regular-file index modes, mapped to whether the file is executable.
+_REGULAR_FILE_MODES: Final[dict[str, bool]] = {"100644": False, "100755": True}
+_EXECUTABLE_BITS: Final[int] = 0o111
+
+
+def _index_records(directory: Path, name: str) -> list[_IndexEntry]:
+    """Every index entry the literal pathspec ``name`` matches, else _CheckoutUnproven."""
+    listed = run_git(
+        directory,
+        _LITERAL_PATHSPECS,
+        "ls-files",
+        "--stage",
+        "-v",
+        "-z",
+        _OPTIONS_END,
+        name,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if listed.returncode != 0:
+        raise _CheckoutUnproven(f"git could not list `{name}` in the index")
+    entries: list[_IndexEntry] = []
+    for record in listed.stdout.split(_RECORD_SEPARATOR):
+        if not record:
+            continue
+        found = _INDEX_RECORD.fullmatch(record)
+        if found is None:
+            raise _CheckoutUnproven(f"git's index listing for `{name}` could not be read")
+        entries.append(_IndexEntry(**found.groupdict()))
+    return entries
+
+
+def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
+    """Every index entry ``name`` names, each a plain merged entry, else _CheckoutUnproven."""
+    entries = _index_records(directory, name)
+    for entry in entries:
+        if entry.tag != _PLAIN_CACHED_TAG:
+            raise _CheckoutUnproven(
+                f"`{entry.path}` carries index tag `{entry.tag}` (assume-unchanged, "
+                "skip-worktree or unmerged), which hides its changes from `git diff`"
+            )
+        if entry.stage != _MERGED_STAGE:
+            raise _CheckoutUnproven(f"`{entry.path}` is unmerged")
+    return entries
+
+
+def _parent_problem(directory: Path, name: str) -> str | None:
+    """Why a parent of ``name`` would be replaced to make room for it, or None.
+
+    Restoring ``d/x`` first removes whatever sits at ``d`` when it is not a directory,
+    so every parent prefix must be absent or a real directory (lstat: a symlink counts
+    as not a directory), and no parent may itself be an index entry. An lstat error
+    other than absence propagates as OSError, which the caller turns into a denial.
+    """
+    parts = name.split(_PATH_SEPARATOR)
+    parents = [_PATH_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts))]
+    for parent in parents:
+        if any(entry.path == parent for entry in _index_records(directory, parent)):
+            return f"`{parent}` is a file in the index, so restoring `{name}` would replace it"
+    for parent in parents:
+        try:
+            mode = (directory / parent).lstat().st_mode
+        except FileNotFoundError:
+            # Not there is an answer, not a failure: the checkout creates this parent
+            # and every deeper one as directories, so nothing below it can be replaced.
+            break
+        if not stat.S_ISDIR(mode):
+            return f"`{parent}` is not a directory, so restoring `{name}` would replace it"
+    return None
+
+
+def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]) -> str | None:
+    """Why the existing ``name`` holds bytes or a mode its index entry lacks, or None.
+
+    ``git diff`` compares after clean filters and line-ending conversion and may ignore
+    the executable bit, so the raw bytes are hashed with no filters and compared with
+    the index object, and the executable bit with the index mode.
+    """
+    target = directory / name
+    if not path_is_file(target, unreadable_means=False):
+        return f"`{name}` is not one regular file"
+    if not entries:
+        return f"`{name}` is untracked work the checkout would overwrite"
+    if len(entries) != 1 or entries[0].path != name:
+        return f"`{name}` is not one tracked file"
+    entry = entries[0]
+    executable = _REGULAR_FILE_MODES.get(entry.mode)
+    if executable is None:
+        return f"`{name}` is not a regular file in the index"
+    if bool(target.stat().st_mode & _EXECUTABLE_BITS) != executable:
+        return f"`{name}` has an executable bit the index does not record"
+    hashed = run_git(
+        directory, "hash-object", "--no-filters", _OPTIONS_END, name, timeout=Timeout.GIT_CONTEXT
+    )
+    if hashed.returncode != 0:
+        return f"git could not hash `{name}`"
+    if hashed.stdout.strip() != entry.object_id:
+        return f"`{name}` holds bytes (line endings or filtered content) the index does not"
+    return None
+
+
+def _checkout_paths_loss(directory: Path, paths: tuple[str, ...]) -> str | None:
+    """Why checking out ``paths`` in ``directory`` may lose local state, or None.
+
+    Any filesystem error on a probe (a name too long, a permission refusal) is a path
+    whose state is unknown, so it denies with the reason rather than escaping.
+    """
+    try:
+        return _checkout_paths_proof(directory, paths)
+    except _CheckoutUnproven as unproven:
+        return str(unproven)
+    except OSError as error:
+        return f"a named path could not be read ({error.strerror or type(error).__name__})"
+
+
+def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None:
+    """:func:`_checkout_paths_loss` without its error translation."""
+    top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+    if top.returncode != 0 or not top.stdout.strip():
+        return f"`{directory}` is not in a git working tree git could read"
+    top_level = Path(top.stdout.strip()).resolve()
+    base = directory.resolve()
+    for name in paths:
+        target = directory / name
+        parent_problem = _parent_problem(directory, name)
+        if parent_problem is not None:
+            return parent_problem
+        if target.is_symlink():
+            return f"`{name}` is a symlink"
+        if target.resolve() != base / name:
+            return f"`{name}` passes through a symlink"
+        if not path_is_relative_to(base / name, top_level):
+            return f"`{name}` is outside the repository"
+        entries = _index_entries(directory, name)
+        if path_exists(target, unreadable_means=True):
+            problem = _present_file_problem(directory, name, entries)
+            if problem is not None:
+                return problem
+        elif entries:
+            return f"`{name}` is deleted in the working tree but still in the index"
+    for staged, where in ((False, "unstaged"), (True, "staged")):
+        args = ("diff", "--cached") if staged else ("diff",)
+        diff = run_git(
+            directory,
+            _LITERAL_PATHSPECS,
+            *args,
+            "--quiet",
+            _OPTIONS_END,
+            *paths,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if diff.returncode == _DIFF_DIFFERS:
+            return f"`{' '.join(paths)}` holds {where} changes the checkout would discard"
+        if diff.returncode != _DIFF_CLEAN:
+            return f"git could not compare `{' '.join(paths)}` for {where} changes"
     return None
 
 
@@ -1477,8 +1772,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         # Both matches() and handle() consume the same ordered mapping, so they
         # can never drift on which pattern matched first.
         rule_ids = self._match_rule_ids(command)
-        # A forced branch delete, a worktree removal and a restore of empty files have a
-        # safe case: when nothing can be lost they are allowed. They are judged only when
+        # A forced branch delete, a worktree removal, a restore of empty files and a
+        # checkout of paths with no local state have a safe case: when nothing can be lost they are allowed. They are judged only when
         # no other rule matched too, so a compound command cannot ride the allowance,
         # and the denial then names the rule that actually blocks it.
         others = [matched for matched in rule_ids if matched not in _LOSSLESS_WHEN_PROVEN]
@@ -1526,6 +1821,17 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 )
             if restore is not None:
                 verdicts.append(restore)
+        if RuleID.GIT_CHECKOUT_DISCARD in lossless:
+            lossless.remove(RuleID.GIT_CHECKOUT_DISCARD)
+            try:
+                checkout = _checkout_note(command, self._cwd(hook_input))
+            except RuntimeError as exc:
+                logger.warning("destructive_git: checkout not verified: %s", exc)
+                checkout = RuleID.GIT_CHECKOUT_DISCARD, _with_principle(
+                    _unverified("the directory the command runs in is unknown")
+                )
+            if checkout is not None:
+                verdicts.append(checkout)
         if lossless:
             try:
                 judged = _force_removal_note(command, self._cwd(hook_input), branches, lossless[0])
@@ -1573,7 +1879,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "|---------|--------|\n"
             "| `git reset --hard` | Permanently destroys all uncommitted changes |\n"
             "| `git clean -f` | Permanently deletes untracked files (a dry run `git clean -nd` is allowed) |\n"
-            "| `git checkout -- <file>` | Discards all local changes to that file |\n"
+            "| `git checkout -- <file>` | Discards all local changes to that file (ONE plain "
+            "`git checkout <commit> -- <paths>` is allowed when every literal path is absent "
+            "from the worktree and the index or is a tracked regular file, and `git diff` and "
+            "`git diff --cached` are clean for them: nothing local is lost) |\n"
             "| `git restore <file>` | Discards local changes (`--staged` alone, with or without "
             "`--source`, is allowed; `--staged --worktree` is not. A restore whose every "
             "named file is a tracked, regular, zero-byte file is allowed too: it discards no content) |\n"

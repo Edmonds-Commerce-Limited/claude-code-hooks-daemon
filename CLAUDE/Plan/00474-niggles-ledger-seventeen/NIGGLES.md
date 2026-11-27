@@ -8805,7 +8805,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: a false positive with a clumsy workaround; same family as the empty-file restore allowed in Plan 00586 (PR 276).
 
-**Status**: ⬜ Open. Fix: allow it when every named path is absent from the worktree and the index, or `git diff --quiet -- <paths>` is clean, test first. Shapes to pin: a bypass through a chained command, a path that is a directory, a glob, and a path that exists with changes (must still deny).
+**Status**: 🔄 PR open on `niggle-n753-checkout-commit-path-absent`, unmerged. ONE plain `git checkout <commit> -- <paths>` is allowed when every literal in-repo path is absent from the worktree and the index or is a tracked regular file, and `git diff --quiet` and `git diff --cached --quiet` are clean for them; the proof runs under one `git_deadline` and every git error denies. Pinned denials in `test_destructive_git_checkout_absent_path.py`: chains, wrappers, redirects, options, no commit, globs and pathspec magic, variables and substitutions, present directories, symlinks, untracked files, staged and unstaged changes and deletions, outside paths. Found, not fixed: `git checkout <commit> <path>` with no `--` matches no pattern and is allowed today, as is an `xargs` run that appends the paths after a trailing `--`.
 
 ### N744 reopened — the secret-file guard's message-body half is a usability defect
 
