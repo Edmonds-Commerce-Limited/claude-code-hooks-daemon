@@ -483,8 +483,6 @@ class TestPathsFedByAnotherCommandAreDenied:
             "echo a.txt | xargs sh -c 'git checkout \"$@\"' _",
             f"echo a.txt | git checkout {_OLD} --pathspec-from-file=-",
             f"echo a.txt | git checkout --pathspec-from-file=- {_OLD} --",
-            f"echo x | git checkout {_OLD} --",
-            f"git checkout {_OLD} -- < list.txt",
             f"echo a.txt | sudo xargs git checkout {_OLD} --",
             f"echo a.txt | some-runner git checkout {_OLD} --",
         ],
@@ -538,3 +536,319 @@ class TestPathsFedByAnotherCommandAreDenied:
             RuleID.GIT_CHECKOUT_DISCARD,
         )
         assert not any("diff" in call for call in calls)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo x | git checkout {_OLD} --",
+            "git checkout side < /dev/null",
+            "echo y | git checkout side",
+        ],
+    )
+    def test_stdin_into_a_plain_switch_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        """Review of N764, minor 3: git checkout reads stdin only for `--pathspec-from-file=-`
+        and `-p`, and both are options a switch does not use, so they are judged anyway."""
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        (repo / "list.txt").write_text("a.txt\n")
+        _allowed(handler, command, repo)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo a.txt | xargs git restore --staged",
+            "echo a.txt | xargs git restore -S",
+            "find . -name a.txt -exec git restore --staged {} +",
+        ],
+    )
+    def test_a_fed_staged_only_restore_is_allowed_as_the_unfed_one_is(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        """Review of N764, minor 4: `--staged` alone touches only the index."""
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _allowed(handler, command, repo)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo a.txt | xargs git restore --staged --worktree",
+            "echo a.txt | xargs git restore --staged --wor",
+            "echo a.txt | xargs git restore -SW",
+            "echo a.txt | xargs git restore -S -W",
+        ],
+    )
+    def test_a_fed_restore_of_the_worktree_too_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _denied(handler, command, repo, RuleID.GIT_RESTORE)
+
+
+_BT = chr(96)
+
+
+class TestReviewBlockerBacktickSubstitution:
+    """Review of N764, blocker 1: a run inside backticks is judged as one inside `$( )` is."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f": {_BT}git checkout a.txt{_BT}",
+            f"echo {_BT}git checkout a.txt{_BT}",
+            f"ls {_BT}git checkout {_OLD} a.txt{_BT}",
+            f"{_BT}git checkout a.txt{_BT}",
+            f'echo "{_BT}git checkout {_OLD} a.txt{_BT}"',
+            f"x={_BT}git checkout a.txt{_BT}",
+            f": {_BT}git checkout a.txt",
+            ": $(git checkout a.txt)",
+        ],
+    )
+    def test_a_substituted_path_checkout_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _denied(handler, command, repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_substituted_fed_restore_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _denied(handler, f": {_BT}echo a.txt | xargs git restore{_BT}", repo, RuleID.GIT_RESTORE)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git commit -q --allow-empty -m 'run {_BT}git checkout a.txt{_BT} first'",
+            f"cat > notes.md <<'EOF'\nrun {_BT}git checkout a.txt{_BT} first\nEOF",
+        ],
+    )
+    def test_a_backtick_in_text_bash_never_runs_is_not_judged(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        _allowed(handler, command, repo)
+
+
+class TestReviewBlockerADirectoryMovingWrapper:
+    """Review of N764, blocker 2: `env -C sub` runs git in `sub`, which the reading never saw."""
+
+    @pytest.fixture
+    def edited_inner(self, repo: Path) -> Path:
+        (repo / "sub" / "inner.txt").write_text("tracked\n")
+        _git(repo, "add", "sub/inner.txt")
+        _git(repo, "commit", "-q", "-m", "inner")
+        (repo / "sub" / "inner.txt").write_text("my unsaved edit\n")
+        return repo
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "env -C sub git checkout inner.txt",
+            "env --chdir=sub git checkout inner.txt",
+            "env --chdir sub git checkout inner.txt",
+            "env -i -C sub git checkout inner.txt",
+            "sudo -D sub git checkout inner.txt",
+            "sudo --chdir=sub git checkout inner.txt",
+            "env -C sub git restore inner.txt",
+        ],
+    )
+    def test_the_moved_checkout_is_denied(
+        self, handler: DestructiveGitHandler, edited_inner: Path, command: str
+    ) -> None:
+        assert _verdict(handler, command, edited_inner)[0] == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        ["env git checkout side", "env X=1 git checkout side", "nice -n 5 git checkout side"],
+    )
+    def test_a_wrapper_with_no_directory_option_still_switches(
+        self, handler: DestructiveGitHandler, edited_inner: Path, command: str
+    ) -> None:
+        _allowed(handler, command, edited_inner)
+
+
+class TestReviewMinorHarmlessSwitchesStayAllowed:
+    """Review of N764, minor 3: switches main allowed must not be denied."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git -c advice.detachedHead=false checkout {_OLD}",
+            "git -c color.ui=never checkout side",
+            "GIT_LFS_SKIP_SMUDGE=1 git checkout side",
+            "X=1 git checkout side",
+            "LANG=C git checkout side",
+            "git --no-pager checkout side",
+            "git -P checkout side",
+            "git --no-optional-locks checkout side",
+            "git checkout --conflict=diff3 main",
+            "git checkout --conflict diff3 main",
+        ],
+    )
+    def test_the_switch_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _allowed(handler, command, repo)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -c core.worktree=elsewhere checkout main",
+            "git -c core.ignorecase=true checkout A.TXT",
+            "git --icase-pathspecs checkout A.TXT",
+            "GIT_ICASE_PATHSPECS=1 git checkout A.TXT",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=x git checkout main",
+            "GIT_INDEX_FILE=other git checkout main",
+            "HOME=elsewhere git checkout main",
+            "git --conflict=diff3 checkout a.txt",
+            "git checkout --conflict=diff3 a.txt",
+        ],
+    )
+    def test_a_setting_that_can_change_the_reading_is_still_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        assert _verdict(handler, command, repo)[0] == Decision.DENY
+
+    def test_a_switch_after_cd_into_the_repository_is_read_there(
+        self, handler: DestructiveGitHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "plain"
+        outside.mkdir()
+        _allowed(handler, f"cd {repo} && git checkout side", outside)
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _denied(handler, f"cd {repo} && git checkout a.txt", outside, RuleID.GIT_CHECKOUT_DISCARD)
+
+
+class TestReviewMinorAbbreviatedLongOptions:
+    """Review of N764, minor 5: git takes any unique prefix of a long option."""
+
+    @pytest.mark.parametrize(
+        ("command", "rule"),
+        [
+            ("git checkout-index -a --forc", RuleID.GIT_CHECKOUT_FORCE),
+            ("git checkout-index -a --fo", RuleID.GIT_CHECKOUT_FORCE),
+            ("git checkout-index -a --f", RuleID.GIT_CHECKOUT_FORCE),
+            ("git checkout --forc side", RuleID.GIT_CHECKOUT_FORCE),
+            ("git checkout --fo main", RuleID.GIT_CHECKOUT_FORCE),
+            ("git restore --staged --wor a.txt", RuleID.GIT_RESTORE),
+            ("git restore --staged --w a.txt", RuleID.GIT_RESTORE),
+            ("git reset --har", RuleID.GIT_RESET_HARD),
+            ("git reset --ha", RuleID.GIT_RESET_HARD),
+            ("git clean --forc", RuleID.GIT_CLEAN_FORCE),
+            ("git clean --fo -d", RuleID.GIT_CLEAN_FORCE),
+            ("git switch --discard side", RuleID.GIT_SWITCH_FORCE),
+            ("git switch --di side", RuleID.GIT_SWITCH_FORCE),
+        ],
+    )
+    def test_the_abbreviation_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str, rule: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _denied(handler, command, repo, rule)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git reset --soft HEAD",
+            "git clean -n",
+            "git switch --detach side",
+            "git restore --staged a.txt",
+            "git checkout --quiet side",
+        ],
+    )
+    def test_a_neighbouring_option_is_not_read_as_one(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _allowed(handler, command, repo)
+
+
+class TestReviewMinorQuotingAndAliases:
+    """Review of N764, minor 7: the cheap main gaps."""
+
+    @pytest.mark.parametrize(
+        ("command", "rule"),
+        [
+            ("git $'checkout' -- a.txt", RuleID.GIT_CHECKOUT_DISCARD),
+            ("git $'checkout' a.txt", RuleID.GIT_CHECKOUT_DISCARD),
+            ("git $'\\x63heckout' a.txt", RuleID.GIT_CHECKOUT_DISCARD),
+            ("git $'reset' --hard", RuleID.GIT_RESET_HARD),
+            ("git -c alias.co=checkout co a.txt", RuleID.GIT_DESTRUCTIVE_UNREADABLE),
+            ("git -c 'alias.co=!git checkout' co a.txt", RuleID.GIT_DESTRUCTIVE_UNREADABLE),
+            ("git -calias.co=checkout co a.txt", RuleID.GIT_DESTRUCTIVE_UNREADABLE),
+            ("git --config-env=alias.co=CO co a.txt", RuleID.GIT_DESTRUCTIVE_UNREADABLE),
+            (
+                "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.co GIT_CONFIG_VALUE_0=checkout git co a",
+                RuleID.GIT_DESTRUCTIVE_UNREADABLE,
+            ),
+        ],
+    )
+    def test_the_spelling_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str, rule: str
+    ) -> None:
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _denied(handler, command, repo, rule)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -q --allow-empty -m $'two\\nlines'",
+            "git log --oneline -1 --format=$'%h\\t%s'",
+            "git config --get alias.co",
+        ],
+    )
+    def test_ordinary_ansi_c_quoting_and_alias_reads_are_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        _allowed(handler, command, repo)
+
+
+class TestReviewMinorTheReadingIsBounded:
+    """Review of N764, minor 6: repeated runs share one reading and one set of git calls."""
+
+    def test_identical_switches_ask_git_once(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", recording)
+        _allowed(handler, " && ".join(["git checkout side"] * 50), repo)
+        assert len(calls) == 1
+
+    def test_matches_and_handle_share_one_reading(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", recording)
+        hook_input = _hook_input("git checkout v1 && echo a.txt | xargs git checkout side", repo)
+        assert handler.matches(hook_input) is True
+        reading = len(calls)
+        assert reading == 1
+        assert handler.handle(hook_input).decision == Decision.DENY
+        assert len(calls) == reading
+
+    def test_many_distinct_switches_are_judged_without_asking_git_for_each(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Past a small number of distinct operands the chain is judged (and denied)."""
+        calls: list[tuple[str, ...]] = []
+
+        def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", recording)
+        command = " && ".join(f"git checkout b{index}" for index in range(400))
+        _denied(handler, command, repo, RuleID.GIT_CHECKOUT_DISCARD)
+        assert len(calls) <= 2 * destructive_git._MAX_SWITCH_READINGS

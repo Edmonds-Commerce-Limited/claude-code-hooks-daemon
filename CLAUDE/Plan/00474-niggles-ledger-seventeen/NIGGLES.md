@@ -8925,6 +8925,15 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. The guard reads the undashed form as git does: `git checkout <rev> <paths>` gets the dashed form's proof when `<rev>` is one literal revision that resolves to a tree and names no path in the working tree or the index (also a path: git refuses it as ambiguous; unresolved: git restores every operand from the index; both denied). One operand is a switch, and allowed, when it is a commit or names no path; when it names a path it is a restore from the index and is denied, as `git checkout -- <path>` is. An option a switch does not use, a repository that cannot be placed, or any git failure denies. Quoted and inlined spellings (`git check""out`, `env -S "..."`, `bash -c`) are read too. Also fixed alongside: `git checkout-index -f` matched no rule and is now denied under R-GIT-CHECKOUT-FORCE. Pinned in `tests/unit/handlers/pre_tool_use/test_destructive_git_checkout_undashed.py`; release note 125.
 
+The independent review of the branch (REQUEST CHANGES) found two blockers and two regressions in this fix, all now fixed test first:
+
+- **Backticks**: a checkout inside backticks was never judged (`` : `git checkout f.txt` ``). Each backtick is now read as the command boundary it is, so the run inside is judged as one inside `$( )` is.
+- **Directory-moving wrappers**: `env -C sub` and `env --chdir`/`sudo -D` ran git in a directory the reading never saw. `env` and `sudo` now count as plain wrappers only with no option.
+- **Harmless switches denied**: switches that main allowed are allowed again. That covers output-only settings (`-c advice.*`/`color.*`, `--no-pager`, `-P`), an assignment that is not a `GIT_*` variable outside a short safe list (and not `HOME`), stdin into a plain switch, and `--conflict=<style>`. Any setting that can move the repository, index or worktree, or change pathspec matching, still denies.
+- **Performance**: the reading is made once per hook call and shared by `matches()` and `handle()`. Each distinct run is read once. Past four distinct one-operand checkouts the command is judged whole, and the scan target is cached. The quadratic segment loop is gone.
+
+The review's harmless main gaps are recorded as N771.
+
 ### N765 — an `xargs` run that adds paths after a trailing `--` reaches the checkout restore unjudged
 
 **Source**: the N753 developer agent, 2026-11-27.
@@ -8933,17 +8942,38 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: needs a pipe into xargs; predates PR 293.
 
-**Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. A `git checkout` or `git restore` run by `xargs`, `parallel`, `find`/`fd`, or any prefix that is not a plain wrapper (`sudo`, `env`, `command`, `nice`, `nohup`, `time`, `timeout`, `stdbuf`, `exec`, `builtin`), or fed by a pipe or an input redirect, is denied whatever its form: no git call can see the paths it will be given, so no proof is attempted. That includes a plain switch such as `echo main | xargs git checkout` (fail closed). Pinned in the same test file as N764.
+**Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. A `git checkout` or `git restore` run by `xargs`, `parallel`, `find`/`fd`, or any prefix that is not a plain wrapper (`sudo`, `env`, `command`, `nice`, `nohup`, `time`, `timeout`, `stdbuf`, `exec`, `builtin`), is denied whatever its form: no git call can see the paths it will be given, so no proof is attempted. That includes a plain switch such as `echo main | xargs git checkout` (fail closed). A pipe or input redirect into git checkout itself is not a feed: git reads stdin only for `--pathspec-from-file=-` and `-p`, and both are options a switch never carries, so they are judged anyway. After review, a fed `git restore --staged` that touches only the index is allowed, as the unfed one is. Pinned in the same test file as N764.
 
-### N769 — three discard and over-deny shapes the N764/N765 work found and did not fix
+### N771 — destructive-git gaps on main that the N764/N765 work and its review found
 
-**Source**: the N764/N765 developer agent, 2026-11-27, while reviewing the code it touched.
+**Source**: the N764/N765 developer agent and the independent review of branch `guard-n761-n764-n765-gaps`, 2026-11-27. (First filed on that branch as N769; renumbered, as N769 and N770 are taken on `guard-n744-n760-teamchat-message-sink`.)
 
-**Evidence**: (1) a git alias (`git -c alias.co=checkout co HEAD~1 a.txt`, or an alias in the repository config) names a subcommand no rule pattern knows, so every destructive-git rule, not only the checkout ones, is reached under another name. (2) `git read-tree -u --reset <tree>` and `git read-tree -m -u` rewrite the working tree from a tree, and match no rule. (3) The `git checkout -f` pattern reads an `f` anywhere in a short cluster, so `git checkout -bfeature side` (a branch named `feature` from `side`, attached) is denied as a force; an over-deny only, as `-b feature` works.
+**Evidence**: each of these predates the branch and loses local work, or over-denies, on main.
 
-**Severity**: MEDIUM for (1) and (2), which are discard routes the guard never sees; LOW for (3).
+- (1) Aliases. A git alias names a subcommand no rule pattern knows: `git -c alias.co=checkout co f.txt`, `git -c 'alias.co=!git checkout' co f.txt`, `GIT_CONFIG_KEY_n=alias.*`, or an alias in the repository or global config (`git co f.txt`). So every destructive-git rule is reached under another name.
+- (2) ANSI-C quoting. `git $'checkout' -- f.txt` passed every rule, because quote removal left `$checkout`.
+- (3) Abbreviations. git takes any unique prefix of a long option, and each of these is the destructive option under a shorter name: `git reset --ha`, `git clean --forc`, `git checkout --fo`, `git switch --di`, `git restore --staged --wor`, `git checkout-index --f`. Not yet checked for the same gap: `git branch --del --forc`, and the `git push` spellings.
+- (4) `git read-tree -u --reset <tree>` and `git read-tree -m -u` rewrite the working tree, and match no rule.
+- (5) A branch switch overwrites an ignored file that the target branch tracks. Examples: `git checkout feat` with a local ignored `ign.txt` that `feat` tracks; `nohup git checkout -qm HEAD~1`.
+- (6) Over-deny only: the `git checkout -f` pattern reads an `f` anywhere in a short cluster, so `git checkout -bfeature side` (attached branch name) is denied as a force.
 
-**Status**: ⬜ Open. Fix, test first: resolve an alias (from `-c alias.*` and the repository's config) before matching, or deny an unknown subcommand that an alias defines; add a `read-tree -u` rule; and read `-b`/`-B` as taking the rest of the cluster in the checkout force pattern.
+**Severity**:
+
+- MEDIUM: (1), (3), (4) and (5), which are discard routes the guard never sees.
+- LOW: (6).
+
+**Status**: 🔄 In progress on branch `guard-n761-n764-n765-gaps`.
+
+- Fixed, test first:
+  - (2): `$'...'` is decoded as bash decodes it before every pattern runs.
+  - (3): for the six options listed. Every prefix is matched, and a prefix git finds ambiguous is refused by git anyway.
+  - The command-line half of (1): `-c alias.*`, `--config-env=alias.*` and `GIT_CONFIG_PARAMETERS`/`GIT_CONFIG_KEY_n=alias.*` deny under R-GIT-DESTRUCTIVE-UNREADABLE.
+- Open, fix test first:
+  - Config-file aliases: resolve an unknown subcommand through `git config --get alias.<name>`, or deny an unknown subcommand that names an alias.
+  - (3) for `branch` and `push`.
+  - A `read-tree -u` rule.
+  - (5): a switch is a loss only when an ignored path the target tracks exists, which needs a tree listing per switch; the cost is the open question.
+  - (6): read `-b`/`-B` as taking the rest of the cluster.
 
 ### N766 — a subcommand's own `--project-root` can stand in front of the wrapper's global root
 
