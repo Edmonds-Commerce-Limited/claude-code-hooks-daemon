@@ -8966,13 +8966,24 @@ The review's harmless main gaps are recorded as N771.
 
 - Fixed, test first:
   - (2): `$'...'` is decoded as bash decodes it before every pattern runs.
+
   - (3): for the six options listed. Every prefix is matched, and a prefix git finds ambiguous is refused by git anyway.
+
   - The command-line half of (1): `-c alias.*`, `--config-env=alias.*` and `GIT_CONFIG_PARAMETERS`/`GIT_CONFIG_KEY_n=alias.*` deny under R-GIT-DESTRUCTIVE-UNREADABLE.
+
+  - (5), for a one-operand `git checkout` switch, `-` included. The paths the switch touches come from one `git diff --name-status HEAD <target>` (added, modified, retyped, deleted). The switch is denied when any of these holds:
+
+    - something not tracked (an untracked or ignored file, or a symlink in place of a tracked directory) sits where it writes; one batched `git ls-files --others` answers this;
+    - a touched path has a staged or unstaged change against `HEAD`;
+    - a touched path carries an index flag that hides a change.
+
+    The fuzz found two more ways a switch loses work, both closed by the same check: a tracked parent replaced by an untracked symlink, and a staged edit on a path the target removes.
 - Open, fix test first:
   - Config-file aliases: resolve an unknown subcommand through `git config --get alias.<name>`, or deny an unknown subcommand that names an alias.
   - (3) for `branch` and `push`.
   - A `read-tree -u` rule.
-  - (5): a switch is a loss only when an ignored path the target tracks exists, which needs a tree listing per switch; the cost is the open question.
+  - (5) for `git switch` and `git checkout -b <new> <start>` written as two operands. The second is judged as a path checkout and denied; `git switch` is not read at all.
+  - Raw bytes a filter hides: a CRLF file that `core.autocrlf` normalises reads as clean to git, and a switch rewrites it. The restore proof hashes raw bytes; the switch check does not. No fuzz run hit it.
   - (6): read `-b`/`-B` as taking the rest of the cluster.
 
 ### N766 — a subcommand's own `--project-root` can stand in front of the wrapper's global root

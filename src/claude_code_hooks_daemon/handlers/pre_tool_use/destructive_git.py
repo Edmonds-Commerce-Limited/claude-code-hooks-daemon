@@ -1281,8 +1281,9 @@ _PREVIOUS_BRANCH: Final[str] = "-"
 _PREVIOUS_BRANCH_REVISION: Final[str] = "@{-1}"
 _HEAD: Final[str] = "HEAD"
 # The paths a switch writes: added, modified or retyped between HEAD and the target.
-_WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=AMT"
+_WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=ADMT"
 _ADDED_STATUS: Final[str] = "A"
+_DELETED_STATUS: Final[str] = "D"
 # Paths named in one `git ls-files --others` call.
 _PATHS_PER_LISTING: Final[int] = 256
 # Runners that add words of their own to the command they run (N765).
@@ -1518,12 +1519,63 @@ def _switch_overwrite(directory: Path, revision: str) -> str | None:
         return f"git's list of what switching to `{revision}` writes could not be read"
     root = Path(top.stdout.strip())
     in_the_way: list[str] = []
+    touched: list[str] = []
     for status, name in zip(fields[::2], fields[1::2], strict=True):
+        touched.append(name)
+        if status == _DELETED_STATUS:
+            continue
         try:
             in_the_way.extend(_paths_in_the_way(root, name, added=status == _ADDED_STATUS))
         except OSError as error:
             return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
-    return _untracked_content(root, list(dict.fromkeys(in_the_way)))
+    problem = _untracked_content(root, list(dict.fromkeys(in_the_way)))
+    if problem is not None:
+        return problem
+    return _touched_local_changes(root, touched)
+
+
+def _touched_local_changes(root: Path, names: list[str]) -> str | None:
+    """Why any path the switch touches holds a local change, or None.
+
+    Git refuses most such switches, but not all: a staged edit on a path the target
+    removes was dropped (review fuzz, seed 777). So every touched path must be clean
+    against ``HEAD`` in the working tree and in the index, and carry a plain index
+    entry (an assume-unchanged or skip-worktree flag hides a change from ``git diff``).
+    """
+    for start in range(0, len(names), _PATHS_PER_LISTING):
+        chunk = names[start : start + _PATHS_PER_LISTING]
+        for compared, where in ((("diff",), "unstaged"), (("diff", "--cached"), "staged")):
+            diff = run_git(
+                root,
+                _LITERAL_PATHSPECS,
+                *compared,
+                "--quiet",
+                "--no-ext-diff",
+                _HEAD,
+                _OPTIONS_END,
+                *chunk,
+                timeout=Timeout.GIT_CONTEXT,
+            )
+            if diff.returncode == _DIFF_DIFFERS:
+                return f"a path the switch writes or removes holds {where} changes"
+            if diff.returncode != _DIFF_CLEAN:
+                return f"git could not compare the paths the switch touches for {where} changes"
+        tags = run_git(
+            root,
+            _LITERAL_PATHSPECS,
+            "ls-files",
+            "-v",
+            "-z",
+            _OPTIONS_END,
+            *chunk,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if tags.returncode != 0:
+            return "git could not list the index entries the switch touches"
+        for record in tags.stdout.split(_RECORD_SEPARATOR):
+            if record and not record.startswith(_PLAIN_CACHED_TAG):
+                return f"`{record[2:]}` carries an index flag that hides its changes from git diff"
+    return None
 
 
 def _paths_in_the_way(root: Path, name: str, *, added: bool) -> list[str]:

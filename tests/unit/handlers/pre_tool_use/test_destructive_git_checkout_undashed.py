@@ -637,6 +637,8 @@ class TestReviewBlockerADirectoryMovingWrapper:
         (repo / "sub" / "inner.txt").write_text("tracked\n")
         _git(repo, "add", "sub/inner.txt")
         _git(repo, "commit", "-q", "-m", "inner")
+        # `here` touches nothing `main` holds, so a switch to it is a plain switch.
+        _git(repo, "branch", "here")
         (repo / "sub" / "inner.txt").write_text("my unsaved edit\n")
         return repo
 
@@ -659,7 +661,7 @@ class TestReviewBlockerADirectoryMovingWrapper:
 
     @pytest.mark.parametrize(
         "command",
-        ["env git checkout side", "env X=1 git checkout side", "nice -n 5 git checkout side"],
+        ["env git checkout here", "env X=1 git checkout here", "nice -n 5 git checkout here"],
     )
     def test_a_wrapper_with_no_directory_option_still_switches(
         self, handler: DestructiveGitHandler, edited_inner: Path, command: str
@@ -868,6 +870,39 @@ class TestReviewMinorASwitchOverIgnoredFiles:
     ) -> None:
         """Git replaces the clean tracked `a.txt` and `sub/c.txt` itself; nothing local is lost."""
         _allowed(handler, "git checkout shape", reshaped)
+
+    @pytest.mark.parametrize("kind", ["staged", "unstaged", "assume-unchanged", "staged-reverted"])
+    def test_a_local_change_on_a_path_the_switch_removes_is_denied(
+        self, handler: DestructiveGitHandler, reshaped: Path, kind: str
+    ) -> None:
+        """Review fuzz, seed 777 case 672: git dropped a staged edit the switch removed."""
+        target = reshaped / "sub" / "c.txt"
+        target.write_text("my local edit\n")
+        if kind in ("staged", "staged-reverted"):
+            _git(reshaped, "add", "sub/c.txt")
+        if kind == "staged-reverted":
+            target.write_text("content of sub/c.txt\n")
+        if kind == "assume-unchanged":
+            _git(reshaped, "update-index", "--assume-unchanged", "sub/c.txt")
+        _denied(handler, "git checkout shape", reshaped, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_local_change_on_a_path_the_switch_leaves_alone_is_allowed(
+        self, handler: DestructiveGitHandler, reshaped: Path
+    ) -> None:
+        """Git carries such a change across the switch; nothing is lost."""
+        _git(reshaped, "checkout", "-q", "-b", "carry", "shape")
+        _git(reshaped, "checkout", "-q", "main")
+        (reshaped / "olddir").mkdir(exist_ok=True)
+        (reshaped / "untouched.txt").write_text("tracked\n")
+        _git(reshaped, "add", "untouched.txt")
+        _git(reshaped, "commit", "-q", "-m", "untouched")
+        _git(reshaped, "checkout", "-q", "-b", "next")
+        (reshaped / "other.txt").write_text("on next\n")
+        _git(reshaped, "add", "other.txt")
+        _git(reshaped, "commit", "-q", "-m", "other")
+        _git(reshaped, "checkout", "-q", "main")
+        (reshaped / "untouched.txt").write_text("my local edit\n")
+        _allowed(handler, "git checkout next", reshaped)
 
     def test_an_ignored_file_inside_a_tracked_directory_the_switch_replaces_is_denied(
         self, handler: DestructiveGitHandler, reshaped: Path
