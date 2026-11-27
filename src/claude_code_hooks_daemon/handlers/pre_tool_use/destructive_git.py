@@ -1278,6 +1278,10 @@ _LONG_PREFIX: Final[str] = "--"
 _VALUE_SEPARATOR: Final[str] = "="
 # `git checkout -` switches to the previous branch (`@{-1}`).
 _PREVIOUS_BRANCH: Final[str] = "-"
+_PREVIOUS_BRANCH_REVISION: Final[str] = "@{-1}"
+_HEAD: Final[str] = "HEAD"
+# The paths a switch creates: added between HEAD and the target.
+_ADDED_PATHS_FILTER: Final[str] = "--diff-filter=A"
 # Runners that add words of their own to the command they run (N765).
 _ARGUMENT_FEEDERS: Final[frozenset[str]] = frozenset({"xargs", "parallel", "find", "fd", "fdfind"})
 # Prefixes that run the command they are given with its words unchanged.
@@ -1459,15 +1463,71 @@ def _undashed_may_restore(run: GitInvocation, cwd: Path | None) -> bool:
     operands = _switch_operands(run.arguments)
     if operands is None or len(operands) > 1:
         return True
-    if not operands or operands[0] == _PREVIOUS_BRANCH:
+    if not operands:
         return False
     if cwd is None or _switch_reading_problem(run, cwd) is not None:
         return True
     directory = invocation_directory(run, cwd)
+    previous = operands[0] == _PREVIOUS_BRANCH
+    operand = _PREVIOUS_BRANCH_REVISION if previous else operands[0]
     with git_deadline(time.monotonic() + _CHECKOUT_PROOF_BUDGET):
-        if _LITERAL_COMMIT.match(operands[0]) and _resolves(directory, operands[0], "commit"):
+        if _LITERAL_COMMIT.match(operand) and _resolves(directory, operand, "commit"):
+            return _switch_overwrite(directory, operand) is not None
+        if previous:
+            # No previous branch: git refuses the switch, so nothing is written.
             return False
-        return _path_reading(directory, operands[0]) is not None
+        return _path_reading(directory, operand) is not None
+
+
+def _switch_overwrite(directory: Path, revision: str) -> str | None:
+    """Why switching to ``revision`` would write over a local path git does not track, or None.
+
+    Git refuses to switch over a modified tracked file or an untracked one, but it writes
+    over an IGNORED file the target tracks without a word. So every path the switch
+    creates (added between ``HEAD`` and ``revision``) must be absent locally, with every
+    parent absent or a real directory. Any git failure is a reason too.
+    """
+    top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+    if top.returncode != 0 or not top.stdout.strip():
+        return f"`{directory}` is not in a git working tree git could read"
+    added = run_git(
+        directory,
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-relative",
+        _ADDED_PATHS_FILTER,
+        _HEAD,
+        revision,
+        _OPTIONS_END,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if added.returncode != 0:
+        return f"git could not list what switching to `{revision}` creates"
+    root = Path(top.stdout.strip())
+    for name in added.stdout.split(_RECORD_SEPARATOR):
+        problem = _created_path_problem(root, name) if name else None
+        if problem is not None:
+            return problem
+    return None
+
+
+def _created_path_problem(root: Path, name: str) -> str | None:
+    """Why creating ``name`` under ``root`` would replace something local, or None."""
+    parts = name.split(_PATH_SEPARATOR)
+    for depth in range(1, len(parts) + 1):
+        try:
+            mode = root.joinpath(*parts[:depth]).lstat().st_mode
+        except FileNotFoundError:
+            # Nothing there, so nothing below it either: the switch only creates.
+            break
+        except OSError as error:
+            return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
+        if depth == len(parts) or not stat.S_ISDIR(mode):
+            return f"`{name}` would be written over a local file git does not track"
+    return None
 
 
 class _CheckoutUnproven(Exception):

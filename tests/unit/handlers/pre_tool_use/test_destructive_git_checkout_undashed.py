@@ -805,6 +805,62 @@ class TestReviewMinorQuotingAndAliases:
         _allowed(handler, command, repo)
 
 
+class TestReviewMinorASwitchOverIgnoredFiles:
+    """Review of N764, minor 7: git overwrites an IGNORED file the target branch tracks."""
+
+    @pytest.fixture
+    def feat(self, repo: Path) -> Path:
+        _git(repo, "checkout", "-q", "-b", "feat")
+        (repo / "ign.txt").write_text("tracked on feat\n")
+        (repo / "deep").mkdir()
+        (repo / "deep" / "x.txt").write_text("tracked on feat\n")
+        _git(repo, "add", "ign.txt", "deep/x.txt")
+        _git(repo, "commit", "-q", "-m", "feat files")
+        _git(repo, "checkout", "-q", "main")
+        (repo / ".git" / "info" / "exclude").write_text("ign.txt\ndeep\n")
+        return repo
+
+    @pytest.mark.parametrize(
+        "command", ["git checkout feat", "git checkout -m feat", "git checkout -b mine feat"]
+    )
+    def test_a_switch_that_would_overwrite_an_ignored_file_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        (feat / "ign.txt").write_text("ignored local work\n")
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_an_ignored_file_where_the_branch_has_a_directory_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        (feat / "deep").write_text("ignored local work\n")
+        _denied(handler, "git checkout feat", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_the_previous_branch_is_read_the_same_way(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _git(feat, "checkout", "-q", "feat")
+        _git(feat, "checkout", "-q", "main")
+        (feat / "ign.txt").write_text("ignored local work\n")
+        _denied(handler, "git checkout -", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_switch_with_nothing_local_in_the_way_is_allowed(
+        self, handler: DestructiveGitHandler, feat: Path
+    ) -> None:
+        _allowed(handler, "git checkout feat", feat)
+        _allowed(handler, "git checkout -", feat)
+
+    def test_a_failed_comparison_denies(
+        self, handler: DestructiveGitHandler, feat: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def diff_fails(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "diff" in args:
+                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: broken")
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", diff_fails)
+        _denied(handler, "git checkout feat", feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+
 class TestReviewMinorTheReadingIsBounded:
     """Review of N764, minor 6: repeated runs share one reading and one set of git calls."""
 
@@ -818,8 +874,11 @@ class TestReviewMinorTheReadingIsBounded:
             return run_git(cwd, *args, **kwargs)
 
         monkeypatch.setattr(destructive_git, "run_git", recording)
+        _allowed(handler, "git checkout side", repo)
+        one_switch = len(calls)
+        calls.clear()
         _allowed(handler, " && ".join(["git checkout side"] * 50), repo)
-        assert len(calls) == 1
+        assert len(calls) == one_switch
 
     def test_matches_and_handle_share_one_reading(
         self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -834,7 +893,7 @@ class TestReviewMinorTheReadingIsBounded:
         hook_input = _hook_input("git checkout v1 && echo a.txt | xargs git checkout side", repo)
         assert handler.matches(hook_input) is True
         reading = len(calls)
-        assert reading == 1
+        assert reading > 0
         assert handler.handle(hook_input).decision == Decision.DENY
         assert len(calls) == reading
 
