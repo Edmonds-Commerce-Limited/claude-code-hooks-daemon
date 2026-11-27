@@ -1110,14 +1110,17 @@ def _path_reading(directory: Path, name: str) -> str | None:
         return f"`{name}` is not one literal name, so it may match a path"
     try:
         (directory / name).lstat()
-        in_worktree = True
     except FileNotFoundError:
-        # Not there is an answer: the index decides whether git still reads a path.
-        in_worktree = False
+        # Not there is an answer, not a failure: the index decides whether git still
+        # reads a path.
+        return _index_reading(directory, name)
     except OSError as error:
         return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
-    if in_worktree:
-        return f"`{name}` exists in the working tree"
+    return f"`{name}` exists in the working tree"
+
+
+def _index_reading(directory: Path, name: str) -> str | None:
+    """Why the index makes git read ``name`` as a path, or None when no entry matches."""
     try:
         entries = _index_records(directory, name)
     except _CheckoutUnproven as unproven:
