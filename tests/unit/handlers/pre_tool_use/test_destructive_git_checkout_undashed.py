@@ -350,6 +350,43 @@ class TestARealBranchSwitchStaysAllowed:
         monkeypatch.setattr(destructive_git, "run_git", failing)
         _denied(handler, "git checkout a.txt", repo, RuleID.GIT_CHECKOUT_DISCARD)
 
+    def test_a_failed_index_listing_of_a_single_operand_denies(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def listing_fails(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "ls-files" in args:
+                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: broken")
+            return run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(destructive_git, "run_git", listing_fails)
+        _denied(handler, "git checkout not-a-ref", repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_dash_c_target_that_is_not_a_directory_denies(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        _denied(handler, "git -C a.txt checkout side", repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_a_mention_beside_a_real_switch_is_not_judged(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """The echoed run is not in command position; the switch after it is a commit."""
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        _allowed(handler, f"echo git checkout {_OLD} a.txt && git checkout side", repo)
+
+    def test_a_refused_lookup_of_a_single_operand_denies(
+        self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`not-a-ref` would be a switch, but a lookup that fails is not an absence."""
+        real_lstat = Path.lstat
+
+        def refusing(self: Path) -> Any:
+            if self.name == "not-a-ref":
+                raise PermissionError("lstat refused")
+            return real_lstat(self)
+
+        monkeypatch.setattr(Path, "lstat", refusing)
+        _denied(handler, "git checkout not-a-ref", repo, RuleID.GIT_CHECKOUT_DISCARD)
+
     def test_an_exhausted_deadline_denies_a_path_operand(
         self, handler: DestructiveGitHandler, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
