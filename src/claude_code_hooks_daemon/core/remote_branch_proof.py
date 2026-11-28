@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -1013,6 +1013,38 @@ def _push_url_problems(
     return problems
 
 
+def live_refs_problem(directory: Path, remote: str, expected: Mapping[str, str]) -> str | None:
+    """Why ``remote`` does not hold every branch of ``expected`` at its sha, or None.
+
+    Asks the fetch URL and then every other push URL (where a delete goes), each with
+    ``git ls-remote``; it never fetches. A failed listing, an unreadable push URL and a
+    branch missing or at another sha are all problems: nothing unconfirmed passes. A
+    URL is never quoted, as it can carry a credential.
+    """
+    names = sorted(expected)
+    live, failures = live_remote_listing(directory, remote, names)
+    if failures:
+        return f"`git ls-remote {remote}` failed ({'; '.join(failures)}), so nothing is confirmed"
+    moved = [name for name in names if live.get(name) != expected[name]]
+    if moved:
+        return (
+            f"{remote} does not hold {', '.join(f'`{n}`' for n in moved)} at the commit "
+            f"`{REMOTES_PREFIX}{remote}/` records (it moved or is gone); run `git fetch "
+            f"{remote}` and retry"
+        )
+    urls = _other_push_urls(directory, remote)
+    if urls is None:
+        return f"a push URL of {remote} could not be read, so the delete's destination is unconfirmed"
+    for url in urls:
+        pushed, failed = live_remote_listing(directory, url, names)
+        if failed or any(pushed.get(name) != expected[name] for name in names):
+            return (
+                f"a push URL of {remote} (where the delete goes) does not hold the same "
+                "commits as its fetch URL, so the delete's destination is unconfirmed"
+            )
+    return None
+
+
 def prove_remote_merged(
     directory: Path,
     remote: str,
@@ -1076,6 +1108,7 @@ __all__ = [
     "TAGS_PREFIX",
     "RemoteProof",
     "branch_name",
+    "live_refs_problem",
     "live_remote_listing",
     "live_remote_tips",
     "named_ref_problem",
