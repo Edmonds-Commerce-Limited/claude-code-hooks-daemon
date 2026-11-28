@@ -184,6 +184,7 @@ class _ScanState:
 
     stopped: bool | None = None
     saw_assistant: bool = False
+    saw_user: bool = False
 
 
 def _scan_backwards(lines: Iterable[bytes], state: _ScanState) -> TailReading | None:
@@ -209,6 +210,9 @@ def _scan_backwards(lines: Iterable[bytes], state: _ScanState) -> TailReading | 
         if _is_conversational(record):
             is_assistant = record.get("type") == "assistant"
             state.saw_assistant = state.saw_assistant or is_assistant
+            state.saw_user = state.saw_user or (
+                not is_assistant and isinstance(record.get("message"), dict)
+            )
             if state.stopped is None:
                 message = record.get("message")
                 state.stopped = (
@@ -238,6 +242,7 @@ def read_tail(
     initial_window: int = INITIAL_WINDOW_BYTES,
     max_window: int = MAX_WINDOW_BYTES,
     opener: Callable[[Path], IO[bytes]] = _open_binary,
+    fresh_needs_prompt: bool = False,
 ) -> TailReading | None:
     """The last real request's context, model and stopped state of ``path``.
 
@@ -251,6 +256,10 @@ def read_tail(
     attachments and ``api-request*`` records of a first call run to about
     400 KB, and the first assistant record, the only carrier of usage, is
     flushed after the first tool call's hook has run.
+
+    With ``fresh_needs_prompt`` a file is a fresh agent only when it holds a
+    parsed user record carrying a message (its prompt); an empty, binary or
+    unparseable file then raises NoUsageInTail instead of reading as fresh.
 
     Raises NoUsageInTail when an assistant record without usage was read (a
     format change) or the file's start lies beyond ``max_window`` bytes, and
@@ -279,6 +288,8 @@ def read_tail(
                 break
             window = min(window * 2, limit)
     if start == 0 and not state.saw_assistant:
+        if fresh_needs_prompt and not state.saw_user:
+            raise NoUsageInTail(f"no prompt record in the {size:,} bytes of {path}")
         return None
     raise NoUsageInTail(f"no usage in the last {window:,} of {size:,} bytes of {path}")
 

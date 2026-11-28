@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.utils import session_load
 from claude_code_hooks_daemon.utils.session_load import (
     LiveAgent,
     finished_agents,
+    finished_task_ids,
     live_agents,
     model_family,
     read_live_snapshot,
@@ -18,6 +22,7 @@ from claude_code_hooks_daemon.utils.session_load import (
     refresh_live_snapshot,
     write_live_snapshot,
 )
+from claude_code_hooks_daemon.utils.transcript_tail import TailReading
 
 NOW = 1_800_000_000.0
 
@@ -98,6 +103,120 @@ class TestLiveAgents:
         live = live_agents(subagents, liveness_seconds=120, now=NOW)
         assert [entry.label for entry in live] == ["done", "worker-1", "worker-2"]
         assert live[0].context_tokens == 0
+
+
+class TestStrictLiveness:
+    """N758: the stop guard counts an agent live only on a transcript it could read."""
+
+    def test_an_unreadable_recent_transcript_is_not_live_when_strict(
+        self, subagents: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path, **_: object) -> object:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("claude_code_hooks_daemon.utils.session_load.read_tail", refuse)
+        assert live_agents(subagents, liveness_seconds=120, now=NOW, strict=True) == []
+
+    def test_an_unmeasurable_recent_transcript_is_not_live_when_strict(
+        self, subagents: Path
+    ) -> None:
+        """An assistant record with no usage raises NoUsageInTail: not a reading."""
+        path = subagents / "agent-adone-0000000000000003.jsonl"
+        record = {"type": "assistant", "message": {"model": "m", "stop_reason": "tool_use"}}
+        path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+        os.utime(path, (NOW - 5, NOW - 5))
+        live = live_agents(subagents, liveness_seconds=120, now=NOW, strict=True)
+        assert [entry.label for entry in live] == ["worker-1", "worker-2"]
+
+    def test_a_fresh_agent_with_no_assistant_record_yet_is_live_when_strict(
+        self, tmp_path: Path
+    ) -> None:
+        directory = tmp_path / "subagents"
+        directory.mkdir()
+        path = directory / "agent-afresh.jsonl"
+        path.write_text(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
+        os.utime(path, (NOW - 1, NOW - 1))
+        live = live_agents(directory, liveness_seconds=120, now=NOW, strict=True)
+        assert [entry.agent_id for entry in live] == ["afresh"]
+
+    @pytest.mark.parametrize(
+        "content", [b"", b"\x00\xff garbage", b"{not json\n"], ids=["empty", "binary", "invalid"]
+    )
+    def test_a_transcript_with_no_real_record_is_not_live_when_strict(
+        self, tmp_path: Path, content: bytes
+    ) -> None:
+        directory = tmp_path / "subagents"
+        directory.mkdir()
+        path = directory / "agent-anone.jsonl"
+        path.write_bytes(content)
+        os.utime(path, (NOW - 1, NOW - 1))
+        assert live_agents(directory, liveness_seconds=120, now=NOW, strict=True) == []
+        assert [a.agent_id for a in live_agents(directory, liveness_seconds=120, now=NOW)] == [
+            "anone"
+        ]
+
+    def test_a_transcript_dated_past_the_clock_skew_is_not_live_when_strict(
+        self, tmp_path: Path
+    ) -> None:
+        directory = tmp_path / "subagents"
+        ahead = Timeout.TRANSCRIPT_CLOCK_SKEW
+        agent(directory, "afar", "", context=1, stopped=False, age=-(ahead + 1))
+        agent(directory, "anear", "", context=1, stopped=False, age=-(ahead - 1))
+        live = live_agents(directory, liveness_seconds=120, now=NOW, strict=True)
+        assert [entry.agent_id for entry in live] == ["anear"]
+
+    def test_a_symlinked_transcript_is_not_live_when_strict(self, subagents: Path) -> None:
+        link = subagents / "agent-alink.jsonl"
+        link.symlink_to(subagents / "agent-aworker-1-0000000000000001.jsonl")
+        strict = live_agents(subagents, liveness_seconds=120, now=NOW, strict=True)
+        assert "alink" not in [entry.agent_id for entry in strict]
+        assert "alink" in [
+            entry.agent_id for entry in live_agents(subagents, liveness_seconds=120, now=NOW)
+        ]
+
+
+class TestBoundedReads:
+    def test_only_names_the_agents_read(
+        self, subagents: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        read: list[str] = []
+        real = session_load.read_tail
+
+        def spy(path: Path, *, fresh_needs_prompt: bool = False) -> TailReading | None:
+            read.append(path.name)
+            return real(path, fresh_needs_prompt=fresh_needs_prompt)
+
+        monkeypatch.setattr(session_load, "read_tail", spy)
+        live = live_agents(
+            subagents, liveness_seconds=120, now=NOW, only=frozenset({"aworker-2-0000000000000002"})
+        )
+        assert [entry.label for entry in live] == ["worker-2"]
+        assert read == ["agent-aworker-2-0000000000000002.jsonl"]
+
+    def test_limit_stops_at_that_many_live_agents_most_recent_first(self, subagents: Path) -> None:
+        live = live_agents(subagents, liveness_seconds=120, now=NOW, limit=1)
+        assert [entry.label for entry in live] == ["worker-1"]
+
+    def test_a_passed_deadline_reads_nothing(self, subagents: Path) -> None:
+        live = live_agents(
+            subagents, liveness_seconds=120, now=NOW, strict=True, deadline=time.monotonic() - 1
+        )
+        assert live == []
+
+
+class TestFinishedTaskIds:
+    def test_reads_the_finished_agent_tasks_of_one_payload(self) -> None:
+        tasks = [
+            {"id": "a1", "type": "subagent", "status": "completed", "description": "w"},
+            {"id": "a2", "type": "subagent", "status": "running", "description": "x"},
+            {"id": "t1", "type": "shell", "status": "completed"},
+            "junk",
+        ]
+        assert finished_task_ids(tasks) == frozenset({"a1", "w"})
+
+    def test_an_absent_or_malformed_list_is_unknown(self) -> None:
+        assert finished_task_ids(None) is None
+        assert finished_task_ids({"id": "a1"}) is None
 
 
 class TestBackgroundTasks:
