@@ -7,6 +7,8 @@ Every fixture is a throwaway clone of a local bare ``origin`` under ``tmp_path``
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -22,17 +24,20 @@ from claude_code_hooks_daemon.core.branch_reject import (
     LedgerRefusal,
     RejectError,
     RejectRefusedError,
+    RejectRequest,
     RejectRoute,
     RejectStore,
     RemovalApproval,
     Verdict,
     compute_inventory,
+    new_id,
     read_ledger,
     read_ledger_entries,
     record_removal,
+    unresolved_attempts,
 )
 from claude_code_hooks_daemon.utils.github_issue_validity import GhError
-from tests.support.git_fixtures import run_git
+from tests.support.git_fixtures import git_setup_timeout, run_git
 from tests.unit.core.test_branch_reject import HOUR, NOW, _items, _reviewer
 from tests.unit.core.test_branch_reject import _git as _git_out
 
@@ -258,7 +263,9 @@ class TestRepositorySlug:
             ("https://token@github.com/acme/widgets.git", "github.com/acme/widgets"),
             ("git@github.com:acme/widgets.git", "github.com/acme/widgets"),
             ("ssh://git@github.com/acme/widgets.git", "github.com/acme/widgets"),
-            ("ssh://git@ghe.example.com:2222/acme/my.repo.git", "ghe.example.com/acme/my.repo"),
+            ("ssh://git@ghe.example.com/acme/my.repo.git", "ghe.example.com/acme/my.repo"),
+            ("https://github.com:443/acme/widgets.git", "github.com/acme/widgets"),
+            ("ssh://git@github.com:22/acme/widgets.git", "github.com/acme/widgets"),
         ],
     )
     def test_a_github_style_url_names_its_repository(self, url: str, slug: str) -> None:
@@ -278,6 +285,21 @@ class TestRepositorySlug:
         ],
     )
     def test_anything_else_is_refused(self, url: str) -> None:
+        with pytest.raises(RejectRefusedError, match="repository"):
+            remote_route.repository_slug(url)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://ghe.corp:8443/a/w",
+            "ssh://git@ghe.example.com:2222/acme/widgets.git",
+            "http://ghe.corp:8080/a/w.git",
+            "git://ghe.corp:9999/a/w.git",
+            "https://ghe.corp:22/a/w",
+        ],
+    )
+    def test_a_non_default_port_is_refused(self, url: str) -> None:
+        """``gh -R`` takes no port, so dropping it would name another server's repo."""
         with pytest.raises(RejectRefusedError, match="repository"):
             remote_route.repository_slug(url)
 
@@ -422,6 +444,55 @@ class TestSubject:
             remote_route.check_subject(work, BranchesConfig(), "trunk", "novel", _closed(work))
 
 
+def _unresolved_local_review(work: Path, route: RejectRoute) -> None:
+    """A LOCAL-scope review of the same work, dispatched and never answered."""
+    nonce = new_id()
+    inventory = compute_inventory(work, "novel", f"refs/remotes/{REMOTE}/main", remote=REMOTE)
+    route.store.write_request(
+        RejectRequest(
+            nonce=nonce,
+            branch="novel",
+            tip=_tip(work),
+            default_sha=_tip(work, "main"),
+            inventory=inventory,
+            reviewers_required=1,
+            prompt_sha256="b" * 64,
+            created_at=NOW - 2 * HOUR,
+        )
+    )
+    route.store.write_dispatch(
+        DispatchRecord(nonce=nonce, session_id="s9", tool_use_id="toolu_y", agent_id="local9")
+    )
+
+
+class TestUnresolvedAttemptsByScope:
+    def test_a_local_attempt_does_not_count_against_the_remote_scope(
+        self, work: Path, route: RejectRoute
+    ) -> None:
+        _unresolved_local_review(work, route)
+        inventory = compute_inventory(work, "novel", f"refs/remotes/{REMOTE}/main", remote=REMOTE)
+        tip = _tip(work)
+        assert unresolved_attempts(route.store, "novel", tip, inventory) == 1
+        assert unresolved_attempts(route.store, "novel", tip, inventory, remote=REMOTE) == 0
+
+    def test_a_local_attempt_raises_no_remote_reviewer_count(
+        self, work: Path, branches: BranchesConfig, route: RejectRoute
+    ) -> None:
+        _unresolved_local_review(work, route)
+        _subject, issued = remote_route.issue_remote_requests(
+            work, branches, "main", "novel", route, _closed(work)
+        )
+        assert [item.request.reviewers_required for item in issued] == [1]
+
+    def test_a_local_attempt_after_the_verdict_does_not_block_the_remote_delete(
+        self, work: Path, branches: BranchesConfig, route: RejectRoute
+    ) -> None:
+        _issue(work, branches, route, _closed(work))
+        _unresolved_local_review(work, route)
+        remote_route.delete_rejected_remote(work, branches, "main", "novel", route, _closed(work))
+        assert "refs/heads/novel" not in _heads(work)
+
+
 class TestRequest:
     def test_a_request_is_stored_with_the_remote_scope_and_prompt(
         self, work: Path, branches: BranchesConfig, route: RejectRoute
@@ -469,22 +540,35 @@ class TestDelete:
         (line,) = read_ledger(route.ledger_path)
         assert (line.branch, line.remote, line.tip) == ("novel", REMOTE, tip)
 
-    def test_the_bundle_restores_the_branch(
-        self, work: Path, branches: BranchesConfig, route: RejectRoute
+    def test_the_printed_restore_lines_restore_into_a_clone_without_the_objects(
+        self,
+        origin_and_clone: tuple[Path, Path],
+        branches: BranchesConfig,
+        route: RejectRoute,
+        tmp_path: Path,
     ) -> None:
+        """The bundle alone carries the work: a fresh ``--no-local`` clone lacks the tip."""
+        origin, work = origin_and_clone
         tip = _tip(work)
         _issue(work, branches, route, _closed(work))
         removal = remote_route.delete_rejected_remote(
             work, branches, "main", "novel", route, _closed(work)
         )
-        fetch = [
-            "fetch",
-            str(removal.bundle),
-            f"refs/remotes/{REMOTE}/novel:refs/remotes/{REMOTE}/novel",
-        ]
-        _git(work, *fetch)
-        _git(work, "push", "-q", REMOTE, f"{tip}:refs/heads/novel")
-        assert tip in _heads(work)
+        fresh = tmp_path / "fresh"
+        run_git(tmp_path, "clone", "-q", "--no-local", str(origin), str(fresh))
+        missing = subprocess.run(
+            ["git", "-C", str(fresh), "cat-file", "-e", f"{tip}^{{commit}}"],
+            capture_output=True,
+            check=False,
+            timeout=git_setup_timeout(),
+        )
+        assert missing.returncode != 0, "the fresh clone must not already hold the removed tip"
+        for command in removal.restore:
+            argv = shlex.split(command)
+            assert argv[0] == "git"
+            _git(fresh, *argv[1:])
+        assert f"{tip}\trefs/heads/novel" in _git(fresh, "ls-remote", "--heads", REMOTE)
+        assert f"{tip}\trefs/heads/novel" in _heads(work)
 
     def test_no_verdict_is_refused(
         self, work: Path, branches: BranchesConfig, route: RejectRoute

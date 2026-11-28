@@ -62,7 +62,12 @@ _STATES = frozenset({_STATE_CLOSED, _STATE_OPEN, _STATE_MERGED})
 _GIT_SUFFIX = ".git"
 _HOST = r"(?P<host>[A-Za-z0-9][A-Za-z0-9.-]*)"
 _PATH = r"(?P<owner>[^/:@\s]+)/(?P<repo>[^/:@\s]+?)/?"
-_URL_FORM = re.compile(rf"(?:https|http|ssh|git)://(?:[^@/\s]+@)?{_HOST}(?::[0-9]+)?/{_PATH}")
+_URL_FORM = re.compile(
+    rf"(?P<scheme>https|http|ssh|git)://(?:[^@/\s]+@)?{_HOST}(?::(?P<port>[0-9]+))?/{_PATH}"
+)
+#: The only port each scheme may name: ``gh -R`` takes no port, so any other one
+#: would be dropped and the PR state read from a different server.
+_DEFAULT_PORTS = {"https": "443", "http": "80", "ssh": "22", "git": "9418"}
 _SCP_FORM = re.compile(rf"(?:[A-Za-z0-9._-]+@)?{_HOST}:{_PATH}")
 _OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 _REPO = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
@@ -115,7 +120,8 @@ def _parse_prs(raw: str, name: str) -> list[_Pr]:
 def repository_slug(url: str) -> str:
     """``host/owner/repo`` of a GitHub-style remote URL, the form ``gh -R`` takes.
 
-    Accepts ``https://[user@]host[:port]/owner/repo[.git]``, the same with ``ssh://`` or
+    Accepts ``https://[user@]host[:port]/owner/repo[.git]`` (the port only when it is the
+    scheme's default, as ``gh -R`` carries none), the same with ``ssh://`` or
     ``git://``, and ``[user@]host:owner/repo[.git]``. Anything else (a local path, a
     ``file://`` URL, a missing or extra path part, an option-like or dot-only part)
     raises RejectRefusedError: gh must never be left to choose the repository itself.
@@ -125,6 +131,13 @@ def repository_slug(url: str) -> str:
         raise RejectRefusedError(
             "the remote URL names no GitHub-style repository (host/owner/repo), so the "
             "pull request state cannot be read from the repository the delete goes to"
+        )
+    groups = match.groupdict()
+    port = groups.get("port")
+    if port is not None and port != _DEFAULT_PORTS[str(groups["scheme"])]:
+        raise RejectRefusedError(
+            f"the remote URL names port {port}, which `gh -R` cannot carry, so the "
+            "repository the pull request state is read from cannot be named"
         )
     host, owner, repo = match.group("host"), match.group("owner"), match.group("repo")
     repo = repo.removesuffix(_GIT_SUFFIX)

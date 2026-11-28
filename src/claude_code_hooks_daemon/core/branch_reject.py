@@ -1163,8 +1163,14 @@ def _resolved_by_own_verdict(store: RejectStore, request: RejectRequest) -> bool
     )
 
 
-def unresolved_attempts(store: RejectStore, branch: str, tip: str, inventory: Inventory) -> int:
-    """Reviews of this WORK that were dispatched and ended with no verdict of their own.
+def unresolved_attempts(
+    store: RejectStore, branch: str, tip: str, inventory: Inventory, *, remote: str = ""
+) -> int:
+    """Reviews of this WORK, in this scope, that were dispatched and ended with no verdict.
+
+    ``remote`` is the scope (N763): a local review and a remote one are separate
+    attempts, so one scope's unfinished reviews never raise the other's reviewer
+    count or close its route. Keep records, by contrast, span both scopes.
 
     Derived, not only recorded: every dispatch with no verdict counts, which covers a
     failed reply, a killed reviewer that never stopped, a withdrawn verdict and a
@@ -1181,6 +1187,8 @@ def unresolved_attempts(store: RejectStore, branch: str, tip: str, inventory: In
             raise RejectError(f"review {nonce[:12]} was dispatched or failed with no request")
         if request.nonce != nonce:
             raise RejectError(f"the request file for {nonce[:12]} is not named by its nonce")
+        if request.remote != remote:
+            continue
         related = same_work(
             branch, tip, inventory.commits, request.branch, request.tip, request.inventory.commits
         )
@@ -1828,7 +1836,7 @@ def issue_requests(
         keeps,
         removals,
         route.config,
-        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory),
+        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory, remote=remote),
     )
     keep_reasons = tuple(
         reason for keep in related_keeps(branch, tip, inventory, keeps) for reason in keep.reasons
@@ -2366,7 +2374,7 @@ def approve_removal(
         route.store.keeps(),
         removals,
         route.config,
-        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory),
+        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory, remote=remote),
     )
     verdicts = route.store.verdicts_for(branch, tip, remote=remote)
     if not verdicts:
