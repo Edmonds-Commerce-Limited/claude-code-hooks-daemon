@@ -206,10 +206,11 @@ class TestALiveAuthorKeepsTheBranchInFlight:
     ) -> None:
         _unpushed_branch(repo, "feat-a", WORKER)
         _agent(transcript, WORKER)
-        for _ in range(MAX_STOP_BLOCKS + 1):
-            decision = _decide(repo, untracked, transcript=transcript)
-            assert decision.reason is None
-        assert not any("left unpushed" in line for line in decision.context)
+        decisions = [
+            _decide(repo, untracked, transcript=transcript) for _ in range(MAX_STOP_BLOCKS + 1)
+        ]
+        assert all(decision.reason is None for decision in decisions)
+        assert not any("left unpushed" in line for line in decisions[-1].context)
         assert _state(untracked)["in_flight"] == ["feat-a"]
 
     def test_the_in_flight_record_is_cleared_once_the_agent_is_gone(
