@@ -87,6 +87,54 @@ class TestDenied:
         assert f"BLOCKED [{RuleID.SCRATCH_KEEP_MARKER}]" in result.reason
         assert "human" in result.reason
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"mkdir {_ENTRY}/.scratch-keep",
+            f"mkdir -p {_ENTRY}/.scratch-keep",
+            f"mkdir -p {_ENTRY}/.scratch-keep/a",
+            f"mkdir -pv -m 0755 {_ENTRY}/.scratch-keep",
+            f"mkdir --parents --mode=0755 -- {_ENTRY}/.scratch-keep/a/b",
+            f'mkdir "{_ENTRY}/.scratch-keep"',
+            f"mkdir '{_ENTRY}/.scratch-keep/'",
+            f"mkdir {_ENTRY}/other {_ENTRY}/.scratch-keep",
+            "mkdir .scratch-keep",
+            f"cd {_ENTRY} && mkdir .scratch-keep",
+            'mkdir -p "$ENTRY/.scratch-keep"',
+            f"/bin/mkdir {_ENTRY}/.scratch-keep",
+            f"sudo mkdir -p {_ENTRY}/.scratch-keep",
+            f"timeout 5 mkdir {_ENTRY}/.scratch-keep",
+            f"sh -c 'mkdir -p {_ENTRY}/.scratch-keep'",
+            f"mkfifo {_ENTRY}/.scratch-keep",
+            f"mkfifo -m 600 {_ENTRY}/.scratch-keep",
+            f"mknod {_ENTRY}/.scratch-keep p",
+            f"mknod -m 600 {_ENTRY}/.scratch-keep c 1 3",
+        ],
+    )
+    def test_creating_a_marker_node_of_any_kind_is_denied(
+        self, handler: ScratchKeepMarkerGuardHandler, command: str
+    ) -> None:
+        """N767 review: a directory, FIFO or device named the marker now keeps too."""
+        assert handler.matches(_bash(command))
+        assert handler.handle(_bash(command)).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "hook_input",
+        [
+            _write(f"{_ENTRY}/.scratch-keep/notes.md"),
+            _edit(f"{_ENTRY}/.scratch-keep/why.txt"),
+            _bash(f"echo r > {_ENTRY}/.scratch-keep/why.txt"),
+            _bash(f"touch {_ENTRY}/.scratch-keep/why.txt"),
+            _bash(f"rm -r {_ENTRY}/.scratch-keep/why.txt"),
+        ],
+    )
+    def test_a_write_below_a_marker_directory_is_denied(
+        self, handler: ScratchKeepMarkerGuardHandler, hook_input: dict[str, Any]
+    ) -> None:
+        """Write creates missing parents, so a path below the marker creates it."""
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
     def test_copy_into_an_existing_entry_directory_is_denied(
         self, handler: ScratchKeepMarkerGuardHandler, tmp_path: Path
     ) -> None:
@@ -173,6 +221,13 @@ class TestAllowed:
             _bash(f"test -e {_ENTRY}/.scratch-keep && echo kept"),
             _bash("python3 -c 'print(1)'"),
             _bash("git commit -m 'sh -c touch .scratch-keep is denied'"),
+            _bash(f"mkdir -p {_ENTRY}/sub"),
+            _bash(f"mkdir -p {_ENTRY}/.scratch-keeper {_ENTRY}/scratch-keep"),
+            _bash(f"mkfifo {_ENTRY}/pipe"),
+            _bash(f"ls {_ENTRY}/.scratch-keep/"),
+            _bash(f"cat {_ENTRY}/.scratch-keep/why.txt"),
+            _bash("git commit -m 'mkdir .scratch-keep is denied'"),
+            _bash(f"echo 'mkdir {_ENTRY}/.scratch-keep' > {_ENTRY}/notes.txt"),
         ],
     )
     def test_reads_and_other_files_pass(
