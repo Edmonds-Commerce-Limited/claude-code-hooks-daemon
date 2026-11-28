@@ -54,7 +54,7 @@ dev = [
     # coverage on (28.4s vs 9.5s for tests/integration/test_forwarder_socket_stdin.py),
     # enough to push the py3.13 coverage CI shard past the forwarder's socket timing so
     # two tests failed. Lift the hold once a newer release is measured no slower.
-    "coverage==7.13.5",
+    "coverage==7.17.5",
     "pytest-mock>=3.11",
     # The `anyio` pytest plugin runs every `@pytest.mark.anyio` test. It was only
     # ever present as a transitive of semgrep (via mcp/httpx); when Plan 00607
