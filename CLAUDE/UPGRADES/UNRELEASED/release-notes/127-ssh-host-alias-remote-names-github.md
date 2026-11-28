@@ -1,4 +1,4 @@
-# Fix: a `github.com-<suffix>` ssh host alias remote is read as GitHub
+# Callout: a `github.com-<suffix>` ssh host alias remote is read as GitHub
 
 **Plan**: 00474
 **Audience**: everyone
