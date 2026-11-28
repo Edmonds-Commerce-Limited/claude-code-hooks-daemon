@@ -285,6 +285,13 @@ class TestRepositorySlug:
         remote_route.check_subject(work, branches, "main", "novel", gh)
         assert gh.calls and all(call[call.index("-R") + 1] == SLUG for call in gh.calls)
 
+    def test_a_remote_with_two_configured_urls_is_refused(
+        self, work: Path, branches: BranchesConfig
+    ) -> None:
+        _git(work, "config", "--add", f"remote.{REMOTE}.url", "https://github.com/other/fork.git")
+        with pytest.raises(RejectRefusedError, match="exactly one configured URL"):
+            remote_route.check_subject(work, branches, "main", "novel", _closed(work))
+
     def test_a_remote_whose_url_names_no_repository_is_refused(
         self, origin_and_clone: tuple[Path, Path], branches: BranchesConfig
     ) -> None:
