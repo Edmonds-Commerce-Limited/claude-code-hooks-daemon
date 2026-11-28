@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget impo
 from claude_code_hooks_daemon.handlers.subagent_stop.branch_subagent_stop_guard import (
     BranchSubagentStopGuardHandler,
 )
+from claude_code_hooks_daemon.handlers.utils import branch_stop_guard_base
 from claude_code_hooks_daemon.utils.spend_ledger import state_path, write_state
 
 SESSION = "sess-1"
@@ -115,6 +116,22 @@ class TestSubagentStopHandler:
         result = handler.handle(_payload())
         assert result.decision == Decision.DENY
         assert tip in (result.reason or "")
+
+    def test_the_agents_own_transcript_path_stands_in_for_an_absent_one(
+        self, handler: BranchSubagentStopGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N758: either path locates the session's sub-agent transcripts."""
+        seen: dict[str, object] = {}
+
+        def capture(*_args: object, **kwargs: object) -> branch_stop_guard_base.StopDecision:
+            seen.update(kwargs)
+            return branch_stop_guard_base.StopDecision(None, ())
+
+        monkeypatch.setattr(branch_stop_guard_base, "decide_stop", capture)
+        own = "/t/sess-1/subagents/agent-agent-1.jsonl"
+        handler.handle({**_payload(), "agent_transcript_path": own})
+        assert seen["transcript_path"] == own
+        assert seen["agent_id"] == AGENT
 
     def test_acceptance_tests_declared(self, handler: BranchSubagentStopGuardHandler) -> None:
         assert handler.get_acceptance_tests()

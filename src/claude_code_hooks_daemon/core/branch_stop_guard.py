@@ -19,7 +19,7 @@ import logging
 import re
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
@@ -78,6 +78,8 @@ class StopFinding:
     advisory: bool = False
     #: True when the remote holds a copy of the branch (names ``--clean --remote``).
     on_remote: bool = False
+    #: The worktree a ``DIRTY`` finding is about, so its remedies can be rewritten.
+    worktree: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,9 @@ class StopJudgement:
     #: The branches judged in full: those the stopping thread itself touched. Carried
     #: so the gate hands one over only on a queue record or a git lock, from this read.
     own: frozenset[str] = frozenset()
+    #: Each judged branch with the agent ids that touched it (``""`` is the main
+    #: thread), from the same touch-record read, so the gate can name a live author.
+    touched_by: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 class _GitResult(Protocol):
@@ -319,7 +324,13 @@ def judge_stop(
         )
         findings.extend(found)
         incomplete = incomplete or not finished
-    return StopJudgement(tuple(findings), tips, incomplete, own=frozenset(own))
+    return StopJudgement(
+        tuple(findings),
+        tips,
+        incomplete,
+        own=frozenset(own),
+        touched_by={name: frozenset(touches[name]) for name in tips},
+    )
 
 
 #: Reflog subjects that move a branch without adding work of its own: its
@@ -377,6 +388,7 @@ def _judge_branch(
                     StopCheck.DIRTY,
                     tip,
                     (f"git -C {tree} add -A", f"git -C {tree} commit"),
+                    worktree=record.worktree,
                 )
             )
     if merged:

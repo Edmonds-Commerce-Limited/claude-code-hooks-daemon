@@ -134,5 +134,36 @@ class TestStopHandler:
         monkeypatch.setattr(branch_stop_guard_base, "decide_stop", boom)
         assert handler.handle(_payload()).decision == Decision.ALLOW
 
+    def test_the_payloads_transcript_and_background_tasks_reach_the_gate(
+        self, handler: BranchStopGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N758: the live-agent reading needs both, and only the payload carries them."""
+        seen: dict[str, object] = {}
+
+        def capture(*_args: object, **kwargs: object) -> branch_stop_guard_base.StopDecision:
+            seen.update(kwargs)
+            return branch_stop_guard_base.StopDecision(None, ())
+
+        monkeypatch.setattr(branch_stop_guard_base, "decide_stop", capture)
+        tasks = [{"id": "a1", "type": "subagent", "status": "running"}]
+        payload = {**_payload(), "transcript_path": "/t/sess-1.jsonl", "background_tasks": tasks}
+        assert handler.handle(payload).decision == Decision.ALLOW
+        assert seen["transcript_path"] == "/t/sess-1.jsonl"
+        assert seen["background_tasks"] == tasks
+
+    def test_a_payload_without_them_passes_nothing_to_read(
+        self, handler: BranchStopGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, object] = {}
+
+        def capture(*_args: object, **kwargs: object) -> branch_stop_guard_base.StopDecision:
+            seen.update(kwargs)
+            return branch_stop_guard_base.StopDecision(None, ())
+
+        monkeypatch.setattr(branch_stop_guard_base, "decide_stop", capture)
+        handler.handle(_payload())
+        assert seen["transcript_path"] == ""
+        assert seen["background_tasks"] is None
+
     def test_acceptance_tests_declared(self, handler: BranchStopGuardHandler) -> None:
         assert handler.get_acceptance_tests()

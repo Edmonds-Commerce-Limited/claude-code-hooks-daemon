@@ -13,11 +13,13 @@ this function so the rules cannot drift apart.
 from __future__ import annotations
 
 import logging
+import shlex
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.core.agent_ownership import ownership_refusal, running_holds
 from claude_code_hooks_daemon.core.branch_cleanup import linked_worktree_records, sweep_clean_line
@@ -32,7 +34,14 @@ from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFindi
 from claude_code_hooks_daemon.core.branch_sweep import dormant_action
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.session_load import (
+    LiveAgent,
+    finished_agents,
+    finished_task_ids,
+    live_agents,
+)
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
+from claude_code_hooks_daemon.utils.transcript_tail import subagents_dir
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +68,13 @@ _UNPUSHED_KEY: Final[str] = "unpushed"
 _UNPUSHED_RECORD: Final[str] = "left unpushed"
 _UNPUSHED_TRUTH: Final[str] = (
     "The work is intact locally; what is missing is a push, or a branch-park with a reason."
+)
+#: State key: the branches the last stop let through as in flight with a live agent.
+_IN_FLIGHT_KEY: Final[str] = "in_flight"
+#: The main thread's id on a touch record.
+_MAIN_TOUCH: Final[str] = ""
+_LEAVE_IT_TO_THE_AGENT: Final[str] = (
+    "wait for that agent to finish, stop it (TaskStop), or have it commit its own work"
 )
 
 
@@ -247,6 +263,99 @@ def _hold_remedies(finding: StopFinding, worktree: Path) -> StopFinding:
     )
 
 
+def live_session_agents(
+    untracked: Path,
+    *,
+    session_id: str,
+    agent_id: str | None,
+    transcript_path: str,
+    background_tasks: object,
+    now: float,
+) -> tuple[LiveAgent, ...]:
+    """The session's sub-agents verifiably still working, the stopping agent excluded (N758).
+
+    Read from daemon state only: an ``agent-<id>.jsonl`` transcript in the session's
+    sub-agent directory that moved within ``Timeout.STOP_GUARD_AGENT_SILENCE``, whose
+    turn has not ended, which could be read (``strict``), and which neither the
+    recorded ``background_tasks`` nor this payload's reports as no longer running.
+    No transcript path means no reading, so the stop is judged as it always was.
+    """
+    directory = subagents_dir(transcript_path, session_id)
+    if directory is None:
+        return ()
+    finished = finished_agents(untracked, session_id) | (
+        finished_task_ids(background_tasks) or frozenset()
+    )
+    live = live_agents(
+        directory,
+        liveness_seconds=Timeout.STOP_GUARD_AGENT_SILENCE,
+        now=now,
+        finished=finished,
+        strict=True,
+    )
+    return tuple(agent for agent in live if agent.agent_id != agent_id)
+
+
+def _label(agent: LiveAgent) -> str:
+    return f"{agent.name} ({agent.agent_id})" if agent.name else agent.agent_id
+
+
+def _labels(agents: tuple[LiveAgent, ...]) -> str:
+    return ", ".join(_label(agent) for agent in agents)
+
+
+def _in_flight(
+    blocking: list[StopFinding],
+    touched_by: dict[str, frozenset[str]],
+    live: tuple[LiveAgent, ...],
+) -> dict[str, tuple[LiveAgent, ...]]:
+    """Each blocking branch a live sub-agent of the session touched, with those agents."""
+    flying: dict[str, tuple[LiveAgent, ...]] = {}
+    for name in sorted({finding.branch for finding in blocking}):
+        authors = touched_by.get(name, frozenset()) - {_MAIN_TOUCH}
+        agents = tuple(agent for agent in live if agent.agent_id in authors)
+        if agents:
+            flying[name] = agents
+    return flying
+
+
+def _in_flight_line(branch: str, agents: tuple[LiveAgent, ...]) -> str:
+    return (
+        f"Branch in flight (not abandoned): {branch}: a live agent of this session is "
+        f"working on it: {_labels(agents)}. Do not stage or commit its files from here; "
+        f"{_LEAVE_IT_TO_THE_AGENT}."
+    )
+
+
+def _shared_tree_remedies(finding: StopFinding, live: tuple[LiveAgent, ...]) -> StopFinding:
+    """A dirty finding's remedies when another agent of the session is live: never ``add -A``.
+
+    A blanket add would sweep that agent's half-done files into this commit.
+    """
+    if not live or finding.check != StopCheck.DIRTY or finding.worktree is None:
+        return finding
+    tree = shlex.quote(str(finding.worktree))
+    return replace(
+        finding,
+        commands=(
+            f"a live agent of this session ({_labels(live)}) may hold some of these files: "
+            f"stage only your own, by name: git -C {tree} add -- <path>...",
+            f"git -C {tree} commit",
+            f"or {_LEAVE_IT_TO_THE_AGENT}",
+        ),
+    )
+
+
+def _record_in_flight(state: dict[str, Any], flying: dict[str, tuple[LiveAgent, ...]]) -> bool:
+    """Record the in-flight branches, or clear an older record; True when ``state`` changed."""
+    if flying:
+        names = sorted(flying)
+        logger.info("branch_stop_guard: in flight with a live agent at stop: %s", ", ".join(names))
+        state[_IN_FLIGHT_KEY] = names
+        return True
+    return state.pop(_IN_FLIGHT_KEY, None) is not None
+
+
 def decide_stop(
     repo: Path,
     branches: BranchesConfig,
@@ -256,8 +365,16 @@ def decide_stop(
     agent_id: str | None,
     handoff: bool,
     now: float,
+    transcript_path: str = "",
+    background_tasks: object = None,
 ) -> StopDecision:
-    """Judge a stop; every failure to judge allows the stop rather than holding it."""
+    """Judge a stop; every failure to judge allows the stop rather than holding it.
+
+    ``transcript_path`` and ``background_tasks`` come from the stop payload and feed
+    :func:`live_session_agents`: a branch a live sub-agent of the session touched is
+    in flight (reported, never held or recorded as abandoned), and while any such
+    agent is live no remedy stages a whole worktree.
+    """
     allow = StopDecision(None, ())
     if branches.stop_guard.mode == "off" or (untracked / RELEASE_STATE_FILENAME).exists():
         return allow
@@ -299,12 +416,34 @@ def decide_stop(
     ]
     blocking = [f for f in findings if not f.advisory]
     advisory = [f for f in findings if f.advisory]
+    # N758: read only when something would hold the stop, so a clean stop pays nothing.
+    live = (
+        live_session_agents(
+            untracked,
+            session_id=session_id,
+            agent_id=agent_id,
+            transcript_path=transcript_path,
+            background_tasks=background_tasks,
+            now=now,
+        )
+        if blocking
+        else ()
+    )
+    flying = _in_flight(blocking, judgement.touched_by, live)
+    # A newly judged harness branch already names only hold remedies; keep them.
+    blocking = [
+        f if f.branch in newly else _shared_tree_remedies(f, live)
+        for f in blocking
+        if f.branch not in flying
+    ]
     context: list[str] = [
         f"Branch left behind (advisory): {f.branch}: {f.check.value}" for f in advisory
     ]
     over = sorted({f.branch for f in judgement.findings if f.branch in handed})
     if over:
         context.append("Branches handed over to running agents (not abandoned): " + ", ".join(over))
+    context.extend(_in_flight_line(name, agents) for name, agents in flying.items())
+    state_changed = _record_in_flight(state, flying)
     reason: str | None = None
     if blocking and branches.stop_guard.mode == "warn":
         context.extend(f"Branch left behind: {f.branch}: {f.check.value}" for f in blocking)
@@ -321,7 +460,7 @@ def decide_stop(
             context.extend(_record_given_way(state, blocking))
     if reason is None and agent_id is None:
         context.extend(_noisy_context(inventory, state, now=now))
-    if state:
+    if state or state_changed:
         write_state(state_file, state)
     if agent_id is None:
         # Plan 00619: the warning ladder, from the first warning up to the block. Context

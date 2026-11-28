@@ -8863,7 +8863,7 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: a false abandoned record, and advice that would mix another agent's unfinished work into a commit.
 
-**Status**: ⬜ Open. Fix, test first: when a live background agent of the session holds the dirty paths, name that agent and record "in flight", never "abandoned", and never suggest staging everything while another agent of the session is live.
+**Status**: 🔄 Fixed on branch `guard-n758-stop-guard-live-agent` (not merged; release note 128), pending independent review. Signal, from daemon state only: the branch's touch record for this session names a sub-agent id (the same id as its `agent-<id>.jsonl` transcript, checked against this session's own records), and `live_agents(strict=True)` finds that transcript moved within `Timeout.STOP_GUARD_AGENT_SILENCE` (`BASH_MAX` plus `REQUEST_LONG`, 11 minutes), its turn open, readable, and not reported finished by the recorded or the current payload's `background_tasks`. Such a branch is reported "in flight (not abandoned)" naming the agent, recorded under `in_flight`, and draws no block. While any other sub-agent of the session is live, a dirty finding's remedies drop `add -A` (stage your own paths by name, or wait for, stop, or have that agent commit). Every other case (no transcript path, ended, silent, unreadable, finished, another session's agent, a sub-agent's own transcript) is judged as before (`test_branch_stop_gate_live_agent.py`). Limit: the touch record says the agent touched the branch, not which dirty paths are its own; no daemon state maps paths to agents.
 
 ### N759 — a Bash denial names a token as matching a secret glob when the real cause was too many directories entered
 

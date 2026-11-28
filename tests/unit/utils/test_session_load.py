@@ -11,6 +11,7 @@ import pytest
 from claude_code_hooks_daemon.utils.session_load import (
     LiveAgent,
     finished_agents,
+    finished_task_ids,
     live_agents,
     model_family,
     read_live_snapshot,
@@ -98,6 +99,56 @@ class TestLiveAgents:
         live = live_agents(subagents, liveness_seconds=120, now=NOW)
         assert [entry.label for entry in live] == ["done", "worker-1", "worker-2"]
         assert live[0].context_tokens == 0
+
+
+class TestStrictLiveness:
+    """N758: the stop guard counts an agent live only on a transcript it could read."""
+
+    def test_an_unreadable_recent_transcript_is_not_live_when_strict(
+        self, subagents: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path, **_: object) -> object:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr("claude_code_hooks_daemon.utils.session_load.read_tail", refuse)
+        assert live_agents(subagents, liveness_seconds=120, now=NOW, strict=True) == []
+
+    def test_an_unmeasurable_recent_transcript_is_not_live_when_strict(
+        self, subagents: Path
+    ) -> None:
+        """An assistant record with no usage raises NoUsageInTail: not a reading."""
+        path = subagents / "agent-adone-0000000000000003.jsonl"
+        record = {"type": "assistant", "message": {"model": "m", "stop_reason": "tool_use"}}
+        path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+        os.utime(path, (NOW - 5, NOW - 5))
+        live = live_agents(subagents, liveness_seconds=120, now=NOW, strict=True)
+        assert [entry.label for entry in live] == ["worker-1", "worker-2"]
+
+    def test_a_fresh_agent_with_no_assistant_record_yet_is_live_when_strict(
+        self, tmp_path: Path
+    ) -> None:
+        directory = tmp_path / "subagents"
+        directory.mkdir()
+        path = directory / "agent-afresh.jsonl"
+        path.write_text(json.dumps({"type": "user", "message": {"content": "go"}}) + "\n")
+        os.utime(path, (NOW - 1, NOW - 1))
+        live = live_agents(directory, liveness_seconds=120, now=NOW, strict=True)
+        assert [entry.agent_id for entry in live] == ["afresh"]
+
+
+class TestFinishedTaskIds:
+    def test_reads_the_finished_agent_tasks_of_one_payload(self) -> None:
+        tasks = [
+            {"id": "a1", "type": "subagent", "status": "completed", "description": "w"},
+            {"id": "a2", "type": "subagent", "status": "running", "description": "x"},
+            {"id": "t1", "type": "shell", "status": "completed"},
+            "junk",
+        ]
+        assert finished_task_ids(tasks) == frozenset({"a1", "w"})
+
+    def test_an_absent_or_malformed_list_is_unknown(self) -> None:
+        assert finished_task_ids(None) is None
+        assert finished_task_ids({"id": "a1"}) is None
 
 
 class TestBackgroundTasks:

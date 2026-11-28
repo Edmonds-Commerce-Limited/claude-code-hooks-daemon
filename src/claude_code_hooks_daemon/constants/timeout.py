@@ -253,6 +253,12 @@ class Timeout:
     # the stop is allowed. Held under CHAIN_DEADLINE_DEFAULT, which also has to
     # cover the inventory pass and every other Stop handler.
     GIT_STOP_GUARD_BUDGET = 8.0
+    # Plan 00474 N758: the stop guard keeps a branch "in flight" for a live
+    # sub-agent only while that agent's transcript moved within this many
+    # seconds. A tool call writes nothing to the transcript until it returns, so
+    # the bound is the longest foreground Bash call plus a turn around it; an
+    # agent silent for longer has died or been killed, and its branch is judged.
+    STOP_GUARD_AGENT_SILENCE = BASH_MAX // MILLISECONDS_PER_SECOND + REQUEST_LONG
 
     # Plan 00474 N753: one wall-clock bound on every git call of the proof that a
     # `git checkout <commit> -- <paths>` has nothing local to lose. Past it the

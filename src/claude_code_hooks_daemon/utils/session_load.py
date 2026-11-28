@@ -78,13 +78,16 @@ def live_agents(
     liveness_seconds: float,
     now: float | None = None,
     finished: frozenset[str] = frozenset(),
+    strict: bool = False,
 ) -> list[LiveAgent]:
     """Agents in ``directory`` that wrote recently and have not ended their turn.
 
     ``finished`` holds agent ids or names Claude Code reported as no longer
     running; they are excluded. A recent transcript that cannot be read is
-    counted live with an unknown (zero) context. Ordered by idle time, most
-    recent first.
+    counted live with an unknown (zero) context, unless ``strict``: a caller
+    that lets a stop through on the answer counts only what it could read (a
+    fresh agent with no assistant record yet still counts). Ordered by idle
+    time, most recent first.
     """
     moment = time.time() if now is None else now
     found: list[LiveAgent] = []
@@ -115,6 +118,14 @@ def live_agents(
         try:
             reading = read_tail(path)
         except (OSError, NoUsageInTail) as exc:
+            if strict:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a strict count needs a readable transcript, so one that cannot be measured is not counted live",
+                    level=logging.DEBUG,
+                )
+                continue
             log_and_continue(
                 logger,
                 exc,
@@ -136,15 +147,15 @@ def live_agents(
     return sorted(found, key=lambda agent: (agent.idle_seconds, agent.label))
 
 
-def record_background_tasks(untracked: Path, session_id: str, tasks: object) -> None:
-    """Record which agent tasks a Stop/SubagentStop reports as no longer running.
+def finished_task_ids(tasks: object) -> frozenset[str] | None:
+    """The ids and descriptions of the agent tasks ``tasks`` reports as no longer running.
 
-    An absent or malformed list is "unknown" (the contract says so) and leaves
-    the previous record untouched. Each finished task contributes its ``id``
-    and its ``description``, either of which may be what names the agent.
+    None for an absent or malformed list, which is "unknown" (the contract says
+    so), never "nothing finished". Each finished task contributes its ``id`` and
+    its ``description``, either of which may be what names the agent.
     """
     if not isinstance(tasks, list):
-        return
+        return None
     finished: set[str] = set()
     for task in tasks:
         if not isinstance(task, dict) or task.get("type") not in _AGENT_TASK_TYPES:
@@ -155,6 +166,17 @@ def record_background_tasks(untracked: Path, session_id: str, tasks: object) -> 
             value = task.get(key)
             if isinstance(value, str) and value:
                 finished.add(value)
+    return frozenset(finished)
+
+
+def record_background_tasks(untracked: Path, session_id: str, tasks: object) -> None:
+    """Record which agent tasks a Stop/SubagentStop reports as no longer running.
+
+    An absent or malformed list leaves the previous record untouched.
+    """
+    finished = finished_task_ids(tasks)
+    if finished is None:
+        return
     write_state(
         session_dir(untracked, session_id) / _BACKGROUND_FILE,
         {"ts": time.time(), "finished": sorted(finished)},

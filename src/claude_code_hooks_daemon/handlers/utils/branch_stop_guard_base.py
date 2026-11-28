@@ -49,7 +49,10 @@ def stop_guard_rule(rule_id: str, who: str) -> Rule:
             "DO INSTEAD:\n"
             "  Run the listed commands per branch. After three blocked stops the guard\n"
             "  gives way and records the branches as left unpushed (unpushed commits are\n"
-            "  the only finding) or as abandoned (anything else)."
+            "  the only finding) or as abandoned (anything else). A branch a live\n"
+            "  sub-agent of this session touched is in flight instead: never held,\n"
+            "  never abandoned, and while such an agent is live no remedy stages a\n"
+            "  whole worktree; wait for it, stop it, or have it commit its own work."
         ),
     )
 
@@ -117,6 +120,12 @@ class BranchStopGuardBase(StopHandlerBase):
                 agent_id=self._agent_id(hook_input),
                 handoff=self._handoff(hook_input),
                 now=time.time(),
+                transcript_path=str(
+                    hook_input.get(HookInputField.TRANSCRIPT_PATH)
+                    or hook_input.get(HookInputField.AGENT_TRANSCRIPT_PATH)
+                    or ""
+                ),
+                background_tasks=hook_input.get(HookInputField.BACKGROUND_TASKS),
             )
         except Exception as exc:
             log_and_continue(
