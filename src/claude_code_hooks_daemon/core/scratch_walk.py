@@ -42,7 +42,9 @@ class NodeKind(enum.Enum):
     FILE = "file"
     SYMLINK = "symlink"
     SPECIAL = "special"
-    #: An entry root the walk could not ``lstat``: its walk is always stopped.
+    #: A node that could not be ``lstat``ed: an entry root (its walk is always
+    #: stopped), or a keep marker ``scratch_verdict.keep_marker_present`` could
+    #: not read (read as kept).
     UNREAD = "unread"
 
 

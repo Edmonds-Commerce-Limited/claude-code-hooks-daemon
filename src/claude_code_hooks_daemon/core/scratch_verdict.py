@@ -390,6 +390,8 @@ def keep_marker_present(directory: Path) -> bool:
 
     Read by ``lstat``, so a link is never followed. Only ``FileNotFoundError``
     means absent; any other failure is :attr:`NodeKind.UNREAD`, read as kept.
+    Not ``utils.path_predicates``: those follow links, so they would read a
+    dangling or looping marker as absent.
     """
     try:
         kind = kind_of(os.lstat(directory / KEEP_MARKER).st_mode)
@@ -410,8 +412,6 @@ def has_keep_marker(stats: EntryStats) -> bool:
 
     Decided by :func:`marker_keeps`, the rule a session directory's marker is read by.
     """
-    if stats.kind is not NodeKind.DIRECTORY:
-        return False
     wanted = f"{stats.name}/{KEEP_MARKER}"
     found = next((node.kind for node in stats.nodes if node.path == wanted), None)
     return marker_keeps(found)
