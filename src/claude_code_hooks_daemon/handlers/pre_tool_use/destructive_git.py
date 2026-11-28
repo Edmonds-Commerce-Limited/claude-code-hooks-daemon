@@ -1,7 +1,6 @@
 """DestructiveGitHandler - blocks destructive git commands that permanently destroy data."""
 
 import functools
-import itertools
 import logging
 import re
 import shlex
@@ -1417,8 +1416,17 @@ _HARMLESS_REDIRECT_TARGETS: Final[frozenset[str]] = frozenset(
     {"/dev/null", "/dev/stdout", "/dev/stderr"}
 )
 # List operators under which the next statement runs at the same time as the one before.
-_BACKGROUND: Final[str] = "&"
-_CONCURRENT_OPERATORS: Final[frozenset[str]] = frozenset({_BACKGROUND, "|", "|&"})
+_CONCURRENT_OPERATORS: Final[frozenset[str]] = frozenset({"&", "|", "|&"})
+# A statement the parse cannot see as a step of its own: a command or process
+# substitution, or a here-string (fifth review).
+_HIDDEN_STATEMENT: Final[re.Pattern[str]] = re.compile(rf"{_SUBSTITUTION.pattern}|<<<")
+# Options that make a read-only git command write a file or run a program, each with the
+# shortest abbreviation that names it alone (`--o` is ambiguous with `--oneline`).
+_WRITING_READER_OPTIONS: Final[tuple[tuple[str, int], ...]] = (
+    ("--output", len("--ou")),
+    ("--open-files-in-pager", len("--op")),
+)
+_GREP_PAGER_SHORT: Final[str] = "-O"
 # The `_stale_readings` key for a run whose place in the command's order is not known
 # (`id()` of a live object is never negative).
 _ANY_STATEMENT: Final[int] = -1
@@ -1508,6 +1516,8 @@ def _may_change_what_a_switch_reads(step: SimpleCommand) -> bool:
         subcommand = step.git.subcommand
         if subcommand == _BRANCH:
             return not set(step.git.arguments) <= _BRANCH_LISTING_OPTIONS
+        if any(_writes_or_runs(argument) for argument in step.git.arguments):
+            return True
         return subcommand not in _READ_ONLY_GIT_SUBCOMMANDS
     if head in _ENVIRONMENT_DECLARATIONS:
         declared = rest[1:]
@@ -1515,27 +1525,30 @@ def _may_change_what_a_switch_reads(step: SimpleCommand) -> bool:
     return True
 
 
-def _stale_readings(steps: list[SimpleCommand]) -> dict[int, bool]:
+def _stale_readings(steps: list[SimpleCommand], *, hidden: bool) -> dict[int, bool]:
     """For each step of one parse (keyed by ``id``), whether a switch there would be read
-    against state another statement may change first: an earlier statement, or a later one
-    that runs at the same time (a pipeline partner, or anything after a backgrounded
-    switch). Under ``_ANY_STATEMENT``, whether any statement may change it at all: the
-    answer for a run found only by re-parsing a segment, whose place in the order is not
-    known.
+    against state another statement may change first.
+
+    ``hidden``: the command text holds a command or process substitution or a here-string.
+    A statement inside one stays a single word of the step around it, or is lost by the
+    parse (``cat <(git branch t f)``), so it cannot be classified, and every switch is stale
+    (fifth review). Otherwise a switch is stale after any statement that may change state.
+    When the command runs anything at the same time (``&``, a pipe), the flattened steps no
+    longer say which statements share a compound (``( ...; git checkout x ) & git branch
+    x f``), so then any OTHER statement that may change state makes it stale. Under
+    ``_ANY_STATEMENT``: the answer for a run found only by re-parsing a segment, whose
+    place in the order is not known.
     """
     changes = [_may_change_what_a_switch_reads(step) for step in steps]
-    stale: dict[int, bool] = {_ANY_STATEMENT: any(changes)}
+    concurrent = any(step.operator in _CONCURRENT_OPERATORS for step in steps)
+    changed_after = [False] * (len(steps) + 1)
+    for index in range(len(steps) - 1, -1, -1):
+        changed_after[index] = changed_after[index + 1] or changes[index]
+    stale: dict[int, bool] = {_ANY_STATEMENT: hidden or any(changes)}
     changed_before = False
     for index, step in enumerate(steps):
-        later = range(index + 1, len(steps))
-        backgrounded = index + 1 < len(steps) and steps[index + 1].operator == _BACKGROUND
-        partners = itertools.takewhile(
-            lambda later_index: steps[later_index].operator in _CONCURRENT_OPERATORS, later
-        )
-        concurrent = (
-            any(changes[j] for j in later) if backgrounded else any(changes[j] for j in partners)
-        )
-        stale[id(step)] = changed_before or concurrent
+        beside = concurrent and changed_after[index + 1]
+        stale[id(step)] = hidden or changed_before or beside
         changed_before = changed_before or changes[index]
     return stale
 
@@ -1555,6 +1568,19 @@ def _chunk_bounds(names: Sequence[str]) -> list[tuple[int, int]]:
     if start < len(names):
         bounds.append((start, len(names)))
     return bounds
+
+
+def _writes_or_runs(argument: str) -> bool:
+    """Whether a read-only git command's ``argument`` makes it write a file or run a
+    program: ``--output`` (log, show, diff) or ``-O``/``--open-files-in-pager`` (grep),
+    in any abbreviation git accepts."""
+    name = argument.split(_VALUE_SEPARATOR, 1)[0]
+    if argument.startswith(_GREP_PAGER_SHORT):
+        return True
+    return any(
+        len(name) >= shortest and option.startswith(name)
+        for option, shortest in _WRITING_READER_OPTIONS
+    )
 
 
 def _names_a_state_variable(word: str) -> bool:
@@ -2720,12 +2746,20 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         kept = getattr(self._reading, "entry", None)
         if kept is not None and kept[0] is hook_input and kept[1] == blanked:
             return list(kept[2])
-        found = self._read_unpatterned(blanked, hook_input)
+        found = self._read_unpatterned(
+            blanked, hook_input, hidden=bool(_HIDDEN_STATEMENT.search(command))
+        )
         self._reading.entry = (hook_input, blanked, tuple(found))
         return found
 
-    def _read_unpatterned(self, blanked: str, hook_input: dict[str, Any]) -> list[str]:
-        """:meth:`_unpatterned_rule_ids` without its per-hook-call reuse."""
+    def _read_unpatterned(
+        self, blanked: str, hook_input: dict[str, Any], *, hidden: bool
+    ) -> list[str]:
+        """:meth:`_unpatterned_rule_ids` without its per-hook-call reuse.
+
+        ``hidden``: the original command text holds a substitution or here-string, which
+        may run a statement no step shows (see :func:`_stale_readings`).
+        """
         # The linear text scan first: a command with no checkout or restore at command
         # position is never parsed, so a hostile `echo` body costs no more than before.
         in_text: dict[str, set[str]] = {}
@@ -2745,7 +2779,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             return []
         found: set[str] = set()
         steps = simple_commands(blanked)
-        stale = _stale_readings(steps)
+        stale = _stale_readings(steps, hidden=hidden)
         # A segment is parsed with no `cd` before it, so its copy of a run the full parse
         # already holds (in the directory the chain reached) is not read a second time.
         parsed_words = {step.words for step in steps}

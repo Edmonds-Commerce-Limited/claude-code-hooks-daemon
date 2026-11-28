@@ -1082,7 +1082,8 @@ class TestReviewMinorTheReadingIsBounded:
             return run_git(cwd, *args, **kwargs)
 
         monkeypatch.setattr(destructive_git, "run_git", recording)
-        hook_input = _hook_input("git checkout v1 && echo a.txt | xargs git checkout side", repo)
+        # The first switch is read through git; the second is denied, as it runs after it.
+        hook_input = _hook_input("git checkout v1 && git checkout side", repo)
         assert handler.matches(hook_input) is True
         reading = len(calls)
         assert reading > 0
@@ -1463,3 +1464,85 @@ class TestFourthReviewMinorOneAWideSwitchIsReadInFewCalls:
         monkeypatch.setattr(destructive_git, "run_git", recording)
         _allowed(handler, "git checkout wide", repo)
         assert len(calls) <= 10
+
+
+class TestFifthReviewHiddenStatementsBeforeASwitch:
+    """Fifth review, blocker 1 and minors: a statement can run unseen inside a quoted
+    command substitution, a process substitution or a here-string, and the parse keeps
+    it inside one word (or loses it), so any of those in the command makes a switch's
+    reading stale. A backgrounded or piped compound runs beside everything after it."""
+
+    @pytest.fixture
+    def feat(self, repo: Path) -> Path:
+        return _feat_tracks_an_ignored_file(repo)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "$(git branch topic feat)"; git checkout -q topic',
+            'x="$(git branch topic feat)"; git checkout -q topic',
+            f'echo "{_BT}git branch topic feat{_BT}"; git checkout -q topic',
+            'test -z "$(git tag tt feat)" && git checkout -q tt',
+            '[ -z "$(git fetch -q origin 2>&1)" ] && git checkout -q newb',
+            'git status "$(git branch topic feat)"; git checkout -q topic',
+            "cat <(git branch topic feat) >/dev/null; git checkout -q topic",
+            "grep -q x <(git branch topic feat); git checkout -q topic",
+            "cat < <(git branch topic feat); git checkout -q topic",
+            'cat <<< "$(git branch topic feat)"; git checkout -q topic',
+            'head -n1 <<< "$(git branch topic feat)"; git checkout -q topic',
+            'echo "$(git config submodule.recurse true)"; git checkout -q main',
+            "echo ok > >(git branch topic feat); git checkout -q topic",
+        ],
+    )
+    def test_a_switch_after_a_hidden_statement_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        self._in_the_way(feat)
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "( true; git checkout -q topic; git status ) & git branch topic feat; wait",
+            "{ true; git checkout -q topic; git status; } & git branch topic feat; wait",
+            "git branch topic feat | ( true; git checkout -q topic; git status )",
+        ],
+    )
+    def test_a_switch_in_a_backgrounded_or_piped_compound_is_denied(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        self._in_the_way(feat)
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git log -1 --format=%H --output=.git/refs/heads/topic feat && git checkout -q topic",
+            "git diff --outp=diff.txt && git checkout -q main",
+            "git show --output x.txt HEAD && git checkout -q main",
+            "git grep -Ocat main && git checkout -q main",
+            "git grep --open-files-in-pager=cat main && git checkout -q main",
+        ],
+    )
+    def test_a_reader_that_writes_a_file_or_runs_a_pager_counts_as_a_change(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        _denied(handler, command, feat, RuleID.GIT_CHECKOUT_DISCARD)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git status && git checkout main",
+            "git log --oneline | grep x && git checkout main",
+            "git diff --stat --output-indicator-new=+ && git checkout main",
+        ],
+    )
+    def test_plain_readers_before_a_switch_stay_allowed(
+        self, handler: DestructiveGitHandler, feat: Path, command: str
+    ) -> None:
+        _git(feat, "checkout", "-q", "feat")
+        _allowed(handler, command, feat)
+
+    @staticmethod
+    def _in_the_way(repo: Path) -> None:
+        (repo / "ign.txt").write_text("ignored local work\n")
