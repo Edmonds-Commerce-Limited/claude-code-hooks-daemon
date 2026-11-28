@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -25,16 +26,19 @@ from claude_code_hooks_daemon.core import branch_reject_remote
 from claude_code_hooks_daemon.core.branch_reject import (
     DECISION_NO_VALUE,
     DispatchRecord,
+    RejectRoute,
     RejectStore,
     Verdict,
     read_ledger,
 )
+from claude_code_hooks_daemon.core.branch_reject_remote import RemoteRemoval
 from claude_code_hooks_daemon.daemon.cli import (
     build_parser,
     cmd_branch_reject_digest,
     cmd_branch_reject_request,
     cmd_delete_branch,
 )
+from claude_code_hooks_daemon.utils.github_issue_validity import GhRunner
 
 __all__ = ["origin_and_clone"]
 
@@ -225,10 +229,16 @@ def test_an_expired_verdict_is_refused_by_the_cli(
     lifetime = BranchesConfig().reject.verdict_lifetime_hours * HOUR
     real = branch_reject_remote.delete_rejected_remote
 
-    def later(*args: Any, **kwargs: Any) -> Any:
-        route = args[4]
-        moved = type(route)(**{**route.__dict__, "now": route.now + lifetime + HOUR})
-        return real(*args[:4], moved, *args[5:], **kwargs)
+    def later(
+        repo: Path,
+        branches: BranchesConfig,
+        default: str,
+        name: str,
+        route: RejectRoute,
+        runner: GhRunner,
+    ) -> RemoteRemoval:
+        moved = replace(route, now=route.now + lifetime + HOUR)
+        return real(repo, branches, default, name, moved, runner)
 
     monkeypatch.setattr(branch_reject_remote, "delete_rejected_remote", later)
     code, _, err = _delete(project, capsys)
