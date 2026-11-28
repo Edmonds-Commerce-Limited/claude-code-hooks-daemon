@@ -226,6 +226,7 @@ from .init_config import generate_config
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.branch_cleanup import WorktreeBlockersFn
     from claude_code_hooks_daemon.core.branch_reject import Digest, IssuedRequest, RejectRoute
+    from claude_code_hooks_daemon.core.branch_reject_remote import RemoteRemoval
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
         PlanSummary,
@@ -8010,6 +8011,8 @@ def cmd_branch_reject_request(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     branches = _branches_config(repo)
     name: str = args.branch
+    if getattr(args, "remote_only", False):
+        return _branch_reject_request_remote(args, repo, branches, name)
     resolved_default = git_sync.resolve_default_branch(branches, repo)
     if resolved_default is None:
         print("ERROR: cannot determine the default branch; set branches.default", file=sys.stderr)
@@ -8028,6 +8031,7 @@ def cmd_branch_reject_request(args: argparse.Namespace) -> int:
     (classification,) = report.classifications
     if classification.refusal is not None:
         print(f"REFUSED: {name}: {classification.detail}", file=sys.stderr)
+        _print_remote_review_hint(repo, branches, name)
         return 1
     if classification.tier != TIER_UNPROVEN:
         print(
@@ -8035,6 +8039,7 @@ def cmd_branch_reject_request(args: argparse.Namespace) -> int:
             f"Run: hooks-daemon delete-branch {name}",
             file=sys.stderr,
         )
+        _print_remote_review_hint(repo, branches, name)
         return 1
     route, unavailable = _delete_reject_route(repo, branches, resolved_default)
     if route is None:
@@ -8072,6 +8077,80 @@ def cmd_branch_reject_request(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_remote_review_hint(repo: Path, branches: BranchesConfig, name: str) -> None:
+    """Name the remote route when ``name`` has a remote copy (ledger N763)."""
+    from claude_code_hooks_daemon.core import branch_reject
+
+    try:
+        branch_reject.branch_tip(repo, name, remote=branches.remote)
+    except branch_reject.RejectError:
+        return
+    print(
+        f"{branches.remote}/{name} exists. If its pull request was closed unmerged, its "
+        f"remote copy is reviewed with: hooks-daemon branch-reject request {name} --remote-only",
+        file=sys.stderr,
+    )
+
+
+def _branch_reject_request_remote(
+    args: argparse.Namespace, repo: Path, branches: BranchesConfig, name: str
+) -> int:
+    """``branch-reject request <name> --remote-only``: review a closed-PR remote branch.
+
+    Returns:
+        0 when the requests are stored, 1 when the branch or the route refuses, 2 when
+        the default branch cannot be resolved or a fact cannot be read.
+    """
+    from claude_code_hooks_daemon.core import branch_reject, branch_reject_remote
+
+    default = git_sync.resolve_remote_default_branch(branches, repo)
+    if default is None:
+        print(
+            f"ERROR: {branches.remote}'s default branch is not known here; run "
+            f"`git remote set-head {branches.remote} --auto` or set branches.default",
+            file=sys.stderr,
+        )
+        return 2
+    route, unavailable = _delete_reject_route(repo, branches, default)
+    if route is None:
+        print(f"REFUSED: the no-value route is unavailable here: {unavailable}", file=sys.stderr)
+        return 1
+    label = f"{branches.remote}/{name}"
+    try:
+        subject, issued = branch_reject_remote.issue_remote_requests(
+            repo, branches, default, name, route, branch_reject_remote.pr_runner(repo)
+        )
+    except branch_reject.RejectRefusedError as exc:
+        print(f"REFUSED: {label}: {exc}", file=sys.stderr)
+        return 1
+    except branch_reject.RejectError as exc:
+        print(f"ERROR: {label}: {exc}", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        payload = {
+            "branch": name,
+            "remote": subject.remote,
+            "pr_number": subject.pr_number,
+            "tip": subject.tip,
+            "reviewer_type": branch_reject.REVIEWER_AGENT_TYPE,
+            "reviewers_required": len(issued),
+            "requests": [
+                {
+                    "nonce": item.request.nonce,
+                    "prompt": item.prompt,
+                    "prompt_sha256": item.request.prompt_sha256,
+                }
+                for item in issued
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Remote copy {label}: pull request #{subject.pr_number} closed unmerged.")
+        _print_review_prompts(issued)
+        print(f"Then run: hooks-daemon delete-branch --remote-only {name}")
+    return 0
+
+
 def _format_epoch(epoch: float | None) -> str:
     if epoch is None:
         return "never"
@@ -8098,14 +8177,16 @@ def _digest_text(digest: "Digest", present: Sequence[bool], window_days: int) ->
         lines.append("Nothing new since the last mark.")
     for line, still in zip(digest.removals, present, strict=True):
         flag = "  STILL PRESENT at its tip: git never removed it" if still else ""
+        label = f"{line.remote}/{line.branch} (remote)" if line.remote else line.branch
         lines.append(
-            f"REMOVED {line.branch} at {line.tip[:12]} on {_format_epoch(line.removed_at)}{flag}"
+            f"REMOVED {label} at {line.tip[:12]} on {_format_epoch(line.removed_at)}{flag}"
         )
         lines.append(f"  reviewers: {', '.join(line.reviewer_agent_ids)}")
         lines.extend(f"  restore: {command}" for command in line.restore_commands)
     for refusal in digest.refusals:
+        refused = f"{refusal.remote}/{refusal.branch}" if refusal.remote else refusal.branch
         lines.append(
-            f"GIT REFUSED {refusal.branch} at {refusal.tip[:12]} on "
+            f"GIT REFUSED {refused} at {refusal.tip[:12]} on "
             f"{_format_epoch(refusal.refused_at)}: {refusal.detail}"
         )
     for keep in digest.keeps:
@@ -8350,18 +8431,86 @@ def _delete_remote_branches(
             file=sys.stderr,
         )
         return 2
+    from dataclasses import replace
+
+    from claude_code_hooks_daemon.core.remote_branch_proof import branch_name
+
     report = branch_cleanup.delete_remote_branches(repo, branches, default, args.branches)
+    deleted = set(report.deleted_remote)
+    rejected = [
+        name
+        for name in dict.fromkeys(branch_name(n) for n in args.branches)
+        if f"{branches.remote}/{name}" not in deleted
+        and _has_remote_verdict(repo, branches, default, name)
+    ]
+    removed, refused = _delete_rejected_remotes(repo, branches, default, rejected)
+    prefixes = tuple(f"{branches.remote}/{name}: " for name in removed)
+    report = replace(
+        report, skipped=tuple(s for s in report.skipped if not s.startswith(prefixes))
+    )
     for line in branch_cleanup.render(report):
         print(line)
-    if report.skipped:
+    for removal in removed.values():
         print(
-            "\nA remote branch the proof does not accept is never deleted by this "
-            "command. Finish the work (merge it) or ask the human who owns the branch "
-            "to decide.",
+            f"Deleted remote branch {removal.remote}/{removal.name} at {removal.tip[:12]} "
+            f"(no-value verdict; pull request #{removal.pr_number} closed unmerged)"
+        )
+        print(f"      recovery bundle: {removal.bundle}")
+        _print_restore_lines(removal.restore, file=sys.stdout)
+    for line in refused:
+        print(f"Skipped {line}", file=sys.stderr)
+    if report.skipped or refused:
+        print(
+            "\nA remote branch the proof does not accept is deleted by this command only "
+            "through the no-value route: its pull request closed unmerged at the remote "
+            "tip, an independent reviewer's verdict for exactly that tip (`hooks-daemon "
+            "branch-reject request <name> --remote-only`) and a recovery bundle the guard "
+            "writes. Otherwise finish the work (merge it) or ask the human who owns the "
+            "branch to decide.",
             file=sys.stderr,
         )
         return 1
     return 0
+
+
+def _has_remote_verdict(repo: Path, branches: BranchesConfig, default: str, name: str) -> bool:
+    """Whether any remote-scope verdict names ``name``: only then is the route consulted.
+
+    A damaged store reads as True, so the route runs and refuses with the reason
+    rather than the damage being hidden behind the plain refusal.
+    """
+    from claude_code_hooks_daemon.core import branch_reject
+
+    route, _unavailable = _delete_reject_route(repo, branches, default)
+    if route is None:
+        return False
+    try:
+        return bool(route.store.verdicts_named(name, remote=branches.remote))
+    except branch_reject.RejectError:
+        return True
+
+
+def _delete_rejected_remotes(
+    repo: Path, branches: BranchesConfig, default: str, names: Sequence[str]
+) -> "tuple[dict[str, RemoteRemoval], list[str]]":
+    """Offer each name to the remote no-value route: ``(removed, refusal lines)``."""
+    from claude_code_hooks_daemon.core import branch_reject, branch_reject_remote
+
+    removed: dict[str, RemoteRemoval] = {}
+    refused: list[str] = []
+    for name in names:
+        route, unavailable = _delete_reject_route(repo, branches, default)
+        label = f"{branches.remote}/{name}"
+        if route is None:
+            refused.append(f"{label}: the no-value route is unavailable here: {unavailable}")
+            continue
+        try:
+            removed[name] = branch_reject_remote.delete_rejected_remote(
+                repo, branches, default, name, route, branch_reject_remote.pr_runner(repo)
+            )
+        except (branch_reject.RejectRefusedError, branch_reject.RejectError) as exc:
+            refused.append(f"{label}: nothing deleted; the no-value route refused: {exc}")
+    return removed, refused
 
 
 def _print_restore_lines(commands: Sequence[str], *, file: TextIO) -> None:
@@ -14944,7 +15093,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete the named REMOTE branch(es) instead of local ones, each only when "
         "the remote-delete proof accepts it (merged into the default or an integration "
-        "line, or holding no file found nowhere else), under a lease on the proven tip",
+        "line, or holding no file found nowhere else), under a lease on the proven tip; "
+        "or, for a branch whose pull request closed unmerged, when a remote-scope "
+        "no-value verdict (`branch-reject request <name> --remote-only`) covers exactly "
+        "its remote tip, with a recovery bundle",
     )
     parser_delete_branch.set_defaults(func=cmd_delete_branch)
 
@@ -14960,7 +15112,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Admit a review of one unproven branch and print the exact reviewer prompt(s); "
         "takes no free text",
     )
-    parser_reject_request.add_argument("branch", help="The local unproven branch to review")
+    parser_reject_request.add_argument(
+        "branch", help="The unproven branch to review (local, or with --remote-only its remote copy)"
+    )
+    parser_reject_request.add_argument(
+        "--remote-only",
+        dest="remote_only",
+        action="store_true",
+        help="Review the REMOTE copy (branches.remote) of a branch whose pull request was "
+        "closed unmerged with its head at the remote tip; refused when the PR state cannot "
+        "be read, the branch is merged or a worktree has it checked out. A no-value verdict "
+        "for that exact tip lets `delete-branch --remote-only` delete it under a lease, "
+        "with a recovery bundle",
+    )
     parser_reject_request.add_argument(
         "--format",
         choices=["text", "json"],
