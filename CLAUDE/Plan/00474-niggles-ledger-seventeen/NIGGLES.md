@@ -8903,7 +8903,21 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: the budget keeps the proof well under the chain deadline, but the fail-open question applies to every slow guard.
 
-**Status**: ⬜ Open. Confirm the relay's timeout behaviour by a probe test (a handler that sleeps past the limit) and record the answer; add a test that fails without `git_deadline` (assert no git spawn after the deadline).
+**Status**: 🔄 Both tests are done on branch `guard-n762-relay-timeout-probe` (not merged). The independent review APPROVED it with 4 minors, and all four are fixed on the branch. One owner decision is open. Report: `subagent-reports/261128-n762-dev-report.md`.
+
+- **Answer: PreToolUse fails CLOSED; every other event fails OPEN.** The probe is `tests/integration/test_hook_transport_slow_daemon_probe.py`. It runs a stand-in daemon socket in a temporary directory, which reads the request, sleeps past the client's limit, and then answers.
+  - **Relay, PreToolUse:** the timed-out request is handed to the forwarder, and `init.sh` denies it (`relay_exchange_failed`, asserted). The late allow is never used.
+  - **python3, PreToolUse:** `socket_timeout` denies.
+  - **Relay, any other socket:** gets `{}`. This is pinned for user-prompt-submit and post-tool-use. The relay reads the event from the socket name, not the payload.
+  - **Daemon chain deadline:** it is 20 s, under the 30 s client wait, and ends every chain still running when it passes. A chain that has any SAFETY+BLOCKING handler, finished or not, is denied (a stop is blocked). A chain with none is answered with what its finished handlers decided, and the unfinished handlers' output is dropped. So the client timeout decides only when the daemon cannot answer at all.
+- **Owner decision (not changed): stop guards and prompt blockers fail open when a wedged daemon times out.**
+  - **Stop and SubagentStop** never use the relay. A wedged daemon has two outcomes:
+    1. While connects still succeed, the error is `socket_timeout`. The python3 transport allows the stop (Plan 00177, so that a slow daemon does not cause a 30 s stall loop). A stop that the branch stop guard, the QA-failure stop or the goal ledger would block therefore goes through.
+    2. Once the daemon's accept backlog is full, the error is `connect_backlog_full`. `init.sh` blocks the stop, bounded by `_stop_bound` (Plan 00555).
+  - **UserPromptSubmit blockers** (the usage pause) fail open on every transport. The relay gives `{}`, and the python3 transport gives context only.
+  - **Pinned:** the probe's Stop/SubagentStop and relay cases pin the current behaviour. Whether a reached-but-silent daemon should block a stop or a prompt is for the owner.
+- **Deadline test:** `test_no_git_is_spawned_once_the_budget_is_spent_midway_through_a_proof` (`test_destructive_git_force_removal.py`) runs the budget out after a passing patch-id step and asserts no git spawns. Mutation check: with `git_deadline` replaced by a null context it goes red (`merge-base` and `diff` spawned late); restored, all 54 pass.
+- **Also fixed:** `test_relay_mid_exchange_timeout_fails_open.py` is removed. It claimed a PreToolUse timeout fails open "until N24 lands", but it kept passing only because its socket was not named `pre-tool-use.sock`; the probe's socket-name case replaces it. The `force_removal.py` comments that said the relay "may let the command through" now name the chain deadline.
 
 ### N763 — no agent route removes the remote copy of an unmerged branch whose work was judged to have no value
 

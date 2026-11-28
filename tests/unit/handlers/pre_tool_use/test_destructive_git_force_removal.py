@@ -359,6 +359,48 @@ class TestPatchHeldProofIsBounded:
         held = force_removal.patch_held_tips(repo, [picked], set(), clock=lambda: now[0])
         assert held == frozenset()
 
+    def test_no_git_is_spawned_once_the_budget_is_spent_midway_through_a_proof(
+        self, repo: Path, wt: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N762: the shared deadline, not the post-proof clock check, stops the git calls.
+
+        The budget runs out right after a passing patch-id step, so every git call of the
+        net-change and gitlink steps that follow must be refused without a spawn. The
+        test above is satisfied by the clock check after the proof alone; this one
+        fails when ``git_deadline`` does not wrap the loop.
+        """
+        from claude_code_hooks_daemon.daemon import branch_safety
+
+        picked = self._picked(repo, wt)
+        now = [0.0]
+        real_patch_equivalent = branch_safety.patch_equivalent
+
+        def patch_step_runs_long(*args: Any, **kwargs: Any) -> tuple[bool, int | None]:
+            answer = real_patch_equivalent(*args, **kwargs)
+            if answer == (True, 0):
+                # Only the ref that goes on to the net-change step: a ref that fails
+                # here never reaches another git call of this proof.
+                now[0] = force_removal.PATCH_PROOF_BUDGET_SECONDS + 1.0
+            return answer
+
+        real_run = subprocess.run
+        spawned_late: list[list[str]] = []
+        spawned_in_time: list[list[str]] = []
+
+        def recording_run(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+            late = now[0] >= force_removal.PATCH_PROOF_BUDGET_SECONDS
+            (spawned_late if late else spawned_in_time).append(list(argv))
+            return real_run(argv, *args, **kwargs)
+
+        monkeypatch.setattr(branch_safety, "patch_equivalent", patch_step_runs_long)
+        monkeypatch.setattr(subprocess, "run", recording_run)
+        held = force_removal.patch_held_tips(repo, [picked], set(), clock=lambda: now[0])
+        monkeypatch.undo()
+
+        assert held == frozenset()
+        assert spawned_in_time, "the proof never reached git, so the probe proves nothing"
+        assert spawned_late == [], f"git spawned after the deadline: {spawned_late}"
+
     def test_the_proof_runs_from_the_top_level_when_given_a_subdirectory(
         self, repo: Path, wt: Path
     ) -> None:
