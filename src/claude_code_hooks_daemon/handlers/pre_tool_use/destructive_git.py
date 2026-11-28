@@ -1407,6 +1407,9 @@ _STATE_FREE_COMMANDS: Final[frozenset[str]] = frozenset(
         "head",
         "tail",
         "wc",
+        # `set` changes shell options and positional parameters only; a GIT_* variable
+        # is changed by an assignment or `export`, which are judged on their own.
+        "set",
     }
 )
 _ENVIRONMENT_DECLARATIONS: Final[frozenset[str]] = frozenset(

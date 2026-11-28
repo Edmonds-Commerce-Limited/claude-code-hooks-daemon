@@ -1546,3 +1546,42 @@ class TestFifthReviewHiddenStatementsBeforeASwitch:
     @staticmethod
     def _in_the_way(repo: Path) -> None:
         (repo / "ign.txt").write_text("ignored local work\n")
+
+
+class TestASafetyPreludeIsNotAStateChange:
+    """CI corpus row a8-checkout-then-log-pathspec: `set -euo pipefail` changes shell
+    options only, never refs, HEAD, config or the environment git reads, so a switch
+    after it is still read, and allowed when it loses nothing."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "set -euo pipefail; git checkout side && git log -- a.txt",
+            "set -e; git checkout side",
+            "set -x && git checkout side",
+            "set -o pipefail; git checkout side",
+        ],
+    )
+    def test_a_switch_after_set_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        _allowed(handler, command, repo)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "set -euo pipefail; git fetch -q && git checkout side",
+            'set -euo pipefail; echo "$(git branch topic side)"; git checkout topic',
+        ],
+    )
+    def test_set_does_not_excuse_a_later_state_change(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        _denied(handler, command, repo, RuleID.GIT_CHECKOUT_DISCARD)
+
+    def test_an_edited_path_a_set_prefixed_switch_would_write_is_still_denied(
+        self, handler: DestructiveGitHandler, repo: Path
+    ) -> None:
+        """`side` tracks `old.txt`; an untracked `old.txt` here is in the way."""
+        (repo / "old.txt").write_text("my untracked work\n")
+        _denied(handler, "set -e; git checkout side", repo, RuleID.GIT_CHECKOUT_DISCARD)
