@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     compute_inventory,
     read_ledger,
     read_ledger_entries,
+    record_removal,
 )
 from claude_code_hooks_daemon.utils.github_issue_validity import GhError
 from tests.support.git_fixtures import run_git
@@ -106,7 +107,9 @@ def _heads(work: Path) -> str:
     return _git(work, "ls-remote", "--heads", REMOTE)
 
 
-def _pr(state: str = "CLOSED", *, oid: str, name: str = "novel", **extra: object) -> dict[str, object]:
+def _pr(
+    state: str = "CLOSED", *, oid: str, name: str = "novel", **extra: object
+) -> dict[str, object]:
     return {
         "number": PR,
         "state": state,
@@ -346,18 +349,17 @@ class TestSubject:
             remote_route.check_subject(work, branches, "main", "novel", _closed(work))
 
     @pytest.mark.parametrize(
-        ("overrides", "needle"),
+        ("branches", "needle"),
         [
-            ({"protected_names": ["novel"]}, "protected name"),
-            ({"protected_names": ["nov*"]}, "protected name"),
-            ({"exempt": ["novel"]}, "exempt"),
-            ({"exempt": ["n*l"]}, "exempt"),
+            (BranchesConfig(default="main", protected_names=["novel"]), "protected name"),
+            (BranchesConfig(default="main", protected_names=["nov*"]), "protected name"),
+            (BranchesConfig(default="main", exempt=["novel"]), "exempt"),
+            (BranchesConfig(default="main", exempt=["n*l"]), "exempt"),
         ],
     )
     def test_a_protected_or_exempt_name_is_refused(
-        self, work: Path, overrides: dict[str, list[str]], needle: str
+        self, work: Path, branches: BranchesConfig, needle: str
     ) -> None:
-        branches = BranchesConfig(default="main", **overrides)
         with pytest.raises(RejectRefusedError, match=needle):
             remote_route.check_subject(work, branches, "main", "novel", _closed(work))
 
@@ -417,9 +419,7 @@ class TestSubject:
         self, work: Path, branches: BranchesConfig
     ) -> None:
         with pytest.raises(RejectRefusedError, match="default"):
-            remote_route.check_subject(
-                work, BranchesConfig(), "trunk", "novel", _closed(work)
-            )
+            remote_route.check_subject(work, BranchesConfig(), "trunk", "novel", _closed(work))
 
 
 class TestRequest:
@@ -477,7 +477,11 @@ class TestDelete:
         removal = remote_route.delete_rejected_remote(
             work, branches, "main", "novel", route, _closed(work)
         )
-        fetch = ["fetch", str(removal.bundle), f"refs/remotes/{REMOTE}/novel:refs/remotes/{REMOTE}/novel"]
+        fetch = [
+            "fetch",
+            str(removal.bundle),
+            f"refs/remotes/{REMOTE}/novel:refs/remotes/{REMOTE}/novel",
+        ]
         _git(work, *fetch)
         _git(work, "push", "-q", REMOTE, f"{tip}:refs/heads/novel")
         assert tip in _heads(work)
@@ -527,7 +531,10 @@ class TestDelete:
         assert "refs/heads/novel" in _heads(work)
 
     def test_a_tip_moved_after_the_verdict_is_refused(
-        self, origin_and_clone: tuple[Path, Path], branches: BranchesConfig, route: RejectRoute,
+        self,
+        origin_and_clone: tuple[Path, Path],
+        branches: BranchesConfig,
+        route: RejectRoute,
         tmp_path: Path,
     ) -> None:
         origin, work = origin_and_clone
@@ -593,7 +600,7 @@ class TestDelete:
         run_git(other, "checkout", "-q", "novel")
         run_git(other, "commit", "-q", "--allow-empty", "-m", "raced in")
         raced = _git(other, "rev-parse", "HEAD").strip()
-        real = remote_route.record_removal
+        real = record_removal
 
         def push_then_record(
             repo: Path, approval: RemovalApproval, scoped: RejectRoute

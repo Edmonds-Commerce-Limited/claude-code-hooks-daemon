@@ -55,7 +55,9 @@ def _gh(monkeypatch: pytest.MonkeyPatch, gh: FakeGh) -> None:
     monkeypatch.setattr(branch_reject_remote, "pr_runner", lambda _repo: gh)
 
 
-def _request(project: Path, capsys: pytest.CaptureFixture[str], **extra: Any) -> tuple[int, str, str]:
+def _request(
+    project: Path, capsys: pytest.CaptureFixture[str], **extra: Any
+) -> tuple[int, str, str]:
     args = argparse.Namespace(
         project_root=project, branch="novel", format="json", remote_only=True, **extra
     )

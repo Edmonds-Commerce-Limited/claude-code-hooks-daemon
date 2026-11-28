@@ -8445,9 +8445,7 @@ def _delete_remote_branches(
     ]
     removed, refused = _delete_rejected_remotes(repo, branches, default, rejected)
     prefixes = tuple(f"{branches.remote}/{name}: " for name in removed)
-    report = replace(
-        report, skipped=tuple(s for s in report.skipped if not s.startswith(prefixes))
-    )
+    report = replace(report, skipped=tuple(s for s in report.skipped if not s.startswith(prefixes)))
     for line in branch_cleanup.render(report):
         print(line)
     for removal in removed.values():
@@ -15113,7 +15111,8 @@ def build_parser() -> argparse.ArgumentParser:
         "takes no free text",
     )
     parser_reject_request.add_argument(
-        "branch", help="The unproven branch to review (local, or with --remote-only its remote copy)"
+        "branch",
+        help="The unproven branch to review (local, or with --remote-only its remote copy)",
     )
     parser_reject_request.add_argument(
         "--remote-only",

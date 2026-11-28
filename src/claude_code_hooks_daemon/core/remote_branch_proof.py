@@ -1034,7 +1034,9 @@ def live_refs_problem(directory: Path, remote: str, expected: Mapping[str, str])
         )
     urls = _other_push_urls(directory, remote)
     if urls is None:
-        return f"a push URL of {remote} could not be read, so the delete's destination is unconfirmed"
+        return (
+            f"a push URL of {remote} could not be read, so the delete's destination is unconfirmed"
+        )
     for url in urls:
         pushed, failed = live_remote_listing(directory, url, names)
         if failed or any(pushed.get(name) != expected[name] for name in names):
