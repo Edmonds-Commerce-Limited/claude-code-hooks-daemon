@@ -225,6 +225,11 @@ class TestTheRelay:
         assert b"hooks-relay: timeout:" in result.stderr, result.stderr.decode()
         assert result.returncode == 0, result.stderr.decode()
         assert _permission_decision(result.stdout) == "deny", result.stdout.decode()
+        # The deny is the forwarder's (init.sh judged the hand-off), not the relay's own
+        # fallback deny, which it writes only when the hand-off produced nothing.
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "relay_exchange_failed" in reason, reason
+        assert "transport-fail-closed" not in reason, reason
 
     @pytest.mark.parametrize("socket_name", ["user-prompt-submit", "post-tool-use"])
     def test_any_other_event_after_the_limit_fails_open(
