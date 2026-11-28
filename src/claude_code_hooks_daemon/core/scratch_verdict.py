@@ -385,29 +385,24 @@ def marker_keeps(kind: NodeKind | None) -> bool:
     return kind is not None
 
 
-def keep_marker_kind(directory: Path) -> NodeKind | None:
-    """What ``<directory>/.scratch-keep`` is, by ``lstat`` (a link is never followed).
+def keep_marker_present(directory: Path) -> bool:
+    """True when ``directory`` holds a keep marker now, by :func:`marker_keeps`.
 
-    None only when it is absent (``FileNotFoundError``); any other failure is
-    :attr:`NodeKind.UNREAD`, so :func:`marker_keeps` reads it as kept.
+    Read by ``lstat``, so a link is never followed. Only ``FileNotFoundError``
+    means absent; any other failure is :attr:`NodeKind.UNREAD`, read as kept.
     """
     try:
-        info = os.lstat(directory / KEEP_MARKER)
+        kind = kind_of(os.lstat(directory / KEEP_MARKER).st_mode)
     except FileNotFoundError:
-        return None
+        return marker_keeps(None)
     except OSError as exc:
         log_and_continue(
             _LOG,
             exc,
             reason=f"{directory}: keep marker unreadable, read as kept (fail closed)",
         )
-        return NodeKind.UNREAD
-    return kind_of(info.st_mode)
-
-
-def keep_marker_present(directory: Path) -> bool:
-    """True when ``directory`` holds a keep marker now, by :func:`marker_keeps`."""
-    return marker_keeps(keep_marker_kind(directory))
+        kind = NodeKind.UNREAD
+    return marker_keeps(kind)
 
 
 def has_keep_marker(stats: EntryStats) -> bool:
@@ -545,7 +540,6 @@ __all__ = [
     "Verdict",
     "has_keep_marker",
     "judge",
-    "keep_marker_kind",
     "keep_marker_present",
     "marker_keeps",
     "uncovered_nodes",

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core import scratch_verdict as verdict_mod
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
 from claude_code_hooks_daemon.core.scratch_references import References
 from claude_code_hooks_daemon.core.scratch_repos import RepoFindings, RepoKind
@@ -21,13 +22,13 @@ from claude_code_hooks_daemon.core.scratch_verdict import (
     RepositoryMarker,
     Verdict,
     has_keep_marker,
-    keep_marker_kind,
     keep_marker_present,
     marker_keeps,
     uncovered_nodes,
 )
 from claude_code_hooks_daemon.core.scratch_verdict import judge as real_judge
-from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
+from claude_code_hooks_daemon.core.scratch_verdict import marker_keeps as real_marker_keeps
+from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind, kind_of
 from claude_code_hooks_daemon.utils.bounded_walk import Bounded, finished, stopped
 
 _DUE = EntryAge(age_seconds=48 * 3600.0, due=True, lifetime_exceeded=None)
@@ -124,7 +125,6 @@ class TestOneKeepMarkerRule:
         assert marker_keeps(None) is False
 
     def test_absent_is_not_kept(self, tmp_path: Path) -> None:
-        assert keep_marker_kind(tmp_path) is None
         assert keep_marker_present(tmp_path) is False
 
     @pytest.mark.parametrize(
@@ -152,7 +152,7 @@ class TestOneKeepMarkerRule:
             marker.symlink_to(marker)
         else:
             marker.mkdir()
-        assert keep_marker_kind(tmp_path) is kind
+        assert kind_of(os.lstat(marker).st_mode) is kind
         assert keep_marker_present(tmp_path) is True
 
     @pytest.mark.parametrize("error", [PermissionError, NotADirectoryError, OSError])
@@ -162,9 +162,16 @@ class TestOneKeepMarkerRule:
         def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
             raise error("cannot read")
 
+        seen: list[NodeKind | None] = []
+
+        def spy(kind: NodeKind | None) -> bool:
+            seen.append(kind)
+            return real_marker_keeps(kind)
+
         monkeypatch.setattr(os, "lstat", lstat)
-        assert keep_marker_kind(tmp_path) is NodeKind.UNREAD
+        monkeypatch.setattr(verdict_mod, "marker_keeps", spy)
         assert keep_marker_present(tmp_path) is True
+        assert seen == [NodeKind.UNREAD]
 
     @pytest.mark.parametrize("kind", [F, L, D, S])
     def test_the_walk_and_the_lstat_agree(self, kind: NodeKind) -> None:
