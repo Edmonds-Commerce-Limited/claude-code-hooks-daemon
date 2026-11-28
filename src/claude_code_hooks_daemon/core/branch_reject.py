@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.model_fallback_records import parse_fallback_payload
 from claude_code_hooks_daemon.utils.model_tiers import OPUS, family_rank, resolve_model_family
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 #: The tier ``delete-branch`` reports for a removal this route made (slice 2).
 TIER_REJECTED_BUNDLED = "rejected-bundled"
@@ -80,6 +81,13 @@ _SIDECAR_SUFFIX = ".sha256"
 _LEDGER_MODE = 0o644
 _GIT_DIR_NAME = ".git"
 _HEADS = "refs/"
+_REMOTES = "refs/remotes/"
+#: A review's remote scope: one path component, never ``.``-led, no ``/`` (N763).
+_REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+_REMOTE_KEY = "remote"
+#: The directory, under ``bundle_dir``, holding remote-scope bundles. A local bundle
+#: name is a slug with no ``/``, so no local branch can land in it.
+_REMOTE_BUNDLE_DIR = "remotes"
 
 _REQUESTS = "requests"
 _DISPATCHES = "dispatches"
@@ -144,9 +152,23 @@ def _resolve(repo: Path, ref: str) -> str:
     return _git_out(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip()
 
 
-def branch_tip(repo: Path, branch: str) -> str:
-    """The branch's current commit; raises RejectError when it does not resolve."""
-    return _resolve(repo, branch_ref(branch))
+def subject_ref(branch: str, remote: str = "") -> str:
+    """The ref a review judges: ``refs/heads/<b>``, or ``refs/remotes/<remote>/<b>``.
+
+    ``remote`` is the review's SCOPE (ledger N763): empty for the local route. A remote
+    name that is not one plain path component raises RejectError, since it becomes both
+    a ref and a directory of the recovery bundle's path.
+    """
+    if not remote:
+        return branch_ref(branch)
+    if not _REMOTE_NAME.fullmatch(remote) or ".." in remote:
+        raise RejectError(f"{remote!r} is not a plain remote name")
+    return f"{_REMOTES}{remote}/{branch}"
+
+
+def branch_tip(repo: Path, branch: str, *, remote: str = "") -> str:
+    """The branch's current commit in that scope; raises RejectError when it does not resolve."""
+    return _resolve(repo, subject_ref(branch, remote))
 
 
 # --- strict field readers: a wrong type is a RejectError, never a default ----------
@@ -157,6 +179,28 @@ def _str(data: Mapping[str, Any], key: str) -> str:
     if not isinstance(value, str):
         raise RejectError(f"record field {key!r} is not a string")
     return value
+
+
+def _remote(data: Mapping[str, Any]) -> str:
+    """The record's remote scope: absent is the local route; present must be a remote name."""
+    if _REMOTE_KEY not in data:
+        return ""
+    value = data[_REMOTE_KEY]
+    if not isinstance(value, str) or not value:
+        raise RejectError(f"record field {_REMOTE_KEY!r} is not a remote name")
+    subject_ref("x", value)
+    return value
+
+
+def _with_remote(payload: dict[str, Any], remote: str) -> dict[str, Any]:
+    """``payload`` plus the scope, written only when it is a remote one.
+
+    A local record keeps exactly the bytes it had before the scope existed, so its
+    ledger identity (:func:`entry_key`) and every stored record stay valid.
+    """
+    if remote:
+        payload[_REMOTE_KEY] = remote
+    return payload
 
 
 def _float(data: Mapping[str, Any], key: str) -> float:
@@ -302,9 +346,11 @@ class Verdict:
     overall: str
     issued_at: float
     reviewer: Reviewer
+    #: The review's scope: empty for a local branch, else the remote (N763).
+    remote: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema": SCHEMA_VERSION,
             "verdict_id": self.verdict_id,
             "nonce": self.nonce,
@@ -317,6 +363,7 @@ class Verdict:
             "issued_at": self.issued_at,
             "reviewer": self.reviewer.to_dict(),
         }
+        return _with_remote(payload, self.remote)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Verdict:
@@ -335,6 +382,7 @@ class Verdict:
             overall=_str(data, "overall"),
             issued_at=_float(data, "issued_at"),
             reviewer=Reviewer.from_dict(_mapping(data, "reviewer")),
+            remote=_remote(data),
         )
 
 
@@ -350,9 +398,11 @@ class RejectRequest:
     reviewers_required: int
     prompt_sha256: str
     created_at: float
+    #: The review's scope: empty for a local branch, else the remote (N763).
+    remote: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema": SCHEMA_VERSION,
             "nonce": self.nonce,
             "branch": self.branch,
@@ -363,6 +413,7 @@ class RejectRequest:
             "prompt_sha256": self.prompt_sha256,
             "created_at": self.created_at,
         }
+        return _with_remote(payload, self.remote)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> RejectRequest:
@@ -376,6 +427,7 @@ class RejectRequest:
             reviewers_required=_int(data, "reviewers_required"),
             prompt_sha256=_str(data, "prompt_sha256"),
             created_at=_float(data, "created_at"),
+            remote=_remote(data),
         )
 
 
@@ -690,9 +742,11 @@ class RejectStore:
         data = self._read(_VERDICTS, verdict_id)
         return None if data is None else Verdict.from_dict(data)
 
-    def verdicts_for(self, branch: str, tip: str) -> list[Verdict]:
-        """Every stored verdict naming this branch and tip, oldest file name first.
+    def verdicts_named(self, branch: str, *, remote: str = "") -> list[Verdict]:
+        """Every stored verdict naming this branch in this scope, whatever its tip.
 
+        The scope is exact: a local verdict (``remote`` empty) is never returned for a
+        remote scope, nor a remote one for the local scope or another remote (N763).
         Raises RejectError when any verdict file's name is not its own id: the recorder
         files a verdict under its id, so a mismatch is a copy, and the store is not trusted.
         """
@@ -702,7 +756,11 @@ class RejectStore:
             if verdict.verdict_id != path.stem:
                 raise RejectError(f"the verdict file {path} is not named by its own id")
             verdicts.append(verdict)
-        return [v for v in verdicts if v.branch == branch and v.tip == tip]
+        return [v for v in verdicts if v.branch == branch and v.remote == remote]
+
+    def verdicts_for(self, branch: str, tip: str, *, remote: str = "") -> list[Verdict]:
+        """Every stored verdict naming this branch, tip and scope, oldest file name first."""
+        return [v for v in self.verdicts_named(branch, remote=remote) if v.tip == tip]
 
     def write_keep(self, keep: KeepRecord) -> None:
         self._write(_KEEPS, keep.verdict_id, keep.to_dict())
@@ -782,15 +840,16 @@ class RejectRoute:
 # --- the inventory -------------------------------------------------------------------
 
 
-def compute_inventory(repo: Path, branch: str, default_ref: str) -> Inventory:
+def compute_inventory(repo: Path, branch: str, default_ref: str, *, remote: str = "") -> Inventory:
     """The unique commits (merges included) and content-unique paths of ``branch``.
 
-    Measured against ``default_ref`` only (DESIGN.md section 2). Every git failure
-    raises RejectError: a failed walk must never read as an empty inventory.
+    Measured against ``default_ref`` only (DESIGN.md section 2). ``remote`` names the
+    scope (:func:`subject_ref`). Every git failure raises RejectError: a failed walk
+    must never read as an empty inventory.
     """
     from claude_code_hooks_daemon.daemon import branch_safety
 
-    tip_ref = branch_ref(branch)
+    tip_ref = subject_ref(branch, remote)
     default = _full_ref(default_ref)
     tip = _resolve(repo, tip_ref)
     base = _resolve(repo, default)
@@ -863,7 +922,7 @@ def _chain_problems(verdict: Verdict, store: RejectStore) -> list[str]:
     if request is None:
         problems.append("no outstanding request carries this verdict's nonce")
     else:
-        for field_name in ("branch", "tip", "default_sha", "inventory"):
+        for field_name in ("branch", "remote", "tip", "default_sha", "inventory"):
             if getattr(request, field_name) != getattr(verdict, field_name):
                 problems.append(f"the verdict disagrees with its request on {field_name}")
     if dispatch is None:
@@ -899,7 +958,7 @@ def _coverage_problems(verdict: Verdict) -> list[str]:
 
 def _git_problems(verdict: Verdict, repo: Path, default_ref: str) -> list[str]:
     try:
-        tip = branch_tip(repo, verdict.branch)
+        tip = branch_tip(repo, verdict.branch, remote=verdict.remote)
     except RejectError as exc:
         return [f"{verdict.branch} no longer resolves to a branch tip: {exc}"]
     if tip != verdict.tip:
@@ -907,7 +966,7 @@ def _git_problems(verdict: Verdict, repo: Path, default_ref: str) -> list[str]:
             f"the tip moved: the verdict is for {verdict.tip[:12]}, the branch is at {tip[:12]}"
         ]
     try:
-        current = compute_inventory(repo, verdict.branch, default_ref)
+        current = compute_inventory(repo, verdict.branch, default_ref, remote=verdict.remote)
     except RejectError as exc:
         return [f"the inventory could not be recomputed: {exc}"]
     if current != verdict.inventory:
@@ -1104,8 +1163,14 @@ def _resolved_by_own_verdict(store: RejectStore, request: RejectRequest) -> bool
     )
 
 
-def unresolved_attempts(store: RejectStore, branch: str, tip: str, inventory: Inventory) -> int:
-    """Reviews of this WORK that were dispatched and ended with no verdict of their own.
+def unresolved_attempts(
+    store: RejectStore, branch: str, tip: str, inventory: Inventory, *, remote: str = ""
+) -> int:
+    """Reviews of this WORK, in this scope, that were dispatched and ended with no verdict.
+
+    ``remote`` is the scope (N763): a local review and a remote one are separate
+    attempts, so one scope's unfinished reviews never raise the other's reviewer
+    count or close its route. Keep records, by contrast, span both scopes.
 
     Derived, not only recorded: every dispatch with no verdict counts, which covers a
     failed reply, a killed reviewer that never stopped, a withdrawn verdict and a
@@ -1122,6 +1187,8 @@ def unresolved_attempts(store: RejectStore, branch: str, tip: str, inventory: In
             raise RejectError(f"review {nonce[:12]} was dispatched or failed with no request")
         if request.nonce != nonce:
             raise RejectError(f"the request file for {nonce[:12]} is not named by its nonce")
+        if request.remote != remote:
+            continue
         related = same_work(
             branch, tip, inventory.commits, request.branch, request.tip, request.inventory.commits
         )
@@ -1590,6 +1657,7 @@ def record_review_stop(
             user_turns=facts.user_turns,
             reply_sha256=hashlib.sha256(stop.reply.encode("utf-8")).hexdigest(),
         ),
+        remote=request.remote,
     )
     if overall == DECISION_KEEP:
         kept = [i.reason for i in items if i.decision == DECISION_KEEP]
@@ -1627,13 +1695,33 @@ def compose_prompt(
     commits: Sequence[tuple[str, str]],
     paths: Sequence[str],
     keep_reasons: Sequence[str],
+    remote: str = "",
+    pr_number: int | None = None,
 ) -> str:
     """The exact review prompt; raises RejectRefusedError on any unquotable text.
 
     Composed from git facts and the stored keep history only, never from caller text.
     Deterministic and without a trailing newline, so its sha256 is a stable identity.
+    A remote-scope prompt (``remote`` set) names the tracking ref and the closed pull
+    request by NUMBER only (its title is caller text), and raises RejectError without
+    one; a local prompt is unchanged by both parameters.
     """
     _check_quotable("branch", branch)
+    if remote and pr_number is None:
+        raise RejectError("a remote-scope review prompt needs the closed pull request's number")
+    described = f"branch `{branch}`"
+    route_lines: list[str] = []
+    if remote:
+        described = (
+            f"remote branch `{remote}/{branch}` (ref `{subject_ref(branch, remote)}`), whose "
+            f"pull request #{pr_number} was closed without being merged,"
+        )
+        route_lines = [
+            "",
+            "The whole unmerged change, read-only: "
+            f"`git log --patch {default_sha}..{tip}`. Removing this work deletes the "
+            "remote branch; only the recovery bundle the guard writes keeps it.",
+        ]
     for sha, subject in commits:
         _check_quotable("commit subject", subject)
         _check_quotable("commit", sha)
@@ -1651,7 +1739,7 @@ def compose_prompt(
     lines = [
         f"{PROMPT_MARKER}{nonce}",
         "",
-        f"You are reviewing the unmerged work on branch `{branch}` at tip {tip}, measured "
+        f"You are reviewing the unmerged work on {described} at tip {tip}, measured "
         f"against the default branch at {default_sha}. Decide, for each item below, whether "
         "it has any value. Doubt means keep.",
         "",
@@ -1661,6 +1749,7 @@ def compose_prompt(
         "",
         "Read the work with read-only git commands only, for example `git show <sha>` and "
         f"`git diff {default_sha} {tip} -- <path>`. Change no file, branch or ref.",
+        *route_lines,
         "",
         "Commits not on the default branch:",
         *([f"- {sha} {subject}" for sha, subject in commits] or ["- (none)"]),
@@ -1712,22 +1801,31 @@ class IssuedRequest:
     prompt: str
 
 
-def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRequest]:
+def issue_requests(
+    repo: Path,
+    branch: str,
+    route: RejectRoute,
+    *,
+    remote: str = "",
+    pr_number: int | None = None,
+) -> list[IssuedRequest]:
     """Admit a review of ``branch`` and store one request per reviewer required.
 
     One nonce binds one reviewer agent, so a review needing two reviewers mints two
     requests. The caller must already have classified the branch as ``unproven`` with
-    no refusal. Raises RejectRefusedError when admission refuses and RejectError when
-    a fact cannot be read; nothing is stored in either case. Never touches the ledger.
+    no refusal (for a remote scope, :mod:`branch_reject_remote` does). Raises
+    RejectRefusedError when admission refuses and RejectError when a fact cannot be
+    read; nothing is stored in either case. Never touches the ledger.
     """
     if route.default_ref is None:
         raise RejectError("a review request needs the resolved default branch")
     default_ref = route.default_ref
     entries = read_ledger_entries(route.ledger_path)
-    tip = branch_tip(repo, branch)
+    tip = branch_tip(repo, branch, remote=remote)
     default_sha = _resolve(repo, _full_ref(default_ref))
-    inventory = compute_inventory(repo, branch, default_ref)
-    if (branch_tip(repo, branch), _resolve(repo, _full_ref(default_ref))) != (tip, default_sha):
+    inventory = compute_inventory(repo, branch, default_ref, remote=remote)
+    current = branch_tip(repo, branch, remote=remote)
+    if (current, _resolve(repo, _full_ref(default_ref))) != (tip, default_sha):
         raise RejectError("the branch or the default moved while the inventory was computed")
     keeps = route.store.keeps()
     removals = used_state(entries, route.store, now=route.now, config=route.config).removals
@@ -1738,7 +1836,7 @@ def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRe
         keeps,
         removals,
         route.config,
-        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory),
+        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory, remote=remote),
     )
     keep_reasons = tuple(
         reason for keep in related_keeps(branch, tip, inventory, keeps) for reason in keep.reasons
@@ -1755,6 +1853,8 @@ def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRe
             commits=[(sha, subjects[sha]) for sha in inventory.commits],
             paths=inventory.paths,
             keep_reasons=keep_reasons,
+            remote=remote,
+            pr_number=pr_number,
         )
         request = RejectRequest(
             nonce=nonce,
@@ -1765,6 +1865,7 @@ def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRe
             reviewers_required=required,
             prompt_sha256=prompt_digest(prompt),
             created_at=route.now,
+            remote=remote,
         )
         issued.append(IssuedRequest(request=request, prompt=prompt))
     for item in issued:
@@ -1785,10 +1886,20 @@ def main_checkout(repo: Path) -> Path:
     return common.parent.resolve()
 
 
-def bundle_path_for(repo: Path, config: BranchRejectConfig, branch: str, tip: str) -> Path:
-    """``<main>/<bundle_dir>/<branch-slug>-<tip12>.bundle``."""
+def bundle_path_for(
+    repo: Path, config: BranchRejectConfig, branch: str, tip: str, *, remote: str = ""
+) -> Path:
+    """``<main>/<bundle_dir>/<branch-slug>-<tip12>.bundle``.
+
+    A remote scope's bundle lives in ``<bundle_dir>/remotes/<remote>/``, a directory no
+    local slug can name, so a local and a remote bundle never share a path.
+    """
+    subject_ref(branch, remote)
     slug = _SLUG_UNSAFE.sub("-", branch)
-    return main_checkout(repo) / config.bundle_dir / f"{slug}-{tip[:_TIP_IN_NAME]}.bundle"
+    directory = main_checkout(repo) / config.bundle_dir
+    if remote:
+        directory = directory / _REMOTE_BUNDLE_DIR / remote
+    return directory / f"{slug}-{tip[:_TIP_IN_NAME]}.bundle"
 
 
 def sha256_of(path: Path) -> str:
@@ -1858,8 +1969,11 @@ def _prerequisite_problems(repo: Path, record: BundleRecord) -> list[str]:
     ]
 
 
-def bundle_problems(repo: Path, record: BundleRecord, branch: str) -> list[str]:
+def bundle_problems(
+    repo: Path, record: BundleRecord, branch: str, *, remote: str = ""
+) -> list[str]:
     """Every reason the bundle cannot back a removal; an empty list is the only pass."""
+    ref = subject_ref(branch, remote)
     if not record.path.is_file():
         return [f"the bundle file is missing: {record.path}"]
     problems: list[str] = []
@@ -1869,29 +1983,38 @@ def bundle_problems(repo: Path, record: BundleRecord, branch: str) -> list[str]:
     if verify.returncode != 0:
         problems.append(f"git bundle verify failed: {verify.stderr.strip() or 'no detail'}")
     heads = run_git(repo, "bundle", "list-heads", str(record.path), timeout=_git_budget())
-    wanted = f"{record.tip} {branch_ref(branch)}"
+    wanted = f"{record.tip} {ref}"
     if heads.returncode != 0 or wanted not in heads.stdout.splitlines():
-        problems.append(f"the bundle does not list {record.tip[:12]} as {branch_ref(branch)}")
+        problems.append(f"the bundle does not list {record.tip[:12]} as {ref}")
     problems += _prerequisite_problems(repo, record)
     return problems
 
 
 def write_bundle(
-    repo: Path, branch: str, tip: str, default_sha: str, config: BranchRejectConfig
+    repo: Path,
+    branch: str,
+    tip: str,
+    default_sha: str,
+    config: BranchRejectConfig,
+    *,
+    remote: str = "",
 ) -> BundleRecord:
     """Write (or reuse) the branch's recovery bundle in the main checkout and verify it.
 
     Never overwrites: an existing file at the path is verified and reused, and one
-    that does not verify refuses. Raises RejectError on every failure.
+    that does not verify refuses. ``remote`` names the scope (:func:`subject_ref`), and
+    the bundle then holds the tracking ref. Raises RejectError on every failure.
     """
-    current = branch_tip(repo, branch)
+    current = branch_tip(repo, branch, remote=remote)
     if current != tip:
         raise RejectError(f"{branch} is at {current[:12]}, not the expected {tip[:12]}")
-    path = bundle_path_for(repo, config, branch, tip)
-    if not path.exists():
-        _create_bundle(repo, branch, default_sha, path)
+    path = bundle_path_for(repo, config, branch, tip, remote=remote)
+    # An unreadable path counts as present: it is then hashed, which raises, so the
+    # removal is refused rather than a bundle written over something unseen.
+    if not path_exists(path, unreadable_means=True):
+        _create_bundle(repo, subject_ref(branch, remote), default_sha, path)
     record = BundleRecord(path=path, sha256=sha256_of(path), tip=tip, base=default_sha)
-    problems = bundle_problems(repo, record, branch)
+    problems = bundle_problems(repo, record, branch, remote=remote)
     if problems:
         raise RejectError(f"the bundle at {path} is not sound: {'; '.join(problems)}")
     if _written_sha256(path) != record.sha256:
@@ -1918,12 +2041,12 @@ def _written_sha256(path: Path) -> str | None:
         raise RejectError(f"could not read {sidecar}: {exc}") from exc
 
 
-def _create_bundle(repo: Path, branch: str, default_sha: str, path: Path) -> None:
-    """Create the bundle, never overwriting, and record its sha256 beside it."""
+def _create_bundle(repo: Path, ref: str, default_sha: str, path: Path) -> None:
+    """Create the bundle of ``ref``, never overwriting, and record its sha256 beside it."""
     tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        _git_out(repo, "bundle", "create", str(tmp), branch_ref(branch), f"^{default_sha}")
+        _git_out(repo, "bundle", "create", str(tmp), ref, f"^{default_sha}")
         path.hardlink_to(tmp)
         _sha256_sidecar(path).write_text(sha256_of(path) + "\n", encoding="utf-8")
     except OSError as exc:
@@ -1933,13 +2056,14 @@ def _create_bundle(repo: Path, branch: str, default_sha: str, path: Path) -> Non
             tmp.unlink()
 
 
-def restore_commands(branch: str, tip: str, bundle: Path) -> tuple[str, str]:
-    """The fetch from the bundle, and ``git branch <name> <tip>``."""
-    ref = shlex.quote(f"{branch_ref(branch)}:{branch_ref(branch)}")
-    return (
-        f"git fetch {shlex.quote(str(bundle))} {ref}",
-        f"git branch {shlex.quote(branch)} {tip}",
-    )
+def restore_commands(branch: str, tip: str, bundle: Path, *, remote: str = "") -> tuple[str, str]:
+    """The fetch from the bundle, then ``git branch <name> <tip>`` (local scope) or
+    ``git push <remote> <tip>:refs/heads/<name>`` (remote scope)."""
+    full = subject_ref(branch, remote)
+    fetch = f"git fetch {shlex.quote(str(bundle))} {shlex.quote(f'{full}:{full}')}"
+    if remote:
+        return fetch, f"git push {remote} {tip}:{shlex.quote(branch_ref(branch))}"
+    return fetch, f"git branch {shlex.quote(branch)} {tip}"
 
 
 # --- the ledger ----------------------------------------------------------------------
@@ -1960,8 +2084,13 @@ class LedgerLine:
     bundle_sha256: str
     restore_commands: tuple[str, ...]
     removed_at: float
+    #: The removal's scope: empty for a local branch, else the remote (N763).
+    remote: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        return _with_remote(self._payload(), self.remote)
+
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema": SCHEMA_VERSION,
             "branch": self.branch,
@@ -1992,6 +2121,7 @@ class LedgerLine:
             bundle_sha256=_str(data, "bundle_sha256"),
             restore_commands=_strs(data, "restore_commands"),
             removed_at=_float(data, "removed_at"),
+            remote=_remote(data),
         )
 
 
@@ -2014,9 +2144,11 @@ class LedgerRefusal:
     verdict_ids: tuple[str, ...]
     detail: str
     refused_at: float
+    #: The refused removal's scope: empty for a local branch, else the remote (N763).
+    remote: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema": SCHEMA_VERSION,
             "outcome": OUTCOME_GIT_REFUSED,
             "branch": self.branch,
@@ -2025,6 +2157,7 @@ class LedgerRefusal:
             "detail": self.detail,
             "refused_at": self.refused_at,
         }
+        return _with_remote(payload, self.remote)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> LedgerRefusal:
@@ -2037,6 +2170,7 @@ class LedgerRefusal:
             verdict_ids=_strs(data, "verdict_ids"),
             detail=_str(data, "detail"),
             refused_at=_float(data, "refused_at"),
+            remote=_remote(data),
         )
 
 
@@ -2189,6 +2323,8 @@ class RemovalApproval:
     default_sha: str
     verdicts: tuple[Verdict, ...]
     bundle: BundleRecord | None
+    #: The removal's scope: empty for a local branch, else the remote (N763).
+    remote: str = ""
 
 
 def _verdict_refusal(verdicts: Sequence[Verdict], problems: Mapping[str, list[str]]) -> str:
@@ -2210,6 +2346,7 @@ def approve_removal(
     default_ref: str,
     write: bool,
     pending: int = 0,
+    remote: str = "",
 ) -> RemovalApproval:
     """Recompute every fact the route rests on; raise RejectRefusedError or RejectError.
 
@@ -2223,11 +2360,12 @@ def approve_removal(
 
     ``pending`` is the number of removals this same batch has already approved: none
     of them is in the ledger yet, and the rate must count them all the same.
+    ``remote`` is the scope: only verdicts of exactly that scope are offered (N763).
     """
     entries = read_ledger_entries(route.ledger_path)
     used = used_state(entries, route.store, now=route.now, config=route.config)
     default_sha = _resolve(repo, _full_ref(default_ref))
-    inventory = compute_inventory(repo, branch, default_ref)
+    inventory = compute_inventory(repo, branch, default_ref, remote=remote)
     removals = pending + used.removals
     required = admit_request(
         branch,
@@ -2236,9 +2374,9 @@ def approve_removal(
         route.store.keeps(),
         removals,
         route.config,
-        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory),
+        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory, remote=remote),
     )
-    verdicts = route.store.verdicts_for(branch, tip)
+    verdicts = route.store.verdicts_for(branch, tip, remote=remote)
     if not verdicts:
         raise RejectRefusedError("no reviewer verdict is on file for this tip")
     if any(
@@ -2274,9 +2412,16 @@ def approve_removal(
     set_problems = verdict_set_problems(valid, required=required)
     if set_problems:
         raise RejectRefusedError("; ".join(set_problems))
-    bundle = write_bundle(repo, branch, tip, default_sha, route.config) if write else None
+    bundle = (
+        write_bundle(repo, branch, tip, default_sha, route.config, remote=remote) if write else None
+    )
     return RemovalApproval(
-        branch=branch, tip=tip, default_sha=default_sha, verdicts=tuple(valid), bundle=bundle
+        branch=branch,
+        tip=tip,
+        default_sha=default_sha,
+        verdicts=tuple(valid),
+        bundle=bundle,
+        remote=remote,
     )
 
 
@@ -2289,7 +2434,7 @@ def record_removal(repo: Path, approval: RemovalApproval, route: RejectRoute) ->
     """
     if approval.bundle is None:
         raise RejectError("a dry-run approval cannot record a removal")
-    problems = bundle_problems(repo, approval.bundle, approval.branch)
+    problems = bundle_problems(repo, approval.bundle, approval.branch, remote=approval.remote)
     if problems:
         raise RejectError(f"the bundle no longer verifies: {'; '.join(problems)}")
     ids = tuple(v.verdict_id for v in approval.verdicts)
@@ -2309,8 +2454,11 @@ def record_removal(repo: Path, approval: RemovalApproval, route: RejectRoute) ->
         reply_sha256s=tuple(v.reviewer.reply_sha256 for v in approval.verdicts),
         bundle_path=str(approval.bundle.path),
         bundle_sha256=approval.bundle.sha256,
-        restore_commands=restore_commands(approval.branch, approval.tip, approval.bundle.path),
+        restore_commands=restore_commands(
+            approval.branch, approval.tip, approval.bundle.path, remote=approval.remote
+        ),
         removed_at=route.now,
+        remote=approval.remote,
     )
     # The exclusive claim is the single-use decision; the read above only names the
     # common case early. Of two checkouts racing on one verdict, exactly one claims it.
@@ -2349,6 +2497,7 @@ def record_git_refusal(line: LedgerLine, detail: str, route: RejectRoute) -> Non
             verdict_ids=line.verdict_ids,
             detail=detail,
             refused_at=route.now,
+            remote=line.remote,
         ),
     )
 
@@ -2500,7 +2649,7 @@ def branch_still_at_tip(repo: Path, line: LedgerLine) -> bool:
         "rev-parse",
         "--verify",
         "--quiet",
-        f"{branch_ref(line.branch)}^{{commit}}",
+        f"{subject_ref(line.branch, line.remote)}^{{commit}}",
         timeout=_git_budget(),
     )
     if result.returncode == 0:

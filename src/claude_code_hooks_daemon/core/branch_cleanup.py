@@ -1431,6 +1431,13 @@ def delete_remote_branches(
     )
 
 
+def push_leased_deletes(
+    repo: Path, remote: str, tips: Mapping[str, str]
+) -> tuple[list[str], list[str]]:
+    """The public name of :func:`_push_deletes`, for the no-value remote route (N763)."""
+    return _push_deletes(repo, remote, tips)
+
+
 def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[list[str], list[str]]:
     """Delete each remote branch under a lease on its proven tip: ``(deleted, refusals)``.
 
