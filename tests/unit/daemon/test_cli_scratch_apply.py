@@ -460,3 +460,30 @@ class TestSessionChildren:
         for session in document["sessions"]:
             assert all(row["outcome"] != "archived" for row in session["entries"])
         assert (tree.root / _SESSION / "old" / "a.txt").read_bytes() == b"alpha"
+
+
+class TestAnEntryRootMarkerOfAnyShapeIsNeverArchived:
+    """N767: a top-level ``.scratch-keep`` that is not a regular file still keeps the entry."""
+
+    @pytest.mark.parametrize("shape", ["symlink", "dangling", "loop", "directory"])
+    def test_the_pinned_entry_stays_and_its_sibling_goes(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str], shape: str
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        tree.file("pinned/a.txt", b"pinned")
+        marker = tree.root / "pinned" / ".scratch-keep"
+        if shape == "symlink":
+            marker.symlink_to(tree.root / "pinned" / "a.txt")
+        elif shape == "dangling":
+            marker.symlink_to(tree.root / "nowhere")
+        elif shape == "loop":
+            marker.symlink_to(marker)
+        else:
+            marker.mkdir()
+        tree.set_tree_mtime("pinned", now - 5 * _DAY)
+        assert _run(_parse(_project(tree), "--apply", "--json"), now=now) == 0
+        outcomes = {row["name"]: row for row in json.loads(capsys.readouterr().out)["entries"]}
+        assert outcomes["old"]["outcome"] == "archived", outcomes
+        assert outcomes["pinned"]["outcome"] != "archived"
+        assert (tree.root / "pinned" / "a.txt").read_bytes() == b"pinned"

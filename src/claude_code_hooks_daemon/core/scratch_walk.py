@@ -108,7 +108,8 @@ class WalkBudget:
         return self.spent_reason
 
 
-def _kind_of(mode: int) -> NodeKind:
+def kind_of(mode: int) -> NodeKind:
+    """The :class:`NodeKind` of an ``lstat`` mode."""
     if stat.S_ISDIR(mode):
         return NodeKind.DIRECTORY
     if stat.S_ISLNK(mode):
@@ -140,7 +141,7 @@ class _Walk:
             info = os.lstat(top)
         except OSError as exc:
             return f"entry {name} could not be read: {type(exc).__name__}"
-        kind = _kind_of(info.st_mode)
+        kind = kind_of(info.st_mode)
         self.stats.kind = kind
         self.stats.root_ctime_ns = info.st_ctime_ns
         device = info.st_dev
@@ -170,7 +171,7 @@ class _Walk:
     ) -> str:
         if info.st_dev != device:
             return f"{rel} is on a second device"
-        kind = _kind_of(info.st_mode)
+        kind = kind_of(info.st_mode)
         mtime_ns = info.st_ctime_ns if info.st_mtime_ns > self._now_ns else info.st_mtime_ns
         self.stats.newest_mtime_ns = max(self.stats.newest_mtime_ns, mtime_ns)
         if path.name == GIT_MARKER:
@@ -261,6 +262,7 @@ __all__ = [
     "NodeKind",
     "ScandirFn",
     "WalkBudget",
+    "kind_of",
     "list_entries",
     "walk_entry",
 ]

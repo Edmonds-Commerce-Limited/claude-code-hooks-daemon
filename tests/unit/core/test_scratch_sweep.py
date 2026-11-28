@@ -1140,3 +1140,101 @@ class TestTtlHold:
         report = _sweep(tree, now=now, config=_WEEK)
         (sub,) = report.sessions
         assert _held(sub, "cache") is Verdict.KEPT
+
+
+def _place_marker(directory: Path, shape: str) -> None:
+    """Put a ``.scratch-keep`` of ``shape`` directly in ``directory``."""
+    marker = directory / ".scratch-keep"
+    if shape == "regular":
+        marker.write_text("hold\n")
+    elif shape == "symlink":
+        (directory / "reason.txt").write_text("hold\n")
+        marker.symlink_to(directory / "reason.txt")
+    elif shape == "dangling":
+        marker.symlink_to(directory / "nowhere")
+    elif shape == "loop":
+        marker.symlink_to(marker)
+    elif shape == "directory":
+        marker.mkdir()
+        (marker / "why.txt").write_text("hold\n")
+    else:
+        raise ValueError(shape)
+
+
+_MARKER_SHAPES = ("regular", "symlink", "dangling", "loop", "directory")
+
+
+class TestOneKeepMarkerRule:
+    """N767: the entry root and the session directory read ``.scratch-keep`` by one rule.
+
+    Any node of that name keeps, whatever its type: a marker that cannot be
+    read safely must never lead to an archive.
+    """
+
+    def _entry_verdict(self, tmp_path: Path, shape: str) -> str:
+        tree = build_scratch_tree(tmp_path / "entry")
+        now = _now()
+        tree.file("pinned/a.log", b"x")
+        _place_marker(tree.root / "pinned", shape)
+        _old(tree, now)
+        return _verdicts(_sweep(tree, now=now))["pinned"]
+
+    def _session_child_verdict(self, tmp_path: Path, shape: str) -> str:
+        tree = build_scratch_tree(tmp_path / "session")
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _place_marker(tree.root / _SESSION, shape)
+        _old(tree, now)
+        return _children(_sweep(tree, now=now))["cache"]
+
+    @pytest.mark.parametrize("shape", _MARKER_SHAPES)
+    def test_an_entry_root_marker_of_any_shape_keeps(self, tmp_path: Path, shape: str) -> None:
+        assert self._entry_verdict(tmp_path, shape) == "KEPT"
+
+    @pytest.mark.parametrize("shape", _MARKER_SHAPES)
+    def test_a_session_marker_of_any_shape_keeps_every_child(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        assert self._session_child_verdict(tmp_path, shape) == "KEPT"
+
+    @pytest.mark.parametrize("shape", _MARKER_SHAPES)
+    def test_the_two_checks_agree(self, tmp_path: Path, shape: str) -> None:
+        assert self._entry_verdict(tmp_path, shape) == self._session_child_verdict(tmp_path, shape)
+
+    def test_a_symlinked_entry_marker_reason_is_not_followed(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("pinned/a.log", b"x")
+        _place_marker(tree.root / "pinned", "symlink")
+        _old(tree, now)
+        (row,) = [row for row in _sweep(tree, now=now).rows if row.name == "pinned"]
+        assert row.reasons == ("pinned by .scratch-keep: (no reason given)",)
+
+    def test_a_marker_below_the_top_of_an_entry_does_not_keep(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        tree.file("cache/__pycache__/.scratch-keep", b"hold\n")
+        _old(tree, now)
+        assert _verdicts(_sweep(tree, now=now))["cache"] != "KEPT"
+
+    def test_an_unreadable_session_marker_keeps_every_child(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ``lstat`` failing other than 'absent' is read as kept (fail closed)."""
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        real_lstat = os.lstat
+        marker = str(tree.root / _SESSION / ".scratch-keep")
+
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            if os.fspath(path) == marker:
+                raise PermissionError(13, "Permission denied")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", lstat)
+        assert _children(_sweep(tree, now=now))["cache"] == "KEPT"

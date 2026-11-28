@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.core.scratch_verdict import (
     Verdict,
     has_keep_marker,
     judge,
+    keep_marker_present,
     uncovered_nodes,
 )
 from claude_code_hooks_daemon.core.scratch_walk import (
@@ -633,7 +634,7 @@ def _container_holds(
     """
     holds: list[tuple[Verdict, str]] = []
     session = root / name
-    if os.path.lexists(session / KEEP_MARKER):
+    if keep_marker_present(session):
         holds.append((Verdict.KEPT, "the session directory holds a keep marker"))
     resolved = parent.resolved_root / name
     for pid, cwd in sorted(inputs.cwds.items()):
