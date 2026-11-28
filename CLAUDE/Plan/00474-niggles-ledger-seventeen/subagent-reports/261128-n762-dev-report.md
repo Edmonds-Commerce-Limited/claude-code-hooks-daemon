@@ -31,31 +31,35 @@ How each path works:
   (`fail_body`). The budget is 30 s for the relay plus 10 s for the hand-off, which is under
   Claude Code's 60 s PreToolUse hook timeout (`.claude/settings.json`).
 - **Daemon side.** Before either client limit is reached, the chain deadline applies
-  (`daemon.chain.deadline_seconds`, 20 s by default, in `core/chain.py`). When a chain holding
-  any SAFETY+BLOCKING handler has not finished by then, the daemon itself returns a
-  `HookResult.deny` with the reason "chain: not judged in time". On Stop that is a block. So a
-  merely slow guard is denied by the daemon. The client-side timeout decides the outcome only
-  for a daemon that cannot answer at all (wedged, the GIL-hang shape), or for a chain with no
-  SAFETY+BLOCKING handler.
+  (`daemon.chain.deadline_seconds`, 20 s by default, in `core/chain.py:840-872`). It ends every
+  chain still running. A chain that has any SAFETY+BLOCKING handler, finished or not, gets a
+  `HookResult.deny` from the daemon with the reason "chain: not judged in time"; on Stop that
+  is a block. A chain with none is answered with what its finished handlers decided, and the
+  unfinished handlers' output is dropped. So the client-side timeout decides the outcome only
+  for a daemon that cannot answer at all (wedged, the GIL-hang shape).
 
 ### Owner decision (behaviour NOT changed)
 
 A guard that must block fails open on a client timeout for two event classes:
 
-1. **Stop / SubagentStop.** `emit_error_json` returns `{}` on `socket_timeout`. This was a
-   deliberate choice in Plan 00177, made so that a reached-but-slow daemon does not wedge the
-   session in a 30 s stall loop. As a consequence, when a daemon accepts the connection and
-   never answers, the stop is allowed even though the branch stop guard (R-BRANCH-STOP-GUARD),
-   the QA-failure stop or the goal-ledger stop would have blocked it. A daemon that cannot be
-   reached at all still blocks (with the Plan 00555 bound).
-2. **UserPromptSubmit on the relay** (and every other non-PreToolUse socket). `fail_body` gives
-   `{}`, so a prompt the usage-pause gate (R-USAGE-PAUSE-PROMPT) would block goes through when
-   the daemon is wedged.
+1. **Stop / SubagentStop.** A wedged daemon has two outcomes:
+   - While connects still succeed, the error is `socket_timeout`, and `emit_error_json`
+     returns `{}`. This was a deliberate choice in Plan 00177, made so that a reached-but-slow
+     daemon does not wedge the session in a 30 s stall loop. The stop is therefore allowed even
+     though the branch stop guard (R-BRANCH-STOP-GUARD), the QA-failure stop or the
+     goal-ledger stop would have blocked it.
+   - Once the daemon's accept backlog is full, the error is `connect_backlog_full`, and
+     `init.sh:4169-4182` blocks the stop, bounded by `_stop_bound` (Plan 00555). A daemon that
+     cannot be reached at all also blocks, with the same bound.
+2. **UserPromptSubmit on every transport.** On the relay `fail_body` gives `{}`. On the python3
+   transport (relay off, or after the relay's connect-fail fallback), `init.sh:4232-4248` gives
+   context only. In both cases, a prompt the usage-pause gate (R-USAGE-PAUSE-PROMPT) would
+   block goes through when the daemon is wedged.
 
 The options for the owner: keep the current behaviour (availability over enforcement for
 non-tool events); make a Stop `socket_timeout` block, using the Plan 00555 bound that a down
-daemon already uses so the session cannot loop forever; or extend the relay's fail-closed
-carve-out to the user-prompt-submit socket. The probe pins today's answer, so whichever is
+daemon already uses so the session cannot loop forever; or extend the fail-closed carve-out to
+UserPromptSubmit on both the relay and the python3 transport. The probe pins today's answer, so whichever is
 chosen will turn the matching test red, and that test is the one to change deliberately.
 
 ### Found and fixed
@@ -100,6 +104,26 @@ cover the deadline. After restoring the original line, all 54 tests in the file 
 - The relay was built in the worktree (`relay/build.sh`, aarch64 musl), so the relay tests ran
   rather than skipped. The worktree venv was built with `setup_worktree.sh` steps 4 and 5. That
   script refuses branch names that do not start with `worktree-`, so it could not be run as is.
+
+## Review follow-up
+
+The independent review (`/workspace/untracked/agent-reports/auto/261128-085347-code-reviewer-a70e74af9b5972bcb.md`)
+APPROVED the branch with 4 minors. All four are fixed:
+
+1. **The relay hand-off was not asserted.** The relay PreToolUse test now asserts that the
+   deny reason contains `relay_exchange_failed` and does not contain `transport-fail-closed`.
+   Mutation check: I made `judge_via_fallback` return at once and rebuilt the relay. The test
+   went red on the relay's own `transport-fail-closed` deny. With the source restored and the
+   relay rebuilt, all 7 pass (commit `3efe3a6db`).
+2. **The chain-deadline wording was wrong.** The probe docstring, this report and N762 now say
+   that a chain with any SAFETY+BLOCKING handler is denied, finished or not. They also state
+   the case of a chain with none: it is answered with what its finished handlers decided, and
+   the rest is dropped. The earlier docstring had said the client timeout decides for such a
+   chain, which was wrong: the daemon answers it at the deadline.
+3. **UserPromptSubmit was described as failing open on the relay only.** It fails open on every
+   transport, and the docstring, this report and N762 now say so.
+4. **Only one outcome of a wedged daemon was given.** Both are now stated: `socket_timeout`
+   allows the stop, and `connect_backlog_full` blocks it, bounded by `_stop_bound`.
 
 ## What remains
 

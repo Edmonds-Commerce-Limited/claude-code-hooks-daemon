@@ -13,17 +13,23 @@ The answer pinned here:
 - **PreToolUse fails CLOSED on both transports.** The relay hands the request to
   the forwarder (`init.sh`'s recovery carve-out), which denies; the python3
   transport denies on its socket timeout. The late verdict is never used.
-- **Every other event fails OPEN.** On the relay a timeout gives `{}`. Stop and
+- **Every other event fails OPEN.** On the relay, a timeout on any socket other
+  than PreToolUse's gives `{}`. On the python3 transport (relay off, or after the
+  relay's connect-fail fallback), an event other than PreToolUse and Stop gets
+  context only. So UserPromptSubmit fails open on every transport. Stop and
   SubagentStop never use the relay, and the python3 transport lets a stop through
   on a read-side timeout (Plan 00177): a stop guard (branch stop guard, QA
   failure, goal ledger) that has not answered within the wait does not block.
-  That is recorded in NIGGLES.md N762 as an owner decision, not changed here.
+  That is recorded in NIGGLES.md N762 as an owner decision, not changed here. A
+  daemon stuck long enough to fill its accept backlog is a different error
+  (`connect_backlog_full`), and that one blocks the stop (bounded by `_stop_bound`).
 
 Before the client's wait runs out, the daemon's own chain deadline (20 s by
-default, below the 30 s wait) denies a PreToolUse chain, or blocks a stop chain,
-holding a SAFETY+BLOCKING handler that has not finished, so the client-side
-timeout matters only for a daemon that cannot answer at all (wedged, the GIL-hang
-shape) or a chain with no SAFETY+BLOCKING handler.
+default, below the 30 s wait) ends every chain still running. A chain that has
+any SAFETY+BLOCKING handler, finished or not, is denied (a stop is blocked). A
+chain with none is answered with what its finished handlers decided, and the
+unfinished handlers' output is dropped. So the client-side timeout decides only
+for a daemon that cannot answer at all (wedged, the GIL-hang shape).
 """
 
 from __future__ import annotations
