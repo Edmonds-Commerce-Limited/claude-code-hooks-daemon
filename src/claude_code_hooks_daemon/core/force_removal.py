@@ -27,8 +27,8 @@ ALL_HOLDERS: Final[tuple[str, ...]] = ("refs/heads", "refs/remotes", "refs/tags"
 REMOTE_HOLDERS: Final[tuple[str, ...]] = ("refs/remotes",)
 
 
-#: Wall-clock seconds the whole patch-equivalence search may take. The hook relay gives up
-#: at 30 s and may then let the command through, so this stays well under it.
+#: Wall-clock seconds the whole patch-equivalence search may take: well under the daemon's
+#: chain deadline (20 s), past which the whole PreToolUse chain is denied unjudged.
 PATCH_PROOF_BUDGET_SECONDS: Final[float] = 6.0
 
 
@@ -135,8 +135,8 @@ def patch_held_tips(
         for tip in tips:
             for ref in refs:
                 if clock() >= deadline:
-                    # Out of time is not held: the hook relay would otherwise time out and
-                    # fail open, so the removal is refused instead.
+                    # Out of time is not held: the removal is refused with this guard's own
+                    # reason, before the chain deadline denies the call unjudged.
                     return frozenset(held)
                 if not _shares_history(top_level, ref, tip):
                     continue
