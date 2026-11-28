@@ -8078,12 +8078,16 @@ def cmd_branch_reject_request(args: argparse.Namespace) -> int:
 
 
 def _print_remote_review_hint(repo: Path, branches: BranchesConfig, name: str) -> None:
-    """Name the remote route when ``name`` has a remote copy (ledger N763)."""
-    from claude_code_hooks_daemon.core import branch_reject
+    """Name the remote route when ``name`` has a remote copy (ledger N763).
 
-    try:
-        branch_reject.branch_tip(repo, name, remote=branches.remote)
-    except branch_reject.RejectError:
+    Advisory text only: the lookup asks whether the tracking ref resolves, and any
+    answer other than yes (absent, or git failing) prints nothing. The route itself
+    re-checks every fact and fails closed.
+    """
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+
+    tracking = f"refs/remotes/{branches.remote}/{name}^{{commit}}"
+    if run_git(repo, "rev-parse", "--verify", "--quiet", tracking).returncode != 0:
         return
     print(
         f"{branches.remote}/{name} exists. If its pull request was closed unmerged, its "
