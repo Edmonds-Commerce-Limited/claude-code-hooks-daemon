@@ -51,7 +51,11 @@ from claude_code_hooks_daemon.core.remote_branch_proof import (
 from claude_code_hooks_daemon.utils.git_repo import parse_worktree_porcelain, run_git
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.github_issue_validity import GhError, GhRunner, make_gh_runner
-from claude_code_hooks_daemon.utils.github_ssh_alias import resolve_ssh_host_alias
+from claude_code_hooks_daemon.utils.github_ssh_alias import (
+    GITHUB_SSH_OVER_HTTPS_HOST,
+    GITHUB_SSH_OVER_HTTPS_PORT,
+    resolve_ssh_host_alias,
+)
 
 #: ``gh pr list`` page size. A FULL page is unreadable: a PR past it could be open.
 PR_PAGE_LIMIT = 20
@@ -65,6 +69,9 @@ _GIT_SUFFIX = ".git"
 #: carries one is passed to gh unchanged and fails closed there.
 _HOST = r"(?P<host>[A-Za-z0-9][A-Za-z0-9._-]*)"
 _SSH_SCHEME = "ssh"
+#: ``(scheme, host, port)`` of GitHub's ssh-over-443 address: the only accepted pair of a
+#: host and a non-default port, as that port reaches github.com itself.
+_SSH_OVER_HTTPS = (_SSH_SCHEME, GITHUB_SSH_OVER_HTTPS_HOST, GITHUB_SSH_OVER_HTTPS_PORT)
 _PATH = r"(?P<owner>[^/:@\s]+)/(?P<repo>[^/:@\s]+?)/?"
 _URL_FORM = re.compile(
     rf"(?P<scheme>https|http|ssh|git)://(?:[^@/\s]+@)?{_HOST}(?::(?P<port>[0-9]+))?/{_PATH}"
@@ -126,10 +133,12 @@ def repository_slug(url: str) -> str:
 
     Accepts ``https://[user@]host[:port]/owner/repo[.git]`` (the port only when it is the
     scheme's default, as ``gh -R`` carries none), the same with ``ssh://`` or
-    ``git://``, and ``[user@]host:owner/repo[.git]``. In the two ssh-style forms (scp
-    and ``ssh://``) a ``github.com-<suffix>`` ssh config alias names ``github.com``
-    (:mod:`github_ssh_alias`); every other host is kept, and gh fails closed on an
-    unknown one. Anything else (a local path, a
+    ``git://``, and ``[user@]host:owner/repo[.git]``. The one non-default port accepted
+    is 443 on ``ssh://ssh.github.com``, GitHub's documented ssh-over-443 address. The
+    host is lowercased, as gh lowercases it. In the two ssh-style forms (scp and
+    ``ssh://``) a ``github.com-<suffix>`` ssh config alias and ``ssh.github.com`` name
+    ``github.com`` (:mod:`github_ssh_alias`); every other host is kept, and gh fails
+    closed on an unknown one. Anything else (a local path, a
     ``file://`` URL, a missing or extra path part, an option-like or dot-only part)
     raises RejectRefusedError: gh must never be left to choose the repository itself.
     """
@@ -140,13 +149,14 @@ def repository_slug(url: str) -> str:
             "pull request state cannot be read from the repository the delete goes to"
         )
     groups = match.groupdict()
+    host, owner, repo = match.group("host").lower(), match.group("owner"), match.group("repo")
     port = groups.get("port")
-    if port is not None and port != _DEFAULT_PORTS[str(groups["scheme"])]:
+    ssh_over_https = (groups.get("scheme"), host, port) == _SSH_OVER_HTTPS
+    if port is not None and port != _DEFAULT_PORTS[str(groups["scheme"])] and not ssh_over_https:
         raise RejectRefusedError(
             f"the remote URL names port {port}, which `gh -R` cannot carry, so the "
             "repository the pull request state is read from cannot be named"
         )
-    host, owner, repo = match.group("host"), match.group("owner"), match.group("repo")
     if groups.get("scheme", _SSH_SCHEME) == _SSH_SCHEME:
         host = resolve_ssh_host_alias(host)
     repo = repo.removesuffix(_GIT_SUFFIX)

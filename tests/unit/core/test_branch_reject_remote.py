@@ -320,6 +320,47 @@ class TestRepositorySlug:
         with pytest.raises(RejectRefusedError, match="repository"):
             remote_route.repository_slug(url)
 
+    @pytest.mark.parametrize(
+        ("url", "slug"),
+        [
+            ("git@GitHub.com-LTS:acme/widgets.git", "github.com/acme/widgets"),
+            ("ssh://git@GitHub.com/acme/widgets.git", "github.com/acme/widgets"),
+            ("https://GitHub.com/acme/widgets.git", "github.com/acme/widgets"),
+            ("https://GitHub.com-lts/acme/widgets.git", "github.com-lts/acme/widgets"),
+            ("git@GHE.Example.com:acme/widgets.git", "ghe.example.com/acme/widgets"),
+        ],
+    )
+    def test_the_slug_host_is_lowercased(self, url: str, slug: str) -> None:
+        """gh lowercases host names, so the slug names the host as gh will."""
+        assert remote_route.repository_slug(url) == slug
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "ssh://git@ssh.github.com:443/acme/widgets.git",
+            "ssh://git@SSH.GitHub.com:443/acme/widgets",
+            "ssh://git@ssh.github.com/acme/widgets.git",
+            "git@ssh.github.com:acme/widgets.git",
+        ],
+    )
+    def test_githubs_documented_ssh_over_https_address_names_github(self, url: str) -> None:
+        """``ssh://git@ssh.github.com:443/...`` is GitHub's documented ssh-over-443 form."""
+        assert remote_route.repository_slug(url) == "github.com/acme/widgets"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "ssh://git@ssh.github.com:2222/acme/widgets.git",
+            "ssh://git@github.com:443/acme/widgets.git",
+            "ssh://git@github.com-lts:443/acme/widgets.git",
+            "ssh://git@ghe.example.com:443/acme/widgets.git",
+            "git://ssh.github.com:443/acme/widgets.git",
+        ],
+    )
+    def test_port_443_is_accepted_only_for_ssh_to_ssh_github_com(self, url: str) -> None:
+        with pytest.raises(RejectRefusedError, match="port"):
+            remote_route.repository_slug(url)
+
     def test_a_refused_alias_url_never_echoes_its_credentials(self) -> None:
         with pytest.raises(RejectRefusedError) as caught:
             remote_route.repository_slug("ssh://s3cr3t@github.com-work:2222/acme/widgets")

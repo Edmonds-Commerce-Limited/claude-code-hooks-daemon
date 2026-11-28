@@ -115,13 +115,20 @@ _BODY_FILE: Final[re.Pattern[str]] = re.compile(
 
 _BODY_FILE_FLAGS: Final[tuple[str, ...]] = ("--body-file", "-F")
 
-#: Everything ``gh`` strips before the owner/name pair, across the spellings it
-#: accepts for ``--repo``: an https URL, an ssh URL, and the scp-like form.
-_REPO_URL_PREFIX: Final[re.Pattern[str]] = re.compile(r"\A(?:https?://|ssh://git@|git@)")
-_REPO_HOST_PREFIX: Final[re.Pattern[str]] = re.compile(r"\Agithub\.com[:/]")
-#: The prefixes of the ssh-style spellings, whose host may be an ssh config alias.
-_SSH_URL_PREFIXES: Final[frozenset[str]] = frozenset({"ssh://git@", "git@"})
-_HOST_SPLIT: Final[re.Pattern[str]] = re.compile(r"(?P<host>[^:/]*)(?P<rest>[:/].*)", re.DOTALL)
+#: The URL spellings ``gh`` accepts for ``--repo``, each split into its host and the
+#: path after it, with any ``user@`` and ``:port`` dropped as gh drops them. The
+#: ssh-style two (``ssh://`` and scp-like ``[user@]host:path``) are the ones whose
+#: host may be an ssh config alias; an https host is literal.
+_SSH_URL: Final[re.Pattern[str]] = re.compile(
+    r"ssh://(?:[^@/\s]+@)?(?P<host>[^@/:\s]+)(?::[0-9]*)?/(?P<path>.*)", re.IGNORECASE
+)
+_SCP_URL: Final[re.Pattern[str]] = re.compile(
+    r"(?:[^@/:\s]+@)?(?P<host>[^@/:\s]+):(?!//)(?P<path>.*)"
+)
+_HTTP_URL: Final[re.Pattern[str]] = re.compile(
+    r"https?://(?:[^@/\s]+@)?(?P<host>[^@/:\s]+)(?::[0-9]*)?/(?P<path>.*)", re.IGNORECASE
+)
+_REPO_HOST_PREFIX: Final[re.Pattern[str]] = re.compile(r"\Agithub\.com[:/]", re.IGNORECASE)
 
 #: ``gh`` reads the body from stdin for this value, and nothing readable exists
 #: to check before the fact.
@@ -294,17 +301,19 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         ``git@github.com:owner/name.git``. They all address the same repository,
         so a gate that recognised only one of them would be trivially walked
         past by pasting the URL from a browser. An ssh-style spelling may name
-        GitHub through a ``github.com-<suffix>`` ssh config alias, which ssh
-        resolves to GitHub, so it is read as ``github.com``.
+        GitHub through a ``github.com-<suffix>`` ssh config alias or GitHub's
+        ``ssh.github.com``, so either is read as ``github.com``
+        (:mod:`github_ssh_alias`, which states what it cannot resolve). Any user
+        part and any port are dropped, as gh drops them, and the host is matched
+        case-insensitively, as gh lowercases it.
         """
         text = value.strip().strip("\"'")
-        prefix = _REPO_URL_PREFIX.match(text)
-        if prefix is not None:
-            text = text[prefix.end() :]
-            split = _HOST_SPLIT.fullmatch(text)
-            if prefix.group(0) in _SSH_URL_PREFIXES and split is not None:
-                # N772: only ssh-style URLs go through ssh config host aliases.
-                text = f"{resolve_ssh_host_alias(split['host'])}{split['rest']}"
+        ssh = _SSH_URL.fullmatch(text) or _SCP_URL.fullmatch(text)
+        web = _HTTP_URL.fullmatch(text)
+        if ssh is not None:
+            text = f"{resolve_ssh_host_alias(ssh['host'])}/{ssh['path']}"
+        elif web is not None:
+            text = f"{web['host']}/{web['path']}"
         text = _REPO_HOST_PREFIX.sub("", text)
         text = text.removesuffix(".git")
         return text.strip("/").lower()

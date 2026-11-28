@@ -109,6 +109,24 @@ class TestWhatEngagesTheGate:
             f"github.com/{_UPSTREAM}",
             f"git@github.com-lts:{_UPSTREAM}.git",
             f"ssh://git@github.com-work/{_UPSTREAM}.git",
+            # N772 review minor 1: any ssh user, or none, as ssh config may supply it.
+            f"github.com-lts:{_UPSTREAM}.git",
+            f"me@github.com-lts:{_UPSTREAM}.git",
+            f"ssh://u@github.com-lts/{_UPSTREAM}.git",
+            f"ssh://u@github.com/{_UPSTREAM}.git",
+            f"ssh://github.com/{_UPSTREAM}.git",
+            f"https://token@github.com/{_UPSTREAM}.git",
+            # Minor 2: gh lowercases host names.
+            f"git@GitHub.com:{_UPSTREAM}.git",
+            f"git@GitHub.com-LTS:{_UPSTREAM}.git",
+            f"https://GitHub.com/{_UPSTREAM}",
+            f"GitHub.com/{_UPSTREAM}",
+            # Minor 4: GitHub's documented ssh-over-443 address; gh drops the port.
+            f"ssh://git@ssh.github.com:443/{_UPSTREAM}.git",
+            f"ssh://git@ssh.github.com/{_UPSTREAM}.git",
+            f"ssh://git@ssh.github.com:2222/{_UPSTREAM}.git",
+            f"ssh://git@github.com:22/{_UPSTREAM}.git",
+            f"git@ssh.github.com:{_UPSTREAM}.git",
         ],
     )
     def test_every_url_spelling_of_the_same_repo_engages(self, spelling: str) -> None:
@@ -181,6 +199,34 @@ class TestTheCwdIsAThirdWayToNameARepository:
         clone = _git_checkout_with_origin(tmp_path, url)
 
         assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"github.com-lts:{_UPSTREAM}.git",
+            f"me@github.com-lts:{_UPSTREAM}.git",
+            f"ssh://u@github.com-lts/{_UPSTREAM}.git",
+            f"git@GitHub.com-LTS:{_UPSTREAM}.git",
+            f"ssh://git@ssh.github.com:443/{_UPSTREAM}.git",
+        ],
+    )
+    def test_every_ssh_spelling_of_a_github_remote_is_gated(self, tmp_path: Path, url: str) -> None:
+        """N772 review minors 1, 2 and 4, read from the cwd's remotes."""
+        clone = _git_checkout_with_origin(tmp_path, url)
+
+        assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            f"https://github.com-lts/{_UPSTREAM}",
+            f"git@ghe.example.com:{_UPSTREAM}.git",
+            f"ssh://git@gitlab.com-lts/{_UPSTREAM}.git",
+        ],
+    )
+    def test_a_host_that_is_not_github_is_not_gated(self, spelling: str) -> None:
+        """An https host is literal, and another forge's or server's host is not GitHub."""
+        assert not _handler().matches(_bash(f"gh issue create --repo {spelling} --title x"))
 
     def test_an_alias_like_https_remote_is_not_github(self, tmp_path: Path) -> None:
         """Only ssh-style URLs read ssh config, so an https host is taken literally."""
