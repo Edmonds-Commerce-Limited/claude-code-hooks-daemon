@@ -18,13 +18,17 @@ from claude_code_hooks_daemon.core import branch_reject_remote as remote_route
 from claude_code_hooks_daemon.core.branch_reject import (
     DECISION_NO_VALUE,
     DispatchRecord,
+    LedgerLine,
+    LedgerRefusal,
     RejectError,
     RejectRefusedError,
     RejectRoute,
     RejectStore,
+    RemovalApproval,
     Verdict,
     compute_inventory,
     read_ledger,
+    read_ledger_entries,
 )
 from claude_code_hooks_daemon.utils.github_issue_validity import GhError
 from tests.support.git_fixtures import run_git
@@ -33,6 +37,8 @@ from tests.unit.core.test_branch_reject import _git as _git_out
 
 REMOTE = "origin"
 PR = 17
+GH_URL = "https://github.com/acme/widgets.git"
+SLUG = "github.com/acme/widgets"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -50,7 +56,10 @@ def origin_and_clone(tmp_path: Path) -> tuple[Path, Path]:
     run_git(work, "config", "user.email", "t@example.invalid")
     run_git(work, "config", "user.name", "Tester")
     run_git(work, "config", "commit.gpgsign", "false")
-    run_git(work, "remote", "add", REMOTE, str(origin))
+    # The remote's CONFIGURED url names a GitHub repository (what gh is pointed at);
+    # insteadOf sends every git transfer to the local bare repository instead.
+    run_git(work, "remote", "add", REMOTE, GH_URL)
+    run_git(work, "config", f"url.{origin}.insteadOf", GH_URL)
     (work / "README.md").write_text("base\n", encoding="utf-8")
     run_git(work, "add", "README.md")
     run_git(work, "commit", "-m", "base")
@@ -109,17 +118,22 @@ def _pr(state: str = "CLOSED", *, oid: str, name: str = "novel", **extra: object
 
 
 class FakeGh:
-    """Answers ``gh pr list`` with ``payload`` (JSON-encoded unless already a str)."""
+    """Answers ``gh pr list --head`` with ``payload`` and ``--base`` with ``based``.
 
-    def __init__(self, payload: object) -> None:
+    Each is JSON-encoded unless already a str, and raised when an exception.
+    """
+
+    def __init__(self, payload: object, based: object = ()) -> None:
         self.payload = payload
+        self.based: object = list(based) if isinstance(based, tuple) else based
         self.calls: list[list[str]] = []
 
     def __call__(self, args: Sequence[str]) -> str:
         self.calls.append(list(args))
-        if isinstance(self.payload, Exception):
-            raise self.payload
-        return self.payload if isinstance(self.payload, str) else json.dumps(self.payload)
+        answer = self.based if "--base" in args else self.payload
+        if isinstance(answer, Exception):
+            raise answer
+        return answer if isinstance(answer, str) else json.dumps(answer)
 
 
 def _closed(work: Path) -> FakeGh:
@@ -163,13 +177,15 @@ def _issue(
 
 class TestClosedPr:
     def test_a_closed_unmerged_pr_at_the_tip_is_accepted(self) -> None:
-        assert remote_route.closed_pr(FakeGh([_pr(oid="a" * 40)]), "novel", "a" * 40) == PR
-
-    def test_the_query_names_the_head_and_every_state(self) -> None:
         gh = FakeGh([_pr(oid="a" * 40)])
-        remote_route.closed_pr(gh, "novel", "a" * 40)
+        assert remote_route.closed_pr(gh, SLUG, "novel", "a" * 40) == PR
+
+    def test_the_query_names_the_repository_the_head_and_every_state(self) -> None:
+        gh = FakeGh([_pr(oid="a" * 40)])
+        remote_route.closed_pr(gh, SLUG, "novel", "a" * 40)
         (call,) = gh.calls
         assert call[:2] == ["pr", "list"]
+        assert call[call.index("-R") + 1] == SLUG
         assert call[call.index("--head") + 1] == "novel"
         assert call[call.index("--state") + 1] == "all"
 
@@ -195,12 +211,87 @@ class TestClosedPr:
         self, payload: object, needle: str
     ) -> None:
         with pytest.raises(RejectRefusedError, match=needle):
-            remote_route.closed_pr(FakeGh(payload), "novel", "a" * 40)
+            remote_route.closed_pr(FakeGh(payload), SLUG, "novel", "a" * 40)
 
     def test_a_full_page_is_unreadable(self) -> None:
         page = [_pr(oid="a" * 40, number=n) for n in range(remote_route.PR_PAGE_LIMIT)]
         with pytest.raises(RejectRefusedError, match="could not be read"):
-            remote_route.closed_pr(FakeGh(page), "novel", "a" * 40)
+            remote_route.closed_pr(FakeGh(page), SLUG, "novel", "a" * 40)
+
+
+class TestOpenBasePrs:
+    """BLOCKER 1 of the N763 review: deleting a branch an open PR is BASED on closes it."""
+
+    def test_no_open_pr_based_on_the_branch_passes(self) -> None:
+        gh = FakeGh([], based=[])
+        remote_route.refuse_open_base_prs(gh, SLUG, "novel")
+        (call,) = gh.calls
+        assert call[call.index("-R") + 1] == SLUG
+        assert call[call.index("--base") + 1] == "novel"
+        assert call[call.index("--state") + 1] == "open"
+
+    @pytest.mark.parametrize(
+        ("based", "needle"),
+        [
+            ([{"number": 99}], "#99"),
+            ([{"number": 99}, {"number": 100}], "#99"),
+            ("not json", "could not be read"),
+            ({"number": 99}, "could not be read"),
+            ([{"number": "99"}], "could not be read"),
+            (GhError("offline"), "could not be read"),
+        ],
+    )
+    def test_an_open_or_unreadable_based_pr_is_refused(self, based: object, needle: str) -> None:
+        with pytest.raises(RejectRefusedError, match=needle):
+            remote_route.refuse_open_base_prs(FakeGh([], based=based), SLUG, "novel")
+
+
+class TestRepositorySlug:
+    @pytest.mark.parametrize(
+        ("url", "slug"),
+        [
+            ("https://github.com/acme/widgets.git", "github.com/acme/widgets"),
+            ("https://github.com/acme/widgets", "github.com/acme/widgets"),
+            ("https://token@github.com/acme/widgets.git", "github.com/acme/widgets"),
+            ("git@github.com:acme/widgets.git", "github.com/acme/widgets"),
+            ("ssh://git@github.com/acme/widgets.git", "github.com/acme/widgets"),
+            ("ssh://git@ghe.example.com:2222/acme/my.repo.git", "ghe.example.com/acme/my.repo"),
+        ],
+    )
+    def test_a_github_style_url_names_its_repository(self, url: str, slug: str) -> None:
+        assert remote_route.repository_slug(url) == slug
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/tmp/origin.git",
+            "file:///tmp/origin.git",
+            "https://github.com/acme",
+            "https://github.com/acme/widgets/extra",
+            "https://github.com/-acme/widgets",
+            "https://github.com/acme/..",
+            "git@github.com:acme/.git",
+            "",
+        ],
+    )
+    def test_anything_else_is_refused(self, url: str) -> None:
+        with pytest.raises(RejectRefusedError, match="repository"):
+            remote_route.repository_slug(url)
+
+    def test_the_route_reads_the_configured_remote_url(
+        self, work: Path, branches: BranchesConfig
+    ) -> None:
+        gh = _closed(work)
+        remote_route.check_subject(work, branches, "main", "novel", gh)
+        assert gh.calls and all(call[call.index("-R") + 1] == SLUG for call in gh.calls)
+
+    def test_a_remote_whose_url_names_no_repository_is_refused(
+        self, origin_and_clone: tuple[Path, Path], branches: BranchesConfig
+    ) -> None:
+        origin, work = origin_and_clone
+        _git(work, "remote", "set-url", REMOTE, str(origin))
+        with pytest.raises(RejectRefusedError, match="repository"):
+            remote_route.check_subject(work, branches, "main", "novel", _closed(work))
 
 
 class TestSubject:
@@ -239,6 +330,66 @@ class TestSubject:
         _git(work, "worktree", "add", "-q", str(tmp_path / "wt"), "-b", "novel", f"{REMOTE}/novel")
         with pytest.raises(RejectRefusedError, match="checked out"):
             remote_route.check_subject(work, branches, "main", "novel", _closed(work))
+
+    def test_a_branch_checked_out_in_the_main_checkout_is_refused(
+        self, work: Path, branches: BranchesConfig
+    ) -> None:
+        _git(work, "checkout", "-q", "-b", "novel", f"{REMOTE}/novel")
+        with pytest.raises(RejectRefusedError, match="checked out"):
+            remote_route.check_subject(work, branches, "main", "novel", _closed(work))
+
+    @pytest.mark.parametrize(
+        ("overrides", "needle"),
+        [
+            ({"protected_names": ["novel"]}, "protected name"),
+            ({"protected_names": ["nov*"]}, "protected name"),
+            ({"exempt": ["novel"]}, "exempt"),
+            ({"exempt": ["n*l"]}, "exempt"),
+        ],
+    )
+    def test_a_protected_or_exempt_name_is_refused(
+        self, work: Path, overrides: dict[str, list[str]], needle: str
+    ) -> None:
+        branches = BranchesConfig(default="main", **overrides)
+        with pytest.raises(RejectRefusedError, match=needle):
+            remote_route.check_subject(work, branches, "main", "novel", _closed(work))
+
+    @pytest.mark.parametrize("name", ["master", "develop", "trunk"])
+    def test_the_default_protected_names_are_refused(
+        self, origin_and_clone: tuple[Path, Path], branches: BranchesConfig, name: str
+    ) -> None:
+        _origin, work = origin_and_clone
+        _git(work, "push", "-q", REMOTE, f"{REMOTE}/novel:refs/heads/{name}")
+        _git(work, "fetch", "-q", REMOTE)
+        gh = FakeGh([_pr(oid=_tip(work, name), name=name)])
+        with pytest.raises(RejectRefusedError, match="protected name"):
+            remote_route.check_subject(work, branches, "main", name, gh)
+
+    def test_the_default_branch_is_refused_by_name(
+        self, work: Path, branches: BranchesConfig
+    ) -> None:
+        gh = FakeGh([_pr(oid=_tip(work, "main"), name="main")])
+        with pytest.raises(RejectRefusedError, match="is the default branch"):
+            remote_route.check_subject(work, branches, "main", "main", gh)
+
+    @pytest.mark.parametrize("name", ["refs/tags/novel", "nov el", "nov*", "-novel"])
+    def test_a_tag_or_non_literal_name_is_refused(
+        self, work: Path, branches: BranchesConfig, name: str
+    ) -> None:
+        with pytest.raises(RejectRefusedError, match="literal"):
+            remote_route.check_subject(work, branches, "main", name, _closed(work))
+
+    def test_an_open_pr_based_on_the_branch_is_refused(
+        self, work: Path, branches: BranchesConfig
+    ) -> None:
+        gh = FakeGh([_pr(oid=_tip(work))], based=[{"number": 99}])
+        with pytest.raises(RejectRefusedError, match="#99"):
+            remote_route.check_subject(work, branches, "main", "novel", gh)
+
+    def test_unreadable_based_prs_are_refused(self, work: Path, branches: BranchesConfig) -> None:
+        gh = FakeGh([_pr(oid=_tip(work))], based=GhError("offline"))
+        with pytest.raises(RejectRefusedError, match="could not be read"):
+            remote_route.check_subject(work, branches, "main", "novel", gh)
 
     def test_a_stale_tracking_ref_is_refused(
         self, origin_and_clone: tuple[Path, Path], branches: BranchesConfig, tmp_path: Path
@@ -284,6 +435,14 @@ class TestRequest:
             remote_route.issue_remote_requests(
                 work, branches, "main", "novel", route, FakeGh([_pr("OPEN", oid=_tip(work))])
             )
+        assert not (route.store.root / "requests").exists()
+
+    def test_an_open_pr_based_on_the_branch_stores_nothing(
+        self, work: Path, branches: BranchesConfig, route: RejectRoute
+    ) -> None:
+        stacked = FakeGh([_pr(oid=_tip(work))], based=[{"number": 99}])
+        with pytest.raises(RejectRefusedError, match="#99"):
+            remote_route.issue_remote_requests(work, branches, "main", "novel", route, stacked)
         assert not (route.store.root / "requests").exists()
 
 
@@ -397,6 +556,53 @@ class TestDelete:
                 work, branches, "main", "novel", route, FakeGh(GhError("offline"))
             )
         assert "refs/heads/novel" in _heads(work)
+
+    def test_an_open_pr_based_on_the_branch_at_delete_time_is_refused(
+        self, work: Path, branches: BranchesConfig, route: RejectRoute
+    ) -> None:
+        _issue(work, branches, route, _closed(work))
+        stacked = FakeGh([_pr(oid=_tip(work))], based=[{"number": 99}])
+        with pytest.raises(RejectRefusedError, match="#99"):
+            remote_route.delete_rejected_remote(work, branches, "main", "novel", route, stacked)
+        assert "refs/heads/novel" in _heads(work)
+        assert read_ledger_entries(route.ledger_path) == []
+
+    def test_a_tip_pushed_between_the_checks_and_the_push_survives(
+        self,
+        origin_and_clone: tuple[Path, Path],
+        branches: BranchesConfig,
+        route: RejectRoute,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The lease is the only guard after the checks: a racing push must win."""
+        origin, work = origin_and_clone
+        judged = _tip(work)
+        _issue(work, branches, route, _closed(work))
+        other = tmp_path / "racer"
+        run_git(tmp_path, "clone", "-q", str(origin), str(other))
+        run_git(other, "config", "user.email", "t@example.invalid")
+        run_git(other, "config", "user.name", "Tester")
+        run_git(other, "checkout", "-q", "novel")
+        run_git(other, "commit", "-q", "--allow-empty", "-m", "raced in")
+        raced = _git(other, "rev-parse", "HEAD").strip()
+        real = remote_route.record_removal
+
+        def push_then_record(
+            repo: Path, approval: RemovalApproval, scoped: RejectRoute
+        ) -> LedgerLine:
+            run_git(other, "push", "-q", "origin", "novel")
+            return real(repo, approval, scoped)
+
+        monkeypatch.setattr(remote_route, "record_removal", push_then_record)
+        with pytest.raises(RejectRefusedError, match="ledger records the refusal"):
+            remote_route.delete_rejected_remote(
+                work, branches, "main", "novel", route, _closed(work)
+            )
+        assert f"{raced}\trefs/heads/novel" in _heads(work)
+        line, refusal = read_ledger_entries(route.ledger_path)
+        assert isinstance(line, LedgerLine) and line.tip == judged
+        assert isinstance(refusal, LedgerRefusal) and refusal.remote == REMOTE
 
     def test_a_used_verdict_is_refused_the_second_time(
         self, work: Path, branches: BranchesConfig, route: RejectRoute

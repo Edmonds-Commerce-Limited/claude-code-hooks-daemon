@@ -9,6 +9,8 @@ AND at delete time:
 
 - the branch's pull request was CLOSED without being merged, and its head commit is
   the remote tip (commits pushed after closing were never judged by anyone);
+- no OPEN pull request uses the branch as its BASE (deleting it would close them);
+- every gh call names the repository of the remote's configured URL (``gh -R``);
 - the remote tip and the remote's default are what ``refs/remotes/<remote>/`` records,
   on the fetch URL and on every push URL;
 - the branch is not merged (the existing proven route deletes that) and no worktree
@@ -21,6 +23,7 @@ approved tip, made only after the ledger line and the single-use claim are writt
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -56,6 +59,13 @@ _STATE_CLOSED = "CLOSED"
 _STATE_OPEN = "OPEN"
 _STATE_MERGED = "MERGED"
 _STATES = frozenset({_STATE_CLOSED, _STATE_OPEN, _STATE_MERGED})
+_GIT_SUFFIX = ".git"
+_HOST = r"(?P<host>[A-Za-z0-9][A-Za-z0-9.-]*)"
+_PATH = r"(?P<owner>[^/:@\s]+)/(?P<repo>[^/:@\s]+?)/?"
+_URL_FORM = re.compile(rf"(?:https|http|ssh|git)://(?:[^@/\s]+@)?{_HOST}(?::[0-9]+)?/{_PATH}")
+_SCP_FORM = re.compile(rf"(?:[A-Za-z0-9._-]+@)?{_HOST}:{_PATH}")
+_OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+_REPO = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
 
 
 def pr_runner(repo: Path) -> GhRunner:
@@ -102,14 +112,87 @@ def _parse_prs(raw: str, name: str) -> list[_Pr]:
     return prs
 
 
-def closed_pr(runner: GhRunner, name: str, tip: str) -> int:
+def repository_slug(url: str) -> str:
+    """``host/owner/repo`` of a GitHub-style remote URL, the form ``gh -R`` takes.
+
+    Accepts ``https://[user@]host[:port]/owner/repo[.git]``, the same with ``ssh://`` or
+    ``git://``, and ``[user@]host:owner/repo[.git]``. Anything else (a local path, a
+    ``file://`` URL, a missing or extra path part, an option-like or dot-only part)
+    raises RejectRefusedError: gh must never be left to choose the repository itself.
+    """
+    match = _URL_FORM.fullmatch(url) or _SCP_FORM.fullmatch(url)
+    if match is None:
+        raise RejectRefusedError(
+            "the remote URL names no GitHub-style repository (host/owner/repo), so the "
+            "pull request state cannot be read from the repository the delete goes to"
+        )
+    host, owner, repo = match.group("host"), match.group("owner"), match.group("repo")
+    repo = repo.removesuffix(_GIT_SUFFIX)
+    if not _OWNER.fullmatch(owner) or not _REPO.fullmatch(repo) or repo in {".", ".."}:
+        raise RejectRefusedError(
+            "the remote URL's owner or repository part is not a plain name, so the "
+            "repository the pull request state is read from cannot be named"
+        )
+    return f"{host}/{owner}/{repo}"
+
+
+def configured_repository(top: Path, remote: str) -> str:
+    """The ``gh -R`` repository of ``remote``'s configured URL (``remote.<r>.url``).
+
+    The configured URL is the repository's identity; an ``insteadOf`` rewrite only
+    changes how git reaches it, and :func:`live_refs_problem` separately confirms the
+    fetch and push destinations hold the judged commits. Exactly one URL is required.
+    """
+    result = run_git(top, "config", "--get-all", f"remote.{remote}.url")
+    urls = [line for line in result.stdout.splitlines() if line]
+    if result.returncode != 0 or len(urls) != 1:
+        raise RejectRefusedError(
+            f"`{remote}` does not have exactly one configured URL, so the repository the "
+            "pull request state is read from cannot be named"
+        )
+    return repository_slug(urls[0])
+
+
+def refuse_open_base_prs(runner: GhRunner, repository: str, name: str) -> None:
+    """Refuse when any OPEN pull request uses ``name`` as its BASE branch.
+
+    Deleting a base branch closes every open pull request based on it, which is work
+    the review never judged. An unreadable answer refuses too.
+    """
+    args = ["pr", "list", "-R", repository, "--base", name, "--state", "open"]
+    unreadable = f"the open pull requests based on `{name}` could not be read"
+    try:
+        raw = runner([*args, "--json", "number", "--limit", str(PR_PAGE_LIMIT)])
+        data: Any = json.loads(raw)
+    except GhError as exc:
+        raise RejectRefusedError(f"{unreadable} ({exc}); nothing is removed") from exc
+    except ValueError as exc:
+        raise RejectRefusedError(f"{unreadable}: gh did not answer JSON ({exc})") from exc
+    if not isinstance(data, list) or not all(
+        isinstance(record, Mapping)
+        and isinstance(record.get("number"), int)
+        and not isinstance(record.get("number"), bool)
+        for record in data
+    ):
+        raise RejectRefusedError(f"{unreadable}: gh did not answer a list of numbered records")
+    if data:
+        numbers = ", ".join(f"#{record['number']}" for record in data)
+        raise RejectRefusedError(
+            f"open pull request(s) {numbers} are based on `{name}`; deleting it would close "
+            "them. Retarget or close them first"
+        )
+
+
+def closed_pr(runner: GhRunner, repository: str, name: str, tip: str) -> int:
     """The number of a CLOSED-unmerged pull request of ``name`` whose head is ``tip``.
 
-    Raises RejectRefusedError unless gh answers, every same-repository PR headed by
-    ``name`` is closed unmerged, and one of them has ``tip`` as its head commit. A PR
-    from a fork (``isCrossRepository``) or with another head name is not this branch's.
+    Asked of ``repository`` (``gh -R``), never of whatever gh would pick. Raises
+    RejectRefusedError unless gh answers, every same-repository PR headed by ``name``
+    is closed unmerged, and one of them has ``tip`` as its head commit. A PR from a
+    fork (``isCrossRepository``) or with another head name is not this branch's.
     """
-    args = ["pr", "list", "--head", name, "--state", "all", "--json", _PR_FIELDS]
+    args = ["pr", "list", "-R", repository, "--head", name, "--state", "all"]
+    args += ["--json", _PR_FIELDS]
     try:
         raw = runner([*args, "--limit", str(PR_PAGE_LIMIT)])
     except GhError as exc:
@@ -154,6 +237,8 @@ class RemoteSubject:
     default_sha: str
     pr_number: int
     top: Path
+    #: ``host/owner/repo``: the repository every gh call of the route names (``-R``).
+    repository: str
 
 
 def _git_top(repo: Path) -> Path:
@@ -195,11 +280,14 @@ def check_subject(
     RejectRefusedError for a refusal, RejectError for a git fact that cannot be read.
     """
     remote = branches.remote
+    if name.startswith("-"):
+        raise RejectRefusedError(f"`{name}` is not a literal branch name (it reads as an option)")
     problem = named_ref_problem(remote, name, default, branches)
     if problem is not None:
         raise RejectRefusedError(problem)
     ref = subject_ref(name, remote)
     top = _git_top(repo)
+    repository = configured_repository(top, remote)
     remote_default = resolve_remote_default_branch(branches, top, remote=remote)
     if remote_default != default:
         known = f"`{remote_default}`" if remote_default else "unknown here"
@@ -229,6 +317,8 @@ def check_subject(
     live = live_refs_problem(top, remote, {name: tip, default: default_sha})
     if live is not None:
         raise RejectRefusedError(live)
+    pr_number = closed_pr(runner, repository, name, tip)
+    refuse_open_base_prs(runner, repository, name)
     return RemoteSubject(
         remote=remote,
         name=name,
@@ -236,8 +326,9 @@ def check_subject(
         default=default,
         default_ref=default_ref,
         default_sha=default_sha,
-        pr_number=closed_pr(runner, name, tip),
+        pr_number=pr_number,
         top=top,
+        repository=repository,
     )
 
 
@@ -331,7 +422,10 @@ __all__ = [
     "RemoteSubject",
     "check_subject",
     "closed_pr",
+    "configured_repository",
     "delete_rejected_remote",
     "issue_remote_requests",
     "pr_runner",
+    "refuse_open_base_prs",
+    "repository_slug",
 ]
