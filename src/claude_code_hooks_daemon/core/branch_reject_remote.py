@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.core.remote_branch_proof import (
 from claude_code_hooks_daemon.utils.git_repo import parse_worktree_porcelain, run_git
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.github_issue_validity import GhError, GhRunner, make_gh_runner
+from claude_code_hooks_daemon.utils.github_ssh_alias import resolve_ssh_host_alias
 
 #: ``gh pr list`` page size. A FULL page is unreadable: a PR past it could be open.
 PR_PAGE_LIMIT = 20
@@ -60,7 +61,10 @@ _STATE_OPEN = "OPEN"
 _STATE_MERGED = "MERGED"
 _STATES = frozenset({_STATE_CLOSED, _STATE_OPEN, _STATE_MERGED})
 _GIT_SUFFIX = ".git"
-_HOST = r"(?P<host>[A-Za-z0-9][A-Za-z0-9.-]*)"
+#: ``_`` is admitted for ssh config aliases (``github.com-my_key``); a real host that
+#: carries one is passed to gh unchanged and fails closed there.
+_HOST = r"(?P<host>[A-Za-z0-9][A-Za-z0-9._-]*)"
+_SSH_SCHEME = "ssh"
 _PATH = r"(?P<owner>[^/:@\s]+)/(?P<repo>[^/:@\s]+?)/?"
 _URL_FORM = re.compile(
     rf"(?P<scheme>https|http|ssh|git)://(?:[^@/\s]+@)?{_HOST}(?::(?P<port>[0-9]+))?/{_PATH}"
@@ -122,7 +126,10 @@ def repository_slug(url: str) -> str:
 
     Accepts ``https://[user@]host[:port]/owner/repo[.git]`` (the port only when it is the
     scheme's default, as ``gh -R`` carries none), the same with ``ssh://`` or
-    ``git://``, and ``[user@]host:owner/repo[.git]``. Anything else (a local path, a
+    ``git://``, and ``[user@]host:owner/repo[.git]``. In the two ssh-style forms (scp
+    and ``ssh://``) a ``github.com-<suffix>`` ssh config alias names ``github.com``
+    (:mod:`github_ssh_alias`); every other host is kept, and gh fails closed on an
+    unknown one. Anything else (a local path, a
     ``file://`` URL, a missing or extra path part, an option-like or dot-only part)
     raises RejectRefusedError: gh must never be left to choose the repository itself.
     """
@@ -140,6 +147,8 @@ def repository_slug(url: str) -> str:
             "repository the pull request state is read from cannot be named"
         )
     host, owner, repo = match.group("host"), match.group("owner"), match.group("repo")
+    if groups.get("scheme", _SSH_SCHEME) == _SSH_SCHEME:
+        host = resolve_ssh_host_alias(host)
     repo = repo.removesuffix(_GIT_SUFFIX)
     if not _OWNER.fullmatch(owner) or not _REPO.fullmatch(repo) or repo in {".", ".."}:
         raise RejectRefusedError(

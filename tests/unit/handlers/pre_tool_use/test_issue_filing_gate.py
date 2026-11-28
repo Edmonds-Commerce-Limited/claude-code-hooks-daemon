@@ -107,6 +107,8 @@ class TestWhatEngagesTheGate:
             f"git@github.com:{_UPSTREAM}.git",
             f"ssh://git@github.com/{_UPSTREAM}.git",
             f"github.com/{_UPSTREAM}",
+            f"git@github.com-lts:{_UPSTREAM}.git",
+            f"ssh://git@github.com-work/{_UPSTREAM}.git",
         ],
     )
     def test_every_url_spelling_of_the_same_repo_engages(self, spelling: str) -> None:
@@ -166,6 +168,25 @@ class TestTheCwdIsAThirdWayToNameARepository:
         clone = _git_checkout_with_origin(tmp_path, f"https://github.com/{_UPSTREAM}.git")
 
         assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"git@github.com-lts:{_UPSTREAM}.git",
+            f"ssh://git@github.com-work/{_UPSTREAM}.git",
+        ],
+    )
+    def test_an_ssh_host_alias_remote_is_gated(self, tmp_path: Path, url: str) -> None:
+        """N772: `gh` resolves `github.com-<suffix>` through ssh config to GitHub."""
+        clone = _git_checkout_with_origin(tmp_path, url)
+
+        assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    def test_an_alias_like_https_remote_is_not_github(self, tmp_path: Path) -> None:
+        """Only ssh-style URLs read ssh config, so an https host is taken literally."""
+        clone = _git_checkout_with_origin(tmp_path, f"https://github.com-lts/{_UPSTREAM}.git")
+
+        assert not _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
 
     def test_a_clone_whose_only_remote_is_named_upstream_is_gated(self, tmp_path: Path) -> None:
         """Plan 00408 Task 3.8: `gh` resolves from the remote SET, not `origin`.

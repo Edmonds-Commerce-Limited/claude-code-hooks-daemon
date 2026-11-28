@@ -77,6 +77,7 @@ from claude_code_hooks_daemon.issue_report.upstream import (
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.github_ssh_alias import resolve_ssh_host_alias
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     iter_shell_words,
     resolve_shell_word,
@@ -118,6 +119,9 @@ _BODY_FILE_FLAGS: Final[tuple[str, ...]] = ("--body-file", "-F")
 #: accepts for ``--repo``: an https URL, an ssh URL, and the scp-like form.
 _REPO_URL_PREFIX: Final[re.Pattern[str]] = re.compile(r"\A(?:https?://|ssh://git@|git@)")
 _REPO_HOST_PREFIX: Final[re.Pattern[str]] = re.compile(r"\Agithub\.com[:/]")
+#: The prefixes of the ssh-style spellings, whose host may be an ssh config alias.
+_SSH_URL_PREFIXES: Final[frozenset[str]] = frozenset({"ssh://git@", "git@"})
+_HOST_SPLIT: Final[re.Pattern[str]] = re.compile(r"(?P<host>[^:/]*)(?P<rest>[:/].*)", re.DOTALL)
 
 #: ``gh`` reads the body from stdin for this value, and nothing readable exists
 #: to check before the fact.
@@ -289,10 +293,18 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         ``gh --repo`` takes the slug, an https URL, an ssh URL and the scp-like
         ``git@github.com:owner/name.git``. They all address the same repository,
         so a gate that recognised only one of them would be trivially walked
-        past by pasting the URL from a browser.
+        past by pasting the URL from a browser. An ssh-style spelling may name
+        GitHub through a ``github.com-<suffix>`` ssh config alias, which ssh
+        resolves to GitHub, so it is read as ``github.com``.
         """
         text = value.strip().strip("\"'")
-        text = _REPO_URL_PREFIX.sub("", text)
+        prefix = _REPO_URL_PREFIX.match(text)
+        if prefix is not None:
+            text = text[prefix.end() :]
+            split = _HOST_SPLIT.fullmatch(text)
+            if prefix.group(0) in _SSH_URL_PREFIXES and split is not None:
+                # N772: only ssh-style URLs go through ssh config host aliases.
+                text = f"{resolve_ssh_host_alias(split['host'])}{split['rest']}"
         text = _REPO_HOST_PREFIX.sub("", text)
         text = text.removesuffix(".git")
         return text.strip("/").lower()

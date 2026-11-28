@@ -9059,3 +9059,13 @@ The review's harmless main gaps are recorded as N771.
 **Severity**: HIGH as an incident, though nothing was lost: the hold window and `scratch-sweep restore` are what made it recoverable.
 
 **Status**: ✅ Fixed in PR 296: `housekeeping --run` refuses unless a project root was named explicitly, and never acts on a project found from the working directory; the step also no longer uses pressure mode, so it never removes an entry inside its TTL.
+
+### N772 — the N763 remote route turns an ssh host alias remote into a host gh cannot reach
+
+**Source**: this seat, 2026-11-28, first real run of the merged N763 route (PR 299).
+
+**Evidence**: `bin/hooks-daemon branch-reject request niggle-n755-time-estimate-behaviour-parameter --remote-only` -> REFUSED: pull request state could not be read (gh exited 1: error connecting to github.com-lts). This repository's origin is scp-style with an ssh config HOST ALIAS (`git@github.com-<suffix>:Owner/repo.git`, the common multi-key idiom), and `repository_slug` in `core/branch_reject_remote.py` kept the alias as the host, so `gh -R` named `github.com-lts/Owner/repo`. The route failed closed, but never works for anyone using such an alias. The same defect sat in `issue_filing_gate`: a cwd remote spelled with the alias normalised to `github.com-lts:owner/name`, which never equals the upstream slug, so a bare `gh issue create` from such a clone of this repository was not gated (the fail-open direction).
+
+**Severity**: MEDIUM: the route is unusable on a common setup, and the gate failed open on the same setup.
+
+**Status**: ✅ Fixed on branch `fix-n772-remote-slug-ssh-host-alias`, test first. One helper, `utils/github_ssh_alias.resolve_ssh_host_alias`, maps `github.com-<suffix>` (suffix of letters, digits, `.`, `-`, `_`, non-empty) to `github.com`; any other host is returned unchanged. `repository_slug` applies it to the scp and `ssh://` forms only (an `https://github.com-x/...` host is not an ssh alias and passes through, so gh fails closed on it); `_HOST` now admits `_` so an alias such as `github.com-my_key` parses. Port refusal, owner/repo validation and the never-echoed credentials are unchanged and pinned by new alias tests. `issue_filing_gate._repo_slug` applies the same helper to its `git@` and `ssh://git@` spellings, for `--repo`, `GH_REPO` and the cwd remotes alike. `core/project_context.py` derives only the repository NAME from the URL, never a host for gh, so it needs no change. Tests: `tests/unit/utils/test_github_ssh_alias.py`, alias cases in `tests/unit/core/test_branch_reject_remote.py` (including the real `git@github.com-lts:Owner/repo.git` regression) and `tests/unit/handlers/pre_tool_use/test_issue_filing_gate.py`; release note 127.

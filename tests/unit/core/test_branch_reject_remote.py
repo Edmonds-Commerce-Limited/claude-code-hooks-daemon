@@ -272,6 +272,60 @@ class TestRepositorySlug:
         assert remote_route.repository_slug(url) == slug
 
     @pytest.mark.parametrize(
+        ("url", "slug"),
+        [
+            ("git@github.com-work:acme/widgets", "github.com/acme/widgets"),
+            ("git@github.com-work:acme/widgets.git", "github.com/acme/widgets"),
+            ("github.com-work:acme/widgets.git", "github.com/acme/widgets"),
+            ("ssh://git@github.com-work/acme/widgets.git", "github.com/acme/widgets"),
+            ("ssh://git@github.com-work:22/acme/widgets", "github.com/acme/widgets"),
+            ("git@github.com-my_key.2:acme/widgets.git", "github.com/acme/widgets"),
+        ],
+    )
+    def test_an_ssh_host_alias_of_github_names_github(self, url: str, slug: str) -> None:
+        """N772: ``github.com-<suffix>`` is an ssh config alias for GitHub, not a host."""
+        assert remote_route.repository_slug(url) == slug
+
+    def test_the_real_world_alias_url_names_github(self) -> None:
+        """Regression: this repository's own origin shape made ``gh -R`` dial ``github.com-lts``."""
+        slug = remote_route.repository_slug("git@github.com-lts:Owner/repo.git")
+        assert slug == "github.com/Owner/repo"
+        assert "github.com-lts" not in slug
+
+    @pytest.mark.parametrize(
+        ("url", "slug"),
+        [
+            ("https://github.com-work/acme/widgets.git", "github.com-work/acme/widgets"),
+            ("http://github.com-work/acme/widgets", "github.com-work/acme/widgets"),
+            ("git@ghe.example.com:acme/widgets.git", "ghe.example.com/acme/widgets"),
+            ("ssh://git@ghe.example.com-work/acme/widgets", "ghe.example.com-work/acme/widgets"),
+            ("git@github.com-:acme/widgets.git", "github.com-/acme/widgets"),
+            ("git@gitlab.com-work:acme/widgets.git", "gitlab.com-work/acme/widgets"),
+        ],
+    )
+    def test_any_other_host_passes_through_unchanged(self, url: str, slug: str) -> None:
+        """Only ssh-style forms read ssh config; gh then fails closed on an unknown host."""
+        assert remote_route.repository_slug(url) == slug
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "git@github.com-a+b:acme/widgets.git",
+            "ssh://git@github.com-a+b/acme/widgets.git",
+            "git@github.com-work:-acme/widgets.git",
+            "ssh://git@github.com-work:2222/acme/widgets.git",
+        ],
+    )
+    def test_an_alias_never_weakens_the_other_checks(self, url: str) -> None:
+        with pytest.raises(RejectRefusedError, match="repository"):
+            remote_route.repository_slug(url)
+
+    def test_a_refused_alias_url_never_echoes_its_credentials(self) -> None:
+        with pytest.raises(RejectRefusedError) as caught:
+            remote_route.repository_slug("ssh://s3cr3t@github.com-work:2222/acme/widgets")
+        assert "s3cr3t" not in str(caught.value)
+
+    @pytest.mark.parametrize(
         "url",
         [
             "/tmp/origin.git",
