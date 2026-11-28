@@ -304,7 +304,7 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 
 **Blocked commands:**
 
-- `git reset --hard` -- destroys all uncommitted changes
+- `git reset --hard` / `git reset --merge` -- destroys uncommitted changes (`git reset --keep` is allowed, owner ruling A6)
 - `git clean -f` -- permanently deletes untracked files
 - `git checkout .` -- discards all working tree changes
 - `git checkout -- <file>` -- discards local changes to specific files

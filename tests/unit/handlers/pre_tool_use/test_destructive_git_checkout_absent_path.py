@@ -558,9 +558,12 @@ class TestShapesThisReadingCannotSettleStayDenied:
 
 
 class TestTheProofFailsClosed:
-    def test_a_checkout_without_the_double_dash_is_not_proven(self, repo: Path) -> None:
-        """`git checkout X p` names no `--`, so a path cannot be told from a commit."""
+    def test_a_checkout_without_the_double_dash_gets_the_same_proof(self, repo: Path) -> None:
+        """N764: git reads `X p` as `X -- p` when X is a commit and no path, so it is judged."""
         (run,) = git_invocations(f"git checkout {_OLD} gone.txt")
+        assert _checkout_restore_loss(run, repo) is None
+        (repo / "a.txt").write_text("my unsaved edit\n")
+        (run,) = git_invocations(f"git checkout {_OLD} a.txt")
         assert _checkout_restore_loss(run, repo) is not None
 
     def test_a_git_failure_denies(

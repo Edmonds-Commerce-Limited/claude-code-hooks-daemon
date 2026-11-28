@@ -2,7 +2,8 @@
 
 `git push --delete <name>` and `git push <remote> :<name>` remove a branch or tag
 from the shared repository, where no local reflog can bring it back. The local
-siblings (`git tag -d`, `git reset --keep`) stay allowed.
+siblings (`git tag -d`, `git reset --keep`, by owner ruling A6) stay allowed.
+`git reset --merge` is denied under R-GIT-RESET-HARD (ledger N771 item 7).
 """
 
 from typing import Any
@@ -134,7 +135,7 @@ def test_the_force_push_rule_still_wins_when_both_apply(handler: DestructiveGitH
         "git tag -d v1",
         "git branch -d merged-feature",
         "git reset --keep HEAD~1",
-        "git reset --merge",
+        "git reset --soft HEAD~1",
         "git push origin main; echo --delete",
         "git push origin main && grep -d skip notes.txt",
         "echo 'git push origin --delete feature'",

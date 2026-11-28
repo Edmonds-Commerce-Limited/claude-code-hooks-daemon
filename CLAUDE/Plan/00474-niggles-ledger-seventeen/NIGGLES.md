@@ -8923,7 +8923,24 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: MEDIUM: a discard route the guard never saw; predates PR 293.
 
-**Status**: ⬜ Open. Fix, test first: when the second operand is not a known ref, treat the undashed form as the path form and apply the same proof as the dashed form (PR 293); keep a real branch switch allowed.
+**Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. The guard reads the undashed form as git does: `git checkout <rev> <paths>` gets the dashed form's proof when `<rev>` is one literal revision that resolves to a tree and names no path in the working tree or the index (also a path: git refuses it as ambiguous; unresolved: git restores every operand from the index; both denied). One operand is a switch, and allowed, when it is a commit or names no path; when it names a path it is a restore from the index and is denied, as `git checkout -- <path>` is. An option a switch does not use, a repository that cannot be placed, or any git failure denies. Quoted and inlined spellings (`git check""out`, `env -S "..."`, `bash -c`) are read too. Also fixed alongside: `git checkout-index -f` matched no rule and is now denied under R-GIT-CHECKOUT-FORCE. Pinned in `tests/unit/handlers/pre_tool_use/test_destructive_git_checkout_undashed.py`; release note 125.
+
+The independent review of the branch (REQUEST CHANGES) found two blockers and two regressions in this fix, all now fixed test first:
+
+- **Backticks**: a checkout inside backticks was never judged (`` : `git checkout f.txt` ``). Each backtick is now read as the command boundary it is, so the run inside is judged as one inside `$( )` is.
+- **Directory-moving wrappers**: `env -C sub` and `env --chdir`/`sudo -D` ran git in a directory the reading never saw. `env` and `sudo` now count as plain wrappers only with no option.
+- **Harmless switches denied**: switches that main allowed are allowed again. That covers output-only settings (`-c advice.*`/`color.*`, `--no-pager`, `-P`), an assignment that is not a `GIT_*` variable outside a short safe list (and not `HOME`), stdin into a plain switch, and `--conflict=<style>`. Any setting that can move the repository, index or worktree, or change pathspec matching, still denies.
+- **Performance**: the reading is made once per hook call and shared by `matches()` and `handle()`. Each distinct run is read once. Past four distinct one-operand checkouts the command is judged whole, and the scan target is cached. The quadratic segment loop is gone.
+
+A second independent review (REQUEST CHANGES) found one blocker, in N771 (5): a one-operand switch was checked against the commit `rev-parse` names rather than the one checkout switches to. Fixed test first, see N771.
+
+A third independent review (REQUEST CHANGES) found three blockers. Two were switch operand shapes still unjudged (a name outside the plain spelling; the shortcut through a non-standard refspec). The third was a new regression: an undashed `git checkout HEAD {f,g}.txt` or `HEAD ~+/f.txt` was allowed over a local edit. All three are fixed test first by shrinking the allow-set to plain spellings and denying shell expansion; see N771 for exactly what is allowed and what is deliberately denied.
+
+A fourth independent review (REQUEST CHANGES) confirmed the round-3 fixes and found one blocker, which main shares. The switch was read against the repository before the command ran, so an earlier statement in the same command could create the target or move HEAD or config: `git fetch && git checkout newb`, `git branch topic feat && git checkout topic`, `git checkout B && git checkout HEAD~1`, `git config submodule.recurse true && ...`, `export GIT_CONFIG_*`. Fixed test first by denying a switch after (or beside) any statement not known to leave refs, HEAD, config and the environment alone; see the earlier-statement condition in N771.
+
+A fifth independent review (REQUEST CHANGES) confirmed every earlier chain and export case denies. It found the same blocker by another route, which main shares: a statement inside a quoted command substitution, a process substitution or a here-string (`echo "$(git branch topic feat)"; git checkout topic`, `cat <(git branch topic feat); ...`, `cat <<< "$(...)"`) stays one word of the step around it, or is lost by the parse, so it was never classified. Fixed test first by denying a switch in any command that holds one. Two minors are fixed in the same way. A backgrounded or piped compound now makes any other state-changing statement count. `--output`/`-O` on a read-only git command now counts as a change. The config-file alias item stays open.
+
+The review's harmless main gaps are recorded as N771.
 
 ### N765 — an `xargs` run that adds paths after a trailing `--` reaches the checkout restore unjudged
 
@@ -8933,7 +8950,85 @@ Follow-up from the seat: the fixtures were `src-go/qa/rules/testdata/tempexclusi
 
 **Severity**: LOW to MEDIUM: needs a pipe into xargs; predates PR 293.
 
-**Status**: ⬜ Open. Fix, test first: deny a checkout or restore with a trailing `--` and no path when its input comes from xargs or any pipe.
+**Status**: ✅ Fixed on branch `guard-n761-n764-n765-gaps`, awaiting the independent security review. A `git checkout` or `git restore` run by `xargs`, `parallel`, `find`/`fd`, or any prefix that is not a plain wrapper (`sudo`, `env`, `command`, `nice`, `nohup`, `time`, `timeout`, `stdbuf`, `exec`, `builtin`), is denied whatever its form: no git call can see the paths it will be given, so no proof is attempted. That includes a plain switch such as `echo main | xargs git checkout` (fail closed). A pipe or input redirect into git checkout itself is not a feed: git reads stdin only for `--pathspec-from-file=-` and `-p`, and both are options a switch never carries, so they are judged anyway. After review, a fed `git restore --staged` that touches only the index is allowed, as the unfed one is. Pinned in the same test file as N764.
+
+### N771 — destructive-git gaps on main that the N764/N765 work and its review found
+
+**Source**: the N764/N765 developer agent and the independent review of branch `guard-n761-n764-n765-gaps`, 2026-11-27. (First filed on that branch as N769; renumbered, as N769 and N770 are taken on `guard-n744-n760-teamchat-message-sink`.)
+
+**Evidence**: each of these predates the branch and loses local work, or over-denies, on main.
+
+- (1) Aliases. A git alias names a subcommand no rule pattern knows: `git -c alias.co=checkout co f.txt`, `git -c 'alias.co=!git checkout' co f.txt`, `GIT_CONFIG_KEY_n=alias.*`, or an alias in the repository or global config (`git co f.txt`). So every destructive-git rule is reached under another name.
+- (2) ANSI-C quoting. `git $'checkout' -- f.txt` passed every rule, because quote removal left `$checkout`.
+- (3) Abbreviations. git takes any unique prefix of a long option, and each of these is the destructive option under a shorter name: `git reset --ha`, `git clean --forc`, `git checkout --fo`, `git switch --di`, `git restore --staged --wor`, `git checkout-index --f`. Not yet checked for the same gap: `git branch --del --forc`, and the `git push` spellings.
+- (4) `git read-tree -u --reset <tree>` and `git read-tree -m -u` rewrite the working tree, and match no rule.
+- (5) A branch switch overwrites an ignored file that the target branch tracks. Examples: `git checkout feat` with a local ignored `ign.txt` that `feat` tracks; `nohup git checkout -qm HEAD~1`.
+- (6) Over-deny only: the `git checkout -f` pattern reads an `f` anywhere in a short cluster, so `git checkout -bfeature side` (attached branch name) is denied as a force.
+- (7) `git reset --merge` and `git reset --keep` (and every prefix, `--mer`, `--kee`) rewrite the working tree and match no rule: the second review's fuzz lost an ignored file to `--mer HEAD~1` and a staged edit to `--kee HEAD~1`.
+- (8) Shell expansion read as a literal name (third review): `git checkout HEAD -- {f,g}.txt` and `HEAD -- ~+/f.txt` were allowed on main over a local edit, because the brace or tilde word names no file as written.
+- (9) Submodule recursion (third review): `git checkout --recurse-submodules smA`, or a plain switch with `submodule.recurse=true`, writes over an ignored file inside the submodule.
+
+**Severity**:
+
+- MEDIUM: (1), (3), (4), (5), (7), (8) and (9), which are discard routes the guard never sees.
+- LOW: (6).
+
+**Status**: 🔄 In progress on branch `guard-n761-n764-n765-gaps`.
+
+- Fixed, test first:
+  - (2): `$'...'` is decoded as bash decodes it before every pattern runs.
+
+  - (3): for the six options listed. Every prefix is matched, and a prefix git finds ambiguous is refused by git anyway.
+
+  - The command-line half of (1): `-c alias.*`, `--config-env=alias.*` and `GIT_CONFIG_PARAMETERS`/`GIT_CONFIG_KEY_n=alias.*` deny under R-GIT-DESTRUCTIVE-UNREADABLE.
+
+  - (5), for a one-operand `git checkout` switch, `-` included. The paths the switch touches come from one `git diff --raw HEAD <target>` (added, modified, retyped, deleted; the modes show a moved submodule). The switch is denied when any of these holds:
+
+    - something not tracked (an untracked or ignored file, or a symlink in place of a tracked directory) sits where it writes; one batched `git ls-files --others` answers this;
+    - a touched path has a staged or unstaged change against `HEAD`;
+    - a touched path carries an index flag that hides a change.
+
+    The fuzz found two more ways a switch loses work, both closed by the same check: a tracked parent replaced by an untracked symlink, and a staged edit on a path the target removes.
+
+    The second review found that the target was the one `rev-parse` picks, which is not always the one checkout switches to (a branch over a same-named tag, the merge base for `A...B`, the remote-branch shortcut). The third review found three more operand shapes the check missed (names outside the plain spelling, refspecs that map anywhere, shell expansion). So the allow-set was SHRUNK rather than the check extended. A one-operand switch is allowed only when all of these hold:
+
+    - the operand is a plain ASCII revision spelling (`[A-Za-z0-9_@][A-Za-z0-9._/@~^{}+-]*`) with no shell expansion (`{a,b}`, `{1..3}`, a leading `~`);
+    - no two of git's readings of it exist at once (`refs/<n>`, `refs/tags/<n>`, `refs/heads/<n>`, `refs/remotes/<n>`);
+    - it resolves to a local branch (checked as the branch) or to a commit not reached through a ref outside `refs/heads`, `refs/tags` and `refs/remotes`. `A...B` resolves to its single merge base (none or several denies). Failing those, it names no path and goes through the remote-branch shortcut: every fetch refspec of every remote is `[+]refs/heads/*:refs/remotes/<remote>/*`, and exactly one ref outside `refs/heads`/`refs/tags` ends in `/<n>`, namely `refs/remotes/<remote>/<n>` of a configured remote. If no ref ends in `/<n>` in the repository as it is when the command starts, the command is allowed: git refuses the checkout, given the earlier-statement condition below (no earlier statement can create that ref);
+    - the switch check above passes against that target;
+    - the earlier-statement condition (fourth and fifth reviews): every statement that runs before it in the same command is known not to change refs, HEAD, config or the environment git reads. When the command runs anything at the same time (`&` or a pipe anywhere), so must EVERY other statement of the command be: the flattened parse does not say which statements share a backgrounded or piped compound. And the command text holds no command substitution (`$(...)` or a backtick, quoted or not), no process substitution (`<(...)`, `>(...)`) and no here-string (`<<<`). A statement inside one stays a single word of the step around it, or is lost by the parse, so it cannot be classified. Known: a read-only git command (`status`, `log`, `show`, `diff`, `rev-parse`, `ls-files`, `ls-tree`, `describe`, `cat-file`, `for-each-ref`, `show-ref`, `blame`, `grep`, `shortlog`, `merge-base`, `name-rev`, `rev-list`, `whatchanged`, `help`, `version`) carrying no `--output` (log, show, diff) and no `-O`/`--open-files-in-pager` (grep), in any abbreviation; `git branch` with listing options only; `cd`, `pushd`, `popd`, `echo`, `printf`, `true`, `:`, `pwd`, `ls`, `cat`, `test`, `[`, `grep`, `head`, `tail`, `wc` and `set` (added after the CI corpus row `a8-checkout-then-log-pathspec`, `set -euo pipefail; git checkout main && git log -- src/x.py`, was denied by the first version of this condition), with no file-writing redirect except to `/dev/null`; and an assignment or `export`/`declare` that names no `GIT_*`, `HOME` or `XDG_CONFIG_HOME` and carries no option. The guard reads the repository as it is BEFORE the command runs, so any other statement makes that reading stale;
+    - when the switch moves a gitlink, `submodule.recurse` is unset or false (git then leaves the submodule's working tree alone). `--recurse-submodules` is no longer a switch option, so it denies.
+
+    **Deliberately denied now (over-denies):**
+
+    - a branch or tag whose name falls outside the plain spelling (`fé`, `a,b`, `a=b`, `a%b`, `a#b`), even with nothing in the way;
+    - a name that is both a branch and a tag (`git checkout amb`), even with nothing in the way;
+    - a commit reached through `refs/<n>` outside the three namespaces (`refs/rem5`);
+    - any remote-branch shortcut while a remote has a non-standard fetch refspec, or for a ref under an unconfigured remote (`refs/remotes/stale/<n>`);
+    - any shell-expanded word in a checkout or restore operand, quoted or not: the guard sees words after quote removal, so a quoted `'{a,b}'` file name is refused too;
+    - a switch moving a submodule while `submodule.recurse` is on or unreadable;
+    - (fourth review) a switch after any statement not in the known list of the earlier-statement condition. That includes the common `git fetch && git checkout x`, `git pull && git checkout x`, `git checkout B && git checkout C` (and even `git checkout x && git checkout x`), `make && git checkout x`, a script, and `git log > out.log && git checkout x`. Run the switch as its own command, after the fetch;
+    - (fifth review) a switch in any command whose text holds `$(`, a backtick, `<(`, `>(` or `<<<`, even when the substitution is harmless or single-quoted text (`echo "$(date)"; git checkout x`, `git commit -m '$(x)' ...`). Also a switch in a command that backgrounds or pipes anything, when any other statement in it may change state (`git checkout x & git fetch`, `( ...; git checkout x ) & git branch x f`).
+
+    The brace and tilde rule also closes the dashed forms main allowed (`git checkout HEAD -- {f,g}.txt`, `HEAD -- ~+/f.txt`).
+
+  - Performance (third review, minor 2): the checkout path proof lists the index and hashes files in chunks, not once per path. A chunk holds up to 4,096 paths and 64 KiB of path text (it was 256 paths until the fourth review). The 2,000-path undashed restore went from about 1,860 git calls (about 5 s, where the proof budget ran out and the command was denied) to a handful of calls (well under 1 s; main 4 s). The fourth review's minor 1 was a switch across a 2,000-path difference, at 345 ms on 256-path chunks against 4.9 ms on main. Git matches every pathspec against every index entry, so past 64 touched paths the switch check now lists unstaged changes, staged changes and index flags once for the whole tree and matches them itself. The same switch now takes 57 ms in the reviewer's `perf2.py`. The switch check still runs under the five-second proof budget, so a difference large enough to exceed it is DENIED (a deliberate over-deny past the budget), never allowed unread. A plain switch costs three git calls (about 9 ms, main 5 ms). An unresolved name costs up to five: refs, commit, index, refspecs, and the diff when a shortcut resolves.
+
+  - (7), the `--merge` half: `git reset --merge` and every prefix (`--mer`) now deny under R-GIT-RESET-HARD with `--hard`, with no proof attempted (fail closed). A reset that touches nothing is rare enough that the over-deny is accepted. `--keep` is NOT denied: owner ruling A6 (Plan 00483, `OWNER-RULINGS-261005.md`) allows it, and only the owner can change that (see the open item below).
+
+  - Over-deny: `-c core.quotepath=<value>` only changes how paths are printed, and a switch carrying it is allowed again. `-c core.autocrlf=...` still denies (it changes what a checkout writes), as does `env -i` (the reading cannot see what the cleared environment does).
+- Open, fix test first:
+  - Config-file aliases: resolve an unknown subcommand through `git config --get alias.<name>`, or deny an unknown subcommand that names an alias.
+  - (3) for `branch` and `push`.
+  - A `read-tree -u` rule.
+  - (5) for `git switch`, which is not read at all: `git switch feat` and `git switch remote-only` lose an ignored file the target tracks, on main and on this branch (confirmed by the second review). `git checkout -b <new> <start>` is not open: it is read as a switch to `<start>` and gets the switch check (`git checkout -b nb feat` in a clean repository is allowed).
+  - Raw bytes a filter hides: a CRLF file that `core.autocrlf` normalises reads as clean to git, and a switch rewrites it. The restore proof hashes raw bytes; the switch check does not. Confirmed by the second review on main and this branch.
+  - (6): read `-b`/`-B` as taking the rest of the cluster.
+  - (7), the `--keep` half: OWNER DECISION NEEDED, not an agent fix. Ruling A6 allows `git reset --keep` on the understanding that git refuses a reset over local changes. That holds for unstaged edits on paths the reset changes, but the review's fuzz shows `--keep HEAD~1` dropping a staged edit (a version that exists only in the index; its blob survives only as a dangling object). Options for the owner: keep the ruling (accept that case), or let the guard deny `--keep` when the index differs from `HEAD` on a path the reset rewrites.
+  - Performance, backtick chains: `` : `git checkout main` `` repeated N times grows by about 3x per doubling of N (the second review measured 251 / 724 / 2321 / 7590 ms at N = 250 / 500 / 1000 / 2000, main 765 / 1669 / 3891 / 9982 ms; the third review 7602 ms at 2000). Faster than main at every size measured, but it scales worse. Fix: parse the backtick variant once rather than once per segment, or deny past a backtick count.
+  - `git restore --source=<commit> --staged <path>` (`-s HEAD~1 -S ign.txt`, `-S .`) replaces index entries and drops a version that exists only in the index (a staged edit, then edited again). It is allowed on main and on this branch, because R-GIT-RESTORE deliberately allows `--staged`; found by fuzz seed 6262 in the third round. A policy question (does `--staged` stay allowed when it discards an index-only version?) rather than a gap in this fix.
+  - (9), the rest: recursion through `git -c submodule.recurse=true` is already denied (an unknown `-c`), and a nested submodule moved by a recursing parent is covered by the same deny. Not checked: a switch that ADDS a submodule over an existing local directory.
+- Out of scope, recorded so nobody assumes it is covered: a quoted command word (`g''it checkout -- f.txt`, `xargs g''it checkout HEAD --`) escapes every destructive-git rule, on main as well. Quote removal on the command word is not done, and an agent is not expected to write it; the threat model is an agent's ordinary mistakes, not evasion.
 
 ### N766 — a subcommand's own `--project-root` can stand in front of the wrapper's global root
 

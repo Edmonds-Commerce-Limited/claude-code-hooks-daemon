@@ -1,10 +1,14 @@
 """DestructiveGitHandler - blocks destructive git commands that permanently destroy data."""
 
+import functools
 import logging
 import re
+import shlex
 import stat
+import sys
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -55,7 +59,9 @@ from claude_code_hooks_daemon.utils.command_position import (
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     GitInvocation,
+    SimpleCommand,
     git_invocations,
+    is_assignment_word,
     simple_commands,
 )
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
@@ -71,6 +77,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_exists, path_is_dir, path_is_file
+from claude_code_hooks_daemon.utils.shell_segmentation import command_word
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +105,88 @@ _GENERIC_DESTRUCTIVE_REASON = "This git command destroys uncommitted changes per
 # tests/unit/handlers/pre_tool_use/test_blocking_handler_evasion.py.
 _SUBCOMMAND_SEPARATOR_CHARS = SUBCOMMAND_SEPARATOR_CHARS
 _GIT_INVOCATION = GIT_INVOCATION
+
+# ANSI-C quoting (`$'checkout'`, `$'\x63heckout'`): bash decodes the escapes and drops the
+# quotes, so `git $'checkout' -- f` is `git checkout -- f`. Quote removal alone left
+# `$checkout`, and every rule read past it.
+_ANSI_C_QUOTED: Final[re.Pattern[str]] = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.DOTALL)
+_ANSI_C_ESCAPE: Final[re.Pattern[str]] = re.compile(
+    r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|c.|.)", re.DOTALL
+)
+_ANSI_C_SIMPLE: Final[dict[str, str]] = {
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "E": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+}
+_HEX_ESCAPES: Final[str] = "xuU"
+_OCTAL_DIGITS: Final[str] = "01234567"
+_CONTROL_ESCAPE: Final[str] = "c"
+_HEX_BASE: Final[int] = 16
+_OCTAL_BASE: Final[int] = 8
+_CONTROL_MASK: Final[int] = 0x1F
+_SINGLE_QUOTE: Final[str] = "'"
+# Distinct commands whose scan segments are kept: matches(), handle() and every pattern
+# read the same command within one hook call.
+_SCAN_CACHE_SIZE: Final[int] = 16
+
+
+def _ansi_c_escape(found: re.Match[str]) -> str:
+    """The character one ANSI-C escape stands for (an unknown escape stays as written)."""
+    escape = found.group(1)
+    if escape[0] in _HEX_ESCAPES and len(escape) > 1:
+        code = int(escape[1:], _HEX_BASE)
+    elif escape[0] in _OCTAL_DIGITS:
+        code = int(escape, _OCTAL_BASE)
+    elif escape[0] == _CONTROL_ESCAPE and len(escape) > 1:
+        code = ord(escape[1]) & _CONTROL_MASK
+    else:
+        return _ANSI_C_SIMPLE.get(escape, found.group(0))
+    return chr(code) if code <= sys.maxunicode else found.group(0)
+
+
+def _decode_ansi_c(text: str) -> str:
+    """``text`` with each ``$'...'`` span decoded and single-quoted, as bash reads it."""
+    return _ANSI_C_QUOTED.sub(
+        lambda quoted: _SINGLE_QUOTE
+        + _ANSI_C_ESCAPE.sub(_ansi_c_escape, quoted.group(1)).replace(_SINGLE_QUOTE, "")
+        + _SINGLE_QUOTE,
+        text,
+    )
+
+
+@functools.lru_cache(maxsize=_SCAN_CACHE_SIZE)
+def _scan_segments(command: str) -> tuple[str, ...]:
+    """The scan target of ``command`` (see ``DestructiveGitHandler._scan_target``), cached."""
+    return tuple(
+        remove_word_quoting(_decode_ansi_c(segment))
+        for segment in command_position_argument_segments(
+            blank_printed_substitutions(command), awk_dollar_is_data=True
+        )
+    )
+
+
+def _long_option(name: str) -> str:
+    """A regex for the whole token ``--<name>`` or any abbreviation git accepts of it.
+
+    git's option parser takes every unique prefix of a long option (`--forc`, `--ha`), so
+    a rule naming only the full spelling is passed by a shorter one. Every prefix down to
+    one letter is matched: a prefix git finds ambiguous is refused by git, so denying it
+    as well costs nothing. The token ends at anything but a word character or a hyphen,
+    as `\b` did for the full spelling: a quote may follow it (`'git reset --hard'`).
+    """
+    prefixes = "|".join(re.escape(f"--{name[:length]}") for length in range(len(name), 0, -1))
+    return rf"(?<![\w-])(?:{prefixes})(?![\w-])"
+
 
 # Force-push detection, scoped to the `git push` sub-command segment.
 # The negated class consumes only characters within the push segment (never a
@@ -178,13 +267,15 @@ _GIT_PUSH_DELETE_PATTERN = (
 # list prevents the pattern source from drifting between the two methods.
 _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     (
-        rf"{_GIT_INVOCATION}reset\s+.*--hard\b",
-        "git reset --hard destroys all uncommitted changes permanently",
+        # `--keep` is allowed by owner ruling A6 (Plan 00483), so it is not listed here.
+        rf"{_GIT_INVOCATION}reset\s+.*(?:{_long_option('hard')}|{_long_option('merge')})",
+        "git reset --hard/--merge rewrites the working tree and can destroy "
+        "uncommitted changes and ignored files permanently",
     ),
     (
         # The force flag must START a whitespace-delimited token: `-f` inside the
         # operand `build-final/` is a directory name, not the flag.
-        rf"{_GIT_INVOCATION}clean\s+(?:.*\s)?(?:--force\b|-(?!-)[a-z]*f)",
+        rf"{_GIT_INVOCATION}clean\s+(?:.*\s)?(?:{_long_option('force')}|-(?!-)[a-z]*f)",
         "git clean -f permanently deletes untracked files",
     ),
     # Bare `git checkout .` discards working-tree changes; generic reason suffices.
@@ -208,7 +299,7 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     (
         rf"{_GIT_INVOCATION}restore\s+"
         r"(?!(?=.*(?<!\S)(?:--staged|-(?!-)(?-i:[A-Za-z]*S[A-Za-z]*))(?!\S))"
-        r"(?!.*(?<!\S)(?:--worktree|-(?!-)(?-i:[A-Za-z]*W[A-Za-z]*))(?!\S)))"
+        rf"(?!.*(?:{_long_option('worktree')}|(?<!\S)-(?!-)(?-i:[A-Za-z]*W[A-Za-z]*)(?!\S))))"
         r".*\S",
         "git restore discards all local changes to files permanently",
     ),
@@ -282,8 +373,17 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     # notes` -- is not swept in.
     (
         rf"{_GIT_INVOCATION}checkout[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
-        r"(?:(?<!\S)--force(?!-)\b|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
+        rf"(?:{_long_option('force')}|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
         "git checkout -f discards every uncommitted change in the working tree",
+    ),
+    # The plumbing spelling: `git checkout-index -f` (`-a` for every path) overwrites
+    # worktree files from the index. `checkout[ \t]+` above never matches it, and without
+    # the force git refuses to overwrite an existing file, so only the forced form is denied.
+    (
+        rf"{_GIT_INVOCATION}checkout-index\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+        rf"(?:{_long_option('force')}|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
+        "git checkout-index -f overwrites working-tree files from the index, discarding "
+        "their uncommitted changes",
     ),
     (
         rf"{_GIT_INVOCATION}switch[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
@@ -293,7 +393,9 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         # resets a branch ref and cannot discard uncommitted changes — git
         # refuses it when that would happen) was denied for a loss it cannot
         # cause.
-        r"(?:(?<!\S)--(?:force(?!-)|discard-changes)\b"
+        # Every prefix of `--force` is also one of `--force-create`, so git refuses them;
+        # every prefix of `--discard-changes` is matched.
+        rf"(?:(?<!\S)--force(?!\S)|{_long_option('discard-changes')}"
         r"|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
         "git switch -f/--discard-changes discards every uncommitted change — the "
         "`switch` spelling of the same loss `git checkout -f` causes",
@@ -329,6 +431,14 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git worktree remove deletes the worktree's ignored files, and with --force its "
         "modified and untracked files and any commit only its HEAD holds",
     ),
+    # An alias defined on the command line names a subcommand no rule here knows:
+    # `git -c alias.co=checkout co f.txt` is `git checkout f.txt`, under a name of its own.
+    (
+        rf"\bgit[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?(?<!\S)(?:-c|--config-env)[ \t=]*"
+        r"['\"]?alias\."
+        r"|(?<!\S)GIT_CONFIG_(?:PARAMETERS|KEY_\d+)=['\"]*alias\.",
+        "a git alias defined on the command line runs a subcommand under a name no rule reads",
+    ),
 )
 
 # Parallel, index-aligned RuleID for each entry in _DESTRUCTIVE_PATTERN_REASONS
@@ -349,12 +459,14 @@ _PATTERN_RULE_IDS: tuple[str, ...] = (
     RuleID.GIT_BRANCH_FORCE_DELETE,  # git branch -d --force, the two-option spelling of -D
     RuleID.GIT_COMMIT_AMEND,
     RuleID.GIT_CHECKOUT_FORCE,
+    RuleID.GIT_CHECKOUT_FORCE,  # git checkout-index -f, the plumbing spelling
     RuleID.GIT_SWITCH_FORCE,
     RuleID.GIT_REFLOG_EXPIRE,
     RuleID.GIT_GC_PRUNE_NOW,
     RuleID.GIT_FILTER_HISTORY,
     RuleID.GIT_PUSH_DELETE_REMOTE,
     RuleID.GIT_WORKTREE_REMOVE_FORCE,
+    RuleID.GIT_DESTRUCTIVE_UNREADABLE,  # an alias defined on the command line
 )
 
 # Shared teaching content appended after the rule-specific "why" in every
@@ -854,9 +966,16 @@ _DIRECTORY_CHANGES: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 # Flags a restore may carry without changing WHICH files it overwrites. Anything else
 # (`--source`, `-p`, `--pathspec-from-file`, `--staged`, `--ours`...) is unverifiable.
 _RESTORE_FLAGS: Final[frozenset[str]] = frozenset({"--worktree", "-W", "--quiet", "-q"})
+# A word bash rewrites before git runs: brace expansion (`{a,b}`, `{1..3}`) and a tilde
+# at the start of the word or of an assignment-like value (`~+/f`, `x=~/f`). The words
+# this reading gets are already unquoted, so a quoted brace is refused too (fail closed).
+_SHELL_EXPANSION: Final[str] = r"\{[^}]*(?:,|\.\.)[^}]*\}|(?:^|[=:])~"
+_SHELL_EXPANSION_PATTERN: Final[re.Pattern[str]] = re.compile(_SHELL_EXPANSION)
 # A path word that is not one literal file name: a glob, a pathspec magic prefix, a
-# variable, or an escape. `.` and `..` name a directory.
-_NOT_A_LITERAL_PATH: Final[re.Pattern[str]] = re.compile(r"[*?\[\]$\\]|^:|^\.{1,2}$")
+# variable, an escape, or a shell expansion. `.` and `..` name a directory.
+_NOT_A_LITERAL_PATH: Final[re.Pattern[str]] = re.compile(
+    rf"[*?\[\]$\\`]|^:|^\.{{1,2}}$|{_SHELL_EXPANSION}"
+)
 
 
 def _restore_loss(run: GitInvocation, cwd: Path) -> str | None:
@@ -948,8 +1067,16 @@ _CHECKOUT: Final[str] = "checkout"
 _DASH_C: Final[str] = "-C"
 #: One wall-clock bound on every git call of the checkout proof (module-level for tests).
 _CHECKOUT_PROOF_BUDGET: float = Timeout.GIT_CHECKOUT_RESTORE_PROOF
-# A commit word safe to hand to git as one argument: no option, glob, variable or escape.
+# A commit word safe to hand to git as one argument: ASCII only, and no option, glob,
+# variable, escape, comma, `=`, `%` or `#`. `_plain_revision` also refuses a shell expansion.
 _LITERAL_COMMIT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_@][A-Za-z0-9._/@~^{}+-]*$")
+
+
+def _plain_revision(word: str) -> bool:
+    """Whether ``word`` is a revision spelling git gets exactly as written (no expansion)."""
+    return bool(_LITERAL_COMMIT.match(word)) and not _SHELL_EXPANSION_PATTERN.search(word)
+
+
 _PATH_SEPARATOR: Final[str] = "/"
 # Path components that do not name one entry: `a//b`, `a/.`, `a/../b`, a trailing `/`.
 _NON_NAMING_COMPONENTS: Final[frozenset[str]] = frozenset({"", ".", ".."})
@@ -971,10 +1098,12 @@ def _checkout_note(command: str, cwd: Path) -> tuple[str, str] | None:
         return None
     return RuleID.GIT_CHECKOUT_DISCARD, _with_principle(
         f"Not restored: {loss}. Only a command that is ONE plain "
-        "`git checkout <commit> -- <paths>` is allowed, and only when every literal path is "
+        "`git checkout <commit> -- <paths>` (or `git checkout <commit> <paths>`, when the "
+        "commit names no path) is allowed, and only when every literal path is "
         "absent from the working tree and the index or is a tracked regular file, and "
         "`git diff` and `git diff --cached` are both clean for them, since that discards "
-        "nothing local. `git show <commit>:<path>` reads a file without writing it."
+        "nothing local. Paths supplied by `xargs`, `find -exec` or a pipe are never judged. "
+        "`git show <commit>:<path>` reads a file without writing it."
     )
 
 
@@ -1003,8 +1132,55 @@ def _checkout_restore_loss(
 ) -> str | None:
     """Why ``run`` (one ``git checkout``) may lose content, or None when it loses none.
 
-    It loses none when it is ``git checkout <commit> -- <paths>`` and every path is
+    It loses none when it is ``git checkout <commit> -- <paths>``, or the same without
+    ``--`` where git reads the first operand as that commit (N764), and every path is
     literal, inside the repository, and has no local state git would overwrite.
+    """
+    problem = _reading_problem(run, cwd)
+    if problem is not None:
+        return problem
+    directory = invocation_directory(run, cwd)
+    dashed = _OPTIONS_END in run.arguments
+    if dashed:
+        split = run.arguments.index(_OPTIONS_END)
+        before, paths = run.arguments[:split], run.arguments[split + 1 :]
+    else:
+        before, paths = run.arguments[:1], run.arguments[1:]
+    if not before:
+        return "it names no commit, so it restores from the index and discards unstaged changes"
+    for word in run.arguments if not dashed else before:
+        if word.startswith("-"):
+            return f"`{word}` changes what `git checkout` overwrites"
+    if not dashed and not paths:
+        return (
+            f"`{before[0]}` is not a commit git switches to, so it is read as a path and "
+            "restored from the index, which discards unstaged changes (to switch branches, "
+            "write the branch name literally)"
+        )
+    if len(before) != 1 or not _plain_revision(before[0]):
+        return "it must name exactly one literal commit before its paths"
+    if not paths:
+        return "it names no path"
+    for name in paths:
+        if _NOT_A_LITERAL_PATH.search(name) or name.startswith(_PATH_SEPARATOR):
+            return f"`{name}` is not one literal relative path"
+        if any(part in _NON_NAMING_COMPONENTS for part in name.split(_PATH_SEPARATOR)):
+            return f"`{name}` is not one literal relative path"
+    # Every git call below shares one deadline: a call past it reports a timeout, which
+    # each check reads as "not proven", so a slow git denies instead of stalling.
+    with git_deadline(clock() + _CHECKOUT_PROOF_BUDGET, clock):
+        if not dashed:
+            ambiguity = _undashed_commit_problem(directory, before[0])
+            if ambiguity is not None:
+                return ambiguity
+        return _checkout_paths_loss(directory, paths)
+
+
+def _reading_problem(run: GitInvocation, cwd: Path) -> str | None:
+    """Why the repository and environment ``run`` reads cannot be stated, else None.
+
+    Only ``-C`` may move git; an assignment or any other global option can change which
+    repository, index or pathspec rules git uses, so the proof would read another one.
     """
     if run.assignments:
         return f"`{run.assignments[0]}` changes what git reads"
@@ -1020,28 +1196,843 @@ def _checkout_restore_loss(
     directory = invocation_directory(run, cwd)
     if not path_is_dir(directory, unreadable_means=False):
         return f"`{directory}` is not a directory"
-    if _OPTIONS_END not in run.arguments:
-        return "it names no `--`, so a path cannot be told from a commit"
-    split = run.arguments.index(_OPTIONS_END)
-    before, paths = run.arguments[:split], run.arguments[split + 1 :]
-    if not before:
-        return "it names no commit, so it restores from the index and discards unstaged changes"
-    for word in before:
-        if word.startswith("-"):
-            return f"`{word}` changes what `git checkout` overwrites"
-    if len(before) != 1 or not _LITERAL_COMMIT.match(before[0]):
-        return "it must name exactly one literal commit before `--`"
-    if not paths:
-        return "it names no path"
-    for name in paths:
-        if _NOT_A_LITERAL_PATH.search(name) or name.startswith(_PATH_SEPARATOR):
-            return f"`{name}` is not one literal relative path"
-        if any(part in _NON_NAMING_COMPONENTS for part in name.split(_PATH_SEPARATOR)):
-            return f"`{name}` is not one literal relative path"
-    # Every git call below shares one deadline: a call past it reports a timeout, which
-    # each check reads as "not proven", so a slow git denies instead of stalling.
-    with git_deadline(clock() + _CHECKOUT_PROOF_BUDGET, clock):
-        return _checkout_paths_loss(directory, paths)
+    return None
+
+
+def _resolves(directory: Path, revision: str, kind: str) -> bool:
+    """Whether git peels the literal ``revision`` to an object of ``kind`` in ``directory``."""
+    peeled = run_git(
+        directory,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{revision}^{{{kind}}}",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    return peeled.returncode == 0
+
+
+def _path_reading(directory: Path, name: str) -> str | None:
+    """Why git may read the operand ``name`` as a path in ``directory``, or None.
+
+    Git reads an operand as a path when it exists in the working tree (lstat, so a
+    dangling symlink counts) or matches an index entry; a glob, pathspec magic or a
+    shell expansion may match either, so it is a path as far as the proof can tell.
+    Any failure to look is a path too.
+    """
+    if _NOT_A_LITERAL_PATH.search(name):
+        return f"`{name}` is not one literal name, so it may match a path"
+    try:
+        (directory / name).lstat()
+    except FileNotFoundError:
+        # Not there is an answer, not a failure: the index decides whether git still
+        # reads a path.
+        return _index_reading(directory, name)
+    except OSError as error:
+        return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
+    return f"`{name}` exists in the working tree"
+
+
+def _index_reading(directory: Path, name: str) -> str | None:
+    """Why the index makes git read ``name`` as a path, or None when no entry matches."""
+    try:
+        entries = _index_records(directory, name)
+    except _CheckoutUnproven as unproven:
+        return str(unproven)
+    if entries:
+        return f"`{name}` names an index entry"
+    return None
+
+
+def _undashed_commit_problem(directory: Path, revision: str) -> str | None:
+    """Why git may not read ``revision`` as the commit of ``git checkout <revision> <paths>``.
+
+    Git takes the first operand as the source only when it resolves to a tree and is not
+    also a path; when it is both, git refuses, and when it does not resolve, git restores
+    EVERY operand from the index. Requiring that it name no path at all also keeps a
+    misreading harmless: an operand matching nothing makes git refuse the whole checkout.
+    """
+    if not _resolves(directory, revision, "tree"):
+        return (
+            f"`{revision}` is not a commit git can read, so git would restore every operand "
+            "from the index"
+        )
+    path = _path_reading(directory, revision)
+    if path is not None:
+        return f"{path}, so git cannot tell the commit from a path"
+    return None
+
+
+# Options a branch-switching `git checkout` may carry without becoming a path checkout.
+# Anything else (`-p`, `--ours`, `--no-overlay`, `--pathspec-from-file`, `--conflict`,
+# an abbreviation) is read as a possible path checkout and judged.
+_SWITCH_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "--quiet",
+        "--progress",
+        "--no-progress",
+        "--track",
+        "--track=direct",
+        "--track=inherit",
+        "--no-track",
+        "--guess",
+        "--no-guess",
+        "--detach",
+        "--merge",
+        "--ignore-other-worktrees",
+        # `--recurse-submodules` is not here: it writes inside submodules, which the switch
+        # check does not read (third review, minor 1).
+        "--no-recurse-submodules",
+    }
+)
+_SWITCH_SHORT_LETTERS: Final[frozenset[str]] = frozenset("qtlm")
+# Options naming the branch to create; the name is the rest of the cluster or the next word.
+_BRANCH_NAME_SHORT_LETTERS: Final[frozenset[str]] = frozenset("bB")
+_BRANCH_NAME_LONG: Final[str] = "--orphan"
+# `--conflict=<style>` (or `--conflict <style>`) is `--merge` with another conflict style.
+_CONFLICT_LONG: Final[str] = "--conflict"
+_VALUE_LONG_OPTIONS: Final[frozenset[str]] = frozenset({_BRANCH_NAME_LONG, _CONFLICT_LONG})
+_LONG_PREFIX: Final[str] = "--"
+_VALUE_SEPARATOR: Final[str] = "="
+# `git checkout -` switches to the previous branch (`@{-1}`).
+_PREVIOUS_BRANCH: Final[str] = "-"
+_PREVIOUS_BRANCH_REVISION: Final[str] = "@{-1}"
+# `A...B` names the merge base of A and B.
+_MERGE_BASE_MARK: Final[str] = "..."
+_REFS_PREFIX: Final[str] = "refs/"
+_TAGS_PREFIX: Final[str] = "refs/tags/"
+_REMOTES_PREFIX: Final[str] = "refs/remotes/"
+# The ref namespaces a one-operand switch may reach a commit through.
+_SWITCH_REF_NAMESPACES: Final[tuple[str, ...]] = (HEADS_PREFIX, _TAGS_PREFIX, _REMOTES_PREFIX)
+_FETCH_REFSPEC_KEYS: Final[str] = r"^remote\..*\.fetch$"
+_FETCH_REFSPEC_KEY: Final[re.Pattern[str]] = re.compile(r"remote\.(?P<remote>.+)\.fetch")
+_FORCED_REFSPEC: Final[str] = "+"
+# `git config --get` exits 1 when the key is not set.
+_CONFIG_KEY_ABSENT: Final[int] = 1
+_SUBMODULE_RECURSE_KEY: Final[str] = "submodule.recurse"
+_CONFIG_FALSE: Final[str] = "false"
+_GITLINK_MODE: Final[str] = "160000"
+# A `git diff --raw -z` record header: `:`, two modes, two object ids and a status.
+_RAW_RECORD_MARK: Final[str] = ":"
+_RAW_HEADER_FIELDS: Final[int] = 5
+_HEAD: Final[str] = "HEAD"
+# The paths a switch writes: added, modified or retyped between HEAD and the target.
+_WRITTEN_PATHS_FILTER: Final[str] = "--diff-filter=ADMT"
+_ADDED_STATUS: Final[str] = "A"
+_DELETED_STATUS: Final[str] = "D"
+# Paths named in one `git ls-files --others` call.
+_PATHS_PER_LISTING: Final[int] = 4096
+# ... and at most this many bytes of path, so a list is never one oversized command line.
+_PATH_BYTES_PER_LISTING: Final[int] = 64 * 1024
+# Past this many touched paths, a whole-tree listing is cheaper than naming each one.
+_NAMED_PATHSPECS_LIMIT: Final[int] = 64
+# Runners that add words of their own to the command they run (N765).
+_ARGUMENT_FEEDERS: Final[frozenset[str]] = frozenset({"xargs", "parallel", "find", "fd", "fdfind"})
+# Prefixes that run the command they are given with its words unchanged.
+_PLAIN_WRAPPERS: Final[frozenset[str]] = frozenset(
+    {"sudo", "env", "command", "builtin", "exec", "nice", "nohup", "time", "timeout", "stdbuf"}
+)
+# Plain wrappers with an option that moves the directory (`env -C`, `sudo -D`, `--chdir`)
+# or the environment; with any option at all they are not plain.
+_OPTION_FREE_WRAPPERS: Final[frozenset[str]] = frozenset({"sudo", "env"})
+_GIT_WORD: Final[str] = "git"
+# Settings a one-operand switch may carry: none of them changes which repository, index,
+# worktree or pathspec rules git reads the operand with.
+_SWITCH_GLOBAL_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--no-pager", "-P", "-p", "--paginate", "--no-optional-locks", "--no-advice"}
+)
+_DASH_LOWER_C: Final[str] = "-c"
+_SWITCH_CONFIG_PREFIXES: Final[tuple[str, ...]] = (
+    "advice.",
+    "color.",
+    "column.",
+    "pager.",
+    "core.pager=",
+    "core.quotepath=",
+    "user.",
+)
+_SWITCH_GIT_VARIABLES: Final[frozenset[str]] = frozenset(
+    {"GIT_LFS_SKIP_SMUDGE", "GIT_PAGER", "GIT_TERMINAL_PROMPT", "GIT_TRACE"}
+)
+_GIT_VARIABLE_PREFIX: Final[str] = "GIT_"
+# Variables that move where git finds its configuration.
+_CONFIG_LOCATING_VARIABLES: Final[frozenset[str]] = frozenset({"HOME", "XDG_CONFIG_HOME"})
+# Statements that cannot change the refs, HEAD, config or environment a later switch is
+# read against (fourth review). Every other statement may, and denies the switch.
+_READ_ONLY_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "status",
+        "log",
+        "show",
+        "diff",
+        "rev-parse",
+        "ls-files",
+        "ls-tree",
+        "describe",
+        "cat-file",
+        "for-each-ref",
+        "show-ref",
+        "blame",
+        "grep",
+        "shortlog",
+        "merge-base",
+        "name-rev",
+        "rev-list",
+        "whatchanged",
+        "help",
+        "version",
+    }
+)
+# `git branch` with only these options lists branches; with anything else it may make one.
+_BRANCH_LISTING_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--list", "--show-current"}
+)
+_STATE_FREE_COMMANDS: Final[frozenset[str]] = frozenset(
+    # Readers that write no file of their own (no `-o`): `sort`, `uniq`, `awk` and `tee`
+    # can, so they are not here.
+    {
+        "cd",
+        "pushd",
+        "popd",
+        "echo",
+        "printf",
+        "true",
+        ":",
+        "pwd",
+        "ls",
+        "cat",
+        "test",
+        "[",
+        "grep",
+        "head",
+        "tail",
+        "wc",
+        # `set` changes shell options and positional parameters only; a GIT_* variable
+        # is changed by an assignment or `export`, which are judged on their own.
+        "set",
+    }
+)
+_ENVIRONMENT_DECLARATIONS: Final[frozenset[str]] = frozenset(
+    {"export", "declare", "typeset", "readonly", "local"}
+)
+_HARMLESS_REDIRECT_TARGETS: Final[frozenset[str]] = frozenset(
+    {"/dev/null", "/dev/stdout", "/dev/stderr"}
+)
+# List operators under which the next statement runs at the same time as the one before.
+_CONCURRENT_OPERATORS: Final[frozenset[str]] = frozenset({"&", "|", "|&"})
+# A statement the parse cannot see as a step of its own: a command or process
+# substitution, or a here-string (fifth review).
+_HIDDEN_STATEMENT: Final[re.Pattern[str]] = re.compile(rf"{_SUBSTITUTION.pattern}|<<<")
+# Options that make a read-only git command write a file or run a program, each with the
+# shortest abbreviation that names it alone (`--o` is ambiguous with `--oneline`).
+_WRITING_READER_OPTIONS: Final[tuple[tuple[str, int], ...]] = (
+    ("--output", len("--ou")),
+    ("--open-files-in-pager", len("--op")),
+)
+_GREP_PAGER_SHORT: Final[str] = "-O"
+# The `_stale_readings` key for a run whose place in the command's order is not known
+# (`id()` of a live object is never negative).
+_ANY_STATEMENT: Final[int] = -1
+# Past this many distinct one-operand checkouts in one command, the command is judged as a
+# whole (and denied by the one-checkout rule) instead of asking git about each operand.
+_MAX_SWITCH_READINGS: Final[int] = 4
+_BACKTICK: Final[str] = "`"
+# A backtick read as the command boundary it is: its body runs as a command of its own.
+_BACKTICK_AS_BOUNDARY: Final[str] = " ; "
+_RESTORE_STAGED_LONG: Final[str] = "--staged"
+_RESTORE_STAGED_LETTER: Final[str] = "S"
+_RESTORE_WORKTREE_LETTER: Final[str] = "W"
+_WORKTREE_OPTION: Final[re.Pattern[str]] = re.compile(_long_option("worktree"))
+# A git checkout or restore at command position in one scan-target segment; an `echo`
+# or `grep` argument is blanked out of that target, so a mention never matches.
+# The subcommand must end its word, so `git checkout-index` is not a checkout.
+_COMMAND_POSITION_RUN: Final[dict[str, re.Pattern[str]]] = {
+    subcommand: re.compile(rf"{_GIT_INVOCATION}{subcommand}(?=[\s;&|()]|$)", re.IGNORECASE)
+    for subcommand in (_CHECKOUT, _RESTORE)
+}
+# The rule a checkout or restore no pattern saw is judged under.
+_UNPATTERNED_RULES: Final[dict[str, str]] = {
+    _CHECKOUT: RuleID.GIT_CHECKOUT_DISCARD,
+    _RESTORE: RuleID.GIT_RESTORE,
+}
+
+
+def _switch_operands(arguments: tuple[str, ...]) -> tuple[str, ...] | None:
+    """The operands of a ``git checkout`` that may be a branch switch, else None.
+
+    None when an option this reading does not know as a switch option is present, or
+    when ``--`` is followed by paths: either may make it a path checkout.
+    """
+    operands: list[str] = []
+    words = iter(arguments)
+    for word in words:
+        if word == _OPTIONS_END:
+            if next(words, None) is not None:
+                return None
+            break
+        if word == _PREVIOUS_BRANCH or not word.startswith("-"):
+            operands.append(word)
+        elif word.startswith(_LONG_PREFIX):
+            if word in _VALUE_LONG_OPTIONS:
+                next(words, None)
+            elif word.split(_VALUE_SEPARATOR, 1)[0] not in _VALUE_LONG_OPTIONS and (
+                word not in _SWITCH_LONG_OPTIONS
+            ):
+                return None
+        else:
+            letters = word[1:]
+            for index, letter in enumerate(letters):
+                if letter in _BRANCH_NAME_SHORT_LETTERS:
+                    if index == len(letters) - 1:
+                        next(words, None)
+                    break
+                if letter not in _SWITCH_SHORT_LETTERS:
+                    return None
+    return tuple(operands)
+
+
+def _may_change_what_a_switch_reads(step: SimpleCommand) -> bool:
+    """Whether ``step``, run before or beside a switch, may change refs, HEAD, config or the
+    environment git reads (fourth review): the switch is read against the repository as
+    it is before the command runs, so after such a statement that reading is stale.
+
+    Only a statement known to change none of them passes: a read-only git command, a
+    plain shell builtin or reader with no file-writing redirect, ``cd``, or an assignment
+    or ``export`` that names no ``GIT_*``, ``HOME`` or ``XDG_CONFIG_HOME``. Anything not
+    classified (``make``, a script, an alias) may change them (fail closed).
+    """
+    if any(target not in _HARMLESS_REDIRECT_TARGETS for _, target in step.redirects):
+        return True
+    words = step.words
+    assignments = 0
+    while assignments < len(words) and is_assignment_word(words[assignments]):
+        assignments += 1
+    rest = words[assignments:]
+    if not rest:
+        return any(_names_a_state_variable(word) for word in words)
+    # The command word decides first: `echo git checkout x` carries a parsed git run in
+    # its words, but what runs is `echo`.
+    head = command_word(rest[0])
+    if head in _STATE_FREE_COMMANDS:
+        return False
+    if step.git is not None and (head == _GIT_WORD or head in _PLAIN_WRAPPERS):
+        subcommand = step.git.subcommand
+        if subcommand == _BRANCH:
+            return not set(step.git.arguments) <= _BRANCH_LISTING_OPTIONS
+        if any(_writes_or_runs(argument) for argument in step.git.arguments):
+            return True
+        return subcommand not in _READ_ONLY_GIT_SUBCOMMANDS
+    if head in _ENVIRONMENT_DECLARATIONS:
+        declared = rest[1:]
+        return any(word.startswith("-") or _names_a_state_variable(word) for word in declared)
+    return True
+
+
+def _stale_readings(steps: list[SimpleCommand], *, hidden: bool) -> dict[int, bool]:
+    """For each step of one parse (keyed by ``id``), whether a switch there would be read
+    against state another statement may change first.
+
+    ``hidden``: the command text holds a command or process substitution or a here-string.
+    A statement inside one stays a single word of the step around it, or is lost by the
+    parse (``cat <(git branch t f)``), so it cannot be classified, and every switch is stale
+    (fifth review). Otherwise a switch is stale after any statement that may change state.
+    When the command runs anything at the same time (``&``, a pipe), the flattened steps no
+    longer say which statements share a compound (``( ...; git checkout x ) & git branch
+    x f``), so then any OTHER statement that may change state makes it stale. Under
+    ``_ANY_STATEMENT``: the answer for a run found only by re-parsing a segment, whose
+    place in the order is not known.
+    """
+    changes = [_may_change_what_a_switch_reads(step) for step in steps]
+    concurrent = any(step.operator in _CONCURRENT_OPERATORS for step in steps)
+    changed_after = [False] * (len(steps) + 1)
+    for index in range(len(steps) - 1, -1, -1):
+        changed_after[index] = changed_after[index + 1] or changes[index]
+    stale: dict[int, bool] = {_ANY_STATEMENT: hidden or any(changes)}
+    changed_before = False
+    for index, step in enumerate(steps):
+        beside = concurrent and changed_after[index + 1]
+        stale[id(step)] = hidden or changed_before or beside
+        changed_before = changed_before or changes[index]
+    return stale
+
+
+def _chunk_bounds(names: Sequence[str]) -> list[tuple[int, int]]:
+    """``(start, end)`` slices of ``names``, each within the per-call path count and bytes."""
+    bounds: list[tuple[int, int]] = []
+    start = size = 0
+    for index, name in enumerate(names):
+        cost = len(name.encode()) + 1
+        if index > start and (
+            index - start >= _PATHS_PER_LISTING or size + cost > _PATH_BYTES_PER_LISTING
+        ):
+            bounds.append((start, index))
+            start, size = index, 0
+        size += cost
+    if start < len(names):
+        bounds.append((start, len(names)))
+    return bounds
+
+
+def _writes_or_runs(argument: str) -> bool:
+    """Whether a read-only git command's ``argument`` makes it write a file or run a
+    program: ``--output`` (log, show, diff) or ``-O``/``--open-files-in-pager`` (grep),
+    in any abbreviation git accepts."""
+    name = argument.split(_VALUE_SEPARATOR, 1)[0]
+    if argument.startswith(_GREP_PAGER_SHORT):
+        return True
+    return any(
+        len(name) >= shortest and option.startswith(name)
+        for option, shortest in _WRITING_READER_OPTIONS
+    )
+
+
+def _names_a_state_variable(word: str) -> bool:
+    """Whether the assignment or name ``word`` sets a variable git reads its state through."""
+    name = word.split(_VALUE_SEPARATOR, 1)[0]
+    return name.startswith(_GIT_VARIABLE_PREFIX) or name in _CONFIG_LOCATING_VARIABLES
+
+
+def _feeding_problem(step: SimpleCommand) -> str | None:
+    """Why ``step``'s git run may get words, or a directory, this reading cannot see, or None.
+
+    A runner such as ``xargs`` or ``find -exec`` appends the paths itself (N765); a
+    prefix this reading does not know may do that or move the directory, so only plain
+    wrappers pass, and ``env``/``sudo`` only with no option (``env -C sub`` and
+    ``sudo -D sub`` run git elsewhere). Stdin is not a feed here: git checkout reads it
+    only for ``--pathspec-from-file=-`` and ``-p``, which a switch never carries.
+    """
+    words = step.words
+    git_at = next((index for index, word in enumerate(words) if command_word(word) == _GIT_WORD), 0)
+    prefix = [word for word in words[:git_at] if not is_assignment_word(word)]
+    if not prefix:
+        return None
+    if any(command_word(word) in _ARGUMENT_FEEDERS for word in prefix) or (
+        command_word(prefix[0]) not in _PLAIN_WRAPPERS
+    ):
+        return f"`{prefix[0]}` runs git and can add paths this reading never sees"
+    for index, word in enumerate(prefix):
+        if command_word(word) in _OPTION_FREE_WRAPPERS and any(
+            later.startswith("-") for later in prefix[index + 1 :]
+        ):
+            return f"`{word}` carries an option, which can move the directory git runs in"
+    return None
+
+
+def _restores_worktree(arguments: tuple[str, ...]) -> bool:
+    """Whether ``git restore <arguments>`` writes the working tree, not only the index.
+
+    Only ``--staged`` (or a short cluster with ``S``) and no ``--worktree`` in any
+    abbreviation (or a cluster with ``W``) keeps the restore to the index.
+    """
+    staged = False
+    for word in arguments:
+        if word == _OPTIONS_END:
+            break
+        if _WORKTREE_OPTION.fullmatch(word):
+            return True
+        if word == _RESTORE_STAGED_LONG:
+            staged = True
+        elif word.startswith("-") and not word.startswith(_LONG_PREFIX):
+            if _RESTORE_WORKTREE_LETTER in word:
+                return True
+            staged = staged or _RESTORE_STAGED_LETTER in word
+    return not staged
+
+
+def _switch_reading_problem(run: GitInvocation, cwd: Path) -> str | None:
+    """Why a one-operand ``run`` cannot be read as a switch where it starts, else None.
+
+    Looser than :func:`_reading_problem` (which guards the restore proof): a variable
+    or setting that only changes output (`X=1`, `-c advice.*`, `--no-pager`) is fine,
+    but one that can move the repository, index or worktree, change how pathspecs
+    match, or move the configuration (any other `GIT_*` variable, `HOME`, any other
+    `-c`) means the operand may be read as a path this reading does not see.
+    """
+    for assignment in run.assignments:
+        name = assignment.split(_VALUE_SEPARATOR, 1)[0]
+        if name in _CONFIG_LOCATING_VARIABLES or (
+            name.startswith(_GIT_VARIABLE_PREFIX) and name not in _SWITCH_GIT_VARIABLES
+        ):
+            return f"`{name}` can change how git reads the operand"
+    options = iter(run.global_options)
+    for option in options:
+        if option == _DASH_C:
+            next(options, None)
+        elif option.startswith(_DASH_C) or option in _SWITCH_GLOBAL_FLAGS:
+            continue
+        elif option.startswith(_DASH_LOWER_C):
+            setting = option[len(_DASH_LOWER_C) :] or next(options, "")
+            if not setting.lower().startswith(_SWITCH_CONFIG_PREFIXES):
+                return f"`{option} {setting}` can change how git reads the operand"
+        else:
+            return f"`{option}` can change how git reads the operand"
+    problem = placement_problem(run, cwd)
+    if problem is not None:
+        return problem
+    if not path_is_dir(invocation_directory(run, cwd), unreadable_means=False):
+        return "the directory git runs in is not a directory"
+    return None
+
+
+def _undashed_may_restore(run: GitInvocation, cwd: Path | None) -> bool:
+    """Whether the ``git checkout`` ``run`` may restore paths though no rule pattern saw it.
+
+    Two operands or more are always a path checkout (or a refusal). One operand is a
+    switch when it is a commit, and when it names no path git can see; otherwise git
+    restores it from the index. An option this reading does not know, a repository it
+    cannot place, or any git failure counts as a possible restore.
+    """
+    operands = _switch_operands(run.arguments)
+    if operands is None or len(operands) > 1:
+        return True
+    if not operands:
+        return False
+    if cwd is None or _switch_reading_problem(run, cwd) is not None:
+        return True
+    directory = invocation_directory(run, cwd)
+    previous = operands[0] == _PREVIOUS_BRANCH
+    operand = _PREVIOUS_BRANCH_REVISION if previous else operands[0]
+    with git_deadline(time.monotonic() + _CHECKOUT_PROOF_BUDGET):
+        if _MERGE_BASE_MARK in operand:
+            return _merge_base_switch_may_restore(directory, operand)
+        if not _plain_revision(operand):
+            # Only a plain ASCII spelling is read as a switch (third review): any other
+            # name is denied, whether git would switch to it or restore it as a path.
+            return True
+        if previous:
+            if _resolves(directory, operand, "commit"):
+                return _switch_overwrite(directory, operand) is not None
+            # No previous branch: git refuses the switch, so nothing is written.
+            return False
+        return _named_switch_may_restore(directory, operand)
+
+
+def _merge_base_switch_may_restore(directory: Path, operand: str) -> bool:
+    """Whether ``git checkout A...B`` may lose work: it switches to the one merge base.
+
+    Either side may be empty, meaning ``HEAD``. No single merge base, a side that is
+    not one literal revision, or a git failure counts as a possible loss.
+    """
+    left, _, right = operand.partition(_MERGE_BASE_MARK)
+    sides = [side or _HEAD for side in (left, right)]
+    if not all(_plain_revision(side) and _MERGE_BASE_MARK not in side for side in sides):
+        return True
+    bases = run_git(directory, "merge-base", "--all", *sides, timeout=Timeout.GIT_CONTEXT)
+    found = bases.stdout.split()
+    if bases.returncode != 0 or len(found) != 1:
+        return True
+    return _switch_overwrite(directory, found[0]) is not None
+
+
+def _named_switch_may_restore(directory: Path, name: str) -> bool:
+    """Whether ``git checkout <name>`` may lose work, resolved as checkout resolves it.
+
+    Every ref ending in ``/<name>`` is listed once. A name more than one of git's
+    readings matches (``refs/<name>``, a tag, a branch, ``refs/remotes/<name>``) is
+    ambiguous and denied. A local branch is checked; then any commit, unless git reaches
+    it through a ref outside ``refs/heads``, ``refs/tags`` and ``refs/remotes``; then a
+    path, which git restores from the index; then the remote-branch shortcut. Any git
+    failure counts as a possible loss; a name that is none of these makes git refuse.
+    """
+    listed = run_git(
+        directory,
+        "for-each-ref",
+        "--format=%(refname)",
+        f"{_REFS_PREFIX}**/{name}",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if listed.returncode != 0:
+        return True
+    refs = {ref for ref in listed.stdout.split() if ref.endswith(f"{_PATH_SEPARATOR}{name}")}
+    readings = (_REFS_PREFIX, _TAGS_PREFIX, HEADS_PREFIX, _REMOTES_PREFIX)
+    if sum(f"{prefix}{name}" in refs for prefix in readings) > 1:
+        return True
+    branch = f"{HEADS_PREFIX}{name}"
+    if branch in refs:
+        return _switch_overwrite(directory, branch) is not None
+    if _resolves(directory, name, "commit"):
+        full = name if name.startswith(_REFS_PREFIX) else f"{_REFS_PREFIX}{name}"
+        if (full == name or full in refs) and not full.startswith(_SWITCH_REF_NAMESPACES):
+            return True
+        return _switch_overwrite(directory, name) is not None
+    if _path_reading(directory, name) is not None:
+        return True
+    return _remote_shortcut_may_restore(directory, name, refs)
+
+
+def _remote_shortcut_may_restore(directory: Path, name: str, refs: set[str]) -> bool:
+    """Whether the remote-branch shortcut ``git checkout <name>`` may lose work.
+
+    Git maps ``refs/heads/<name>`` through every remote's fetch refspec, which can point
+    anywhere, so the shortcut is read only when every refspec is the standard one. Then
+    the one ref outside ``refs/heads`` and ``refs/tags`` ending in ``/<name>`` must be
+    ``refs/remotes/<remote>/<name>`` of a configured remote, and is checked; more than
+    one, or any other ref, denies. None found means git refuses the checkout.
+    """
+    remotes = _standard_fetch_remotes(directory)
+    if remotes is None:
+        return True
+    others = [ref for ref in refs if not ref.startswith((HEADS_PREFIX, _TAGS_PREFIX))]
+    if not others:
+        return False
+    if len(others) > 1 or others[0] not in {
+        f"{_REMOTES_PREFIX}{remote}{_PATH_SEPARATOR}{name}" for remote in remotes
+    }:
+        return True
+    return _switch_overwrite(directory, others[0]) is not None
+
+
+def _standard_fetch_remotes(directory: Path) -> frozenset[str] | None:
+    """The configured remotes, or None when any fetch refspec is not the standard one.
+
+    Standard is ``[+]refs/heads/*:refs/remotes/<remote>/*`` for a remote whose name has
+    no ``/``; any other shape, or a git failure, is None.
+    """
+    listed = run_git(
+        directory, "config", "--get-regexp", _FETCH_REFSPEC_KEYS, timeout=Timeout.GIT_CONTEXT
+    )
+    if listed.returncode == _CONFIG_KEY_ABSENT and not listed.stdout.strip():
+        return frozenset()
+    if listed.returncode != 0:
+        return None
+    remotes: set[str] = set()
+    for line in listed.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        found = _FETCH_REFSPEC_KEY.fullmatch(key)
+        if found is None:
+            return None
+        remote = found["remote"]
+        standard = f"{HEADS_PREFIX}*:{_REMOTES_PREFIX}{remote}{_PATH_SEPARATOR}*"
+        if _PATH_SEPARATOR in remote or value.removeprefix(_FORCED_REFSPEC) != standard:
+            return None
+        remotes.add(remote)
+    return frozenset(remotes)
+
+
+def _switch_overwrite(directory: Path, revision: str) -> str | None:
+    """Why switching to ``revision`` would write over a local path git does not track, or None.
+
+    Git refuses to switch over a modified tracked file or an untracked one, but it writes
+    over an IGNORED file the target tracks without a word, and to write a path whose
+    tracked parent was replaced locally (by an untracked file or symlink) it removes that
+    parent. So for every path the switch writes (added, modified or retyped between
+    ``HEAD`` and ``revision``) each parent must be absent or a real directory, and an
+    added path must be absent. A switch that moves a submodule while recursion is on (or
+    may be) writes inside it, which this check does not read. Any git failure is a
+    reason too.
+    """
+    top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+    if top.returncode != 0 or not top.stdout.strip():
+        return f"`{directory}` is not in a git working tree git could read"
+    written = run_git(
+        directory,
+        "diff",
+        "--raw",
+        "-z",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-relative",
+        _WRITTEN_PATHS_FILTER,
+        _HEAD,
+        revision,
+        _OPTIONS_END,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if written.returncode != 0:
+        return f"git could not list what switching to `{revision}` writes"
+    fields = written.stdout.split(_RECORD_SEPARATOR)
+    if fields and not fields[-1]:
+        fields.pop()
+    if len(fields) % 2:
+        return f"git's list of what switching to `{revision}` writes could not be read"
+    root = Path(top.stdout.strip())
+    in_the_way: list[str] = []
+    touched: list[str] = []
+    moves_a_submodule = False
+    for header, name in zip(fields[::2], fields[1::2], strict=True):
+        # `:<old mode> <new mode> <old id> <new id> <status>`
+        parts = header.removeprefix(_RAW_RECORD_MARK).split()
+        if not header.startswith(_RAW_RECORD_MARK) or len(parts) != _RAW_HEADER_FIELDS:
+            return f"git's list of what switching to `{revision}` writes could not be read"
+        status = parts[-1]
+        moves_a_submodule = moves_a_submodule or _GITLINK_MODE in parts[:2]
+        touched.append(name)
+        if status == _DELETED_STATUS:
+            continue
+        try:
+            in_the_way.extend(_paths_in_the_way(root, name, added=status == _ADDED_STATUS))
+        except OSError as error:
+            return f"`{name}` could not be looked up ({error.strerror or type(error).__name__})"
+    if moves_a_submodule:
+        problem = _submodule_recursion_problem(root)
+        if problem is not None:
+            return problem
+    problem = _untracked_content(root, list(dict.fromkeys(in_the_way)))
+    if problem is not None:
+        return problem
+    return _touched_local_changes(root, touched)
+
+
+def _submodule_recursion_problem(root: Path) -> str | None:
+    """Why a switch in ``root`` may recurse into the submodules it moves, or None.
+
+    Only ``submodule.recurse`` unset or false is no recursion: git then leaves each
+    submodule's working tree alone. Any other value, or a git failure, is a reason.
+    """
+    setting = run_git(
+        root, "config", "--type=bool", "--get", _SUBMODULE_RECURSE_KEY, timeout=Timeout.GIT_CONTEXT
+    )
+    if setting.returncode == _CONFIG_KEY_ABSENT and not setting.stdout.strip():
+        return None
+    if setting.returncode == 0 and setting.stdout.strip() == _CONFIG_FALSE:
+        return None
+    return (
+        f"`{_SUBMODULE_RECURSE_KEY}` makes the switch write inside a submodule it moves, "
+        "which this check does not read"
+    )
+
+
+def _touched_local_changes(root: Path, names: list[str]) -> str | None:
+    """Why any path the switch touches holds a local change, or None.
+
+    Git refuses most such switches, but not all: a staged edit on a path the target
+    removes was dropped (review fuzz, seed 777). So every touched path must be clean
+    against ``HEAD`` in the working tree and in the index, and carry a plain index
+    entry (an assume-unchanged or skip-worktree flag hides a change from ``git diff``).
+
+    Git matches each pathspec against every index entry, so past a few names one
+    whole-tree listing, matched here, is far cheaper than naming them all.
+    """
+    if len(names) > _NAMED_PATHSPECS_LIMIT:
+        return _touched_local_changes_whole_tree(root, names)
+    for start, end in _chunk_bounds(names):
+        chunk = names[start:end]
+        for compared, where in ((("diff",), "unstaged"), (("diff", "--cached"), "staged")):
+            diff = run_git(
+                root,
+                _LITERAL_PATHSPECS,
+                *compared,
+                "--quiet",
+                "--no-ext-diff",
+                _HEAD,
+                _OPTIONS_END,
+                *chunk,
+                timeout=Timeout.GIT_CONTEXT,
+            )
+            if diff.returncode == _DIFF_DIFFERS:
+                return f"a path the switch writes or removes holds {where} changes"
+            if diff.returncode != _DIFF_CLEAN:
+                return f"git could not compare the paths the switch touches for {where} changes"
+        tags = run_git(
+            root,
+            _LITERAL_PATHSPECS,
+            "ls-files",
+            "-v",
+            "-z",
+            _OPTIONS_END,
+            *chunk,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if tags.returncode != 0:
+            return "git could not list the index entries the switch touches"
+        for record in tags.stdout.split(_RECORD_SEPARATOR):
+            if record and not record.startswith(_PLAIN_CACHED_TAG):
+                return f"`{record[2:]}` carries an index flag that hides its changes from git diff"
+    return None
+
+
+def _touched_local_changes_whole_tree(root: Path, names: list[str]) -> str | None:
+    """:func:`_touched_local_changes` read from whole-tree listings, for a long ``names``.
+
+    A listed path counts for a name when it is that name or lies under it, which is how
+    the literal pathspec ``name`` would have matched it.
+    """
+    touched = set(names)
+
+    def under_a_touched_name(path: str) -> bool:
+        parts = path.split(_PATH_SEPARATOR)
+        return any(
+            _PATH_SEPARATOR.join(parts[:depth]) in touched for depth in range(1, len(parts) + 1)
+        )
+
+    for compared, where in ((("diff",), "unstaged"), (("diff", "--cached"), "staged")):
+        listed = run_git(
+            root,
+            *compared,
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-relative",
+            _HEAD,
+            _OPTIONS_END,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listed.returncode != 0:
+            return f"git could not compare the paths the switch touches for {where} changes"
+        if any(
+            under_a_touched_name(path) for path in listed.stdout.split(_RECORD_SEPARATOR) if path
+        ):
+            return f"a path the switch writes or removes holds {where} changes"
+    tags = run_git(root, "ls-files", "-v", "-z", timeout=Timeout.GIT_CONTEXT)
+    if tags.returncode != 0:
+        return "git could not list the index entries the switch touches"
+    for record in tags.stdout.split(_RECORD_SEPARATOR):
+        if record and not record.startswith(_PLAIN_CACHED_TAG) and under_a_touched_name(record[2:]):
+            return f"`{record[2:]}` carries an index flag that hides its changes from git diff"
+    return None
+
+
+def _paths_in_the_way(root: Path, name: str, *, added: bool) -> list[str]:
+    """The local paths writing ``name`` under ``root`` would replace (lstat errors raise).
+
+    A non-directory parent (lstat: a symlink is not a directory) is replaced to make room;
+    so is the path itself when it is ``added`` or is locally a directory. A modified or
+    retyped path that is a local file is tracked, and git refuses to drop a change to it.
+    """
+    parts = name.split(_PATH_SEPARATOR)
+    for depth in range(1, len(parts) + 1):
+        prefix = _PATH_SEPARATOR.join(parts[:depth])
+        try:
+            mode = (root / prefix).lstat().st_mode
+        except FileNotFoundError:
+            # Nothing there, so nothing below it either: the switch only creates.
+            return []
+        if depth < len(parts):
+            if not stat.S_ISDIR(mode):
+                return [prefix]
+        elif added or stat.S_ISDIR(mode):
+            return [prefix]
+    return []
+
+
+def _untracked_content(root: Path, names: list[str]) -> str | None:
+    """Why any of ``names`` holds content git does not track (ignored included), or None.
+
+    Git refuses to replace a modified tracked file, so only what it does not track is at
+    risk: ``git ls-files --others`` with no exclude options lists untracked and ignored
+    files alike. Asked in chunks, so a long list is never one oversized command.
+    """
+    for start, end in _chunk_bounds(names):
+        chunk = names[start:end]
+        listed = run_git(
+            root,
+            _LITERAL_PATHSPECS,
+            "ls-files",
+            "-z",
+            "--others",
+            _OPTIONS_END,
+            *chunk,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listed.returncode != 0:
+            return "git could not list what the switch would replace"
+        untracked = [entry for entry in listed.stdout.split(_RECORD_SEPARATOR) if entry]
+        if untracked:
+            return (
+                f"`{untracked[0]}` is local content git does not track, which the switch replaces"
+            )
+    return None
 
 
 class _CheckoutUnproven(Exception):
@@ -1100,9 +2091,48 @@ def _index_records(directory: Path, name: str) -> list[_IndexEntry]:
     return entries
 
 
-def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
-    """Every index entry ``name`` names, each a plain merged entry, else _CheckoutUnproven."""
-    entries = _index_records(directory, name)
+def _index_records_by_name(directory: Path, names: list[str]) -> dict[str, list[_IndexEntry]]:
+    """The index entries each literal pathspec in ``names`` matches, else _CheckoutUnproven.
+
+    One ``ls-files`` call per chunk of names rather than one per name. A pathspec
+    ``d`` matches ``d`` itself and everything under ``d/``, so each entry is filed
+    under every name in its chunk that is the entry's path or one of its parents.
+    """
+    unique = list(dict.fromkeys(names))
+    found: dict[str, list[_IndexEntry]] = {name: [] for name in unique}
+    for start, end in _chunk_bounds(unique):
+        chunk = unique[start:end]
+        asked = set(chunk)
+        listed = run_git(
+            directory,
+            _LITERAL_PATHSPECS,
+            "ls-files",
+            "--stage",
+            "-v",
+            "-z",
+            _OPTIONS_END,
+            *chunk,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listed.returncode != 0:
+            raise _CheckoutUnproven(f"git could not list `{chunk[0]}` in the index")
+        for record in listed.stdout.split(_RECORD_SEPARATOR):
+            if not record:
+                continue
+            parsed = _INDEX_RECORD.fullmatch(record)
+            if parsed is None:
+                raise _CheckoutUnproven(f"git's index listing for `{chunk[0]}` could not be read")
+            entry = _IndexEntry(**parsed.groupdict())
+            parts = entry.path.split(_PATH_SEPARATOR)
+            for depth in range(1, len(parts) + 1):
+                prefix = _PATH_SEPARATOR.join(parts[:depth])
+                if prefix in asked:
+                    found[prefix].append(entry)
+    return found
+
+
+def _plain_index_entries(entries: list[_IndexEntry]) -> list[_IndexEntry]:
+    """``entries``, each a plain merged entry, else _CheckoutUnproven."""
     for entry in entries:
         if entry.tag != _PLAIN_CACHED_TAG:
             raise _CheckoutUnproven(
@@ -1114,18 +2144,24 @@ def _index_entries(directory: Path, name: str) -> list[_IndexEntry]:
     return entries
 
 
-def _parent_problem(directory: Path, name: str) -> str | None:
+def _parents(name: str) -> list[str]:
+    """Every proper parent prefix of the relative path ``name``, shallowest first."""
+    parts = name.split(_PATH_SEPARATOR)
+    return [_PATH_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts))]
+
+
+def _parent_problem(directory: Path, name: str, index: dict[str, list[_IndexEntry]]) -> str | None:
     """Why a parent of ``name`` would be replaced to make room for it, or None.
 
     Restoring ``d/x`` first removes whatever sits at ``d`` when it is not a directory,
     so every parent prefix must be absent or a real directory (lstat: a symlink counts
-    as not a directory), and no parent may itself be an index entry. An lstat error
-    other than absence propagates as OSError, which the caller turns into a denial.
+    as not a directory), and no parent may itself be an index entry (``index`` holds
+    the entries each parent matches). An lstat error other than absence propagates as
+    OSError, which the caller turns into a denial.
     """
-    parts = name.split(_PATH_SEPARATOR)
-    parents = [_PATH_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts))]
+    parents = _parents(name)
     for parent in parents:
-        if any(entry.path == parent for entry in _index_records(directory, parent)):
+        if any(entry.path == parent for entry in index[parent]):
             return f"`{parent}` is a file in the index, so restoring `{name}` would replace it"
     for parent in parents:
         try:
@@ -1140,11 +2176,10 @@ def _parent_problem(directory: Path, name: str) -> str | None:
 
 
 def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]) -> str | None:
-    """Why the existing ``name`` holds bytes or a mode its index entry lacks, or None.
+    """Why the existing ``name`` is not one regular tracked file with its index mode, or None.
 
-    ``git diff`` compares after clean filters and line-ending conversion and may ignore
-    the executable bit, so the raw bytes are hashed with no filters and compared with
-    the index object, and the executable bit with the index mode.
+    ``git diff`` may ignore the executable bit, so it is compared with the index mode
+    here; the raw bytes are compared by :func:`_raw_bytes_problem`.
     """
     target = directory / name
     if not path_is_file(target, unreadable_means=False):
@@ -1153,19 +2188,37 @@ def _present_file_problem(directory: Path, name: str, entries: list[_IndexEntry]
         return f"`{name}` is untracked work the checkout would overwrite"
     if len(entries) != 1 or entries[0].path != name:
         return f"`{name}` is not one tracked file"
-    entry = entries[0]
-    executable = _REGULAR_FILE_MODES.get(entry.mode)
+    executable = _REGULAR_FILE_MODES.get(entries[0].mode)
     if executable is None:
         return f"`{name}` is not a regular file in the index"
     if bool(target.stat().st_mode & _EXECUTABLE_BITS) != executable:
         return f"`{name}` has an executable bit the index does not record"
-    hashed = run_git(
-        directory, "hash-object", "--no-filters", _OPTIONS_END, name, timeout=Timeout.GIT_CONTEXT
-    )
-    if hashed.returncode != 0:
-        return f"git could not hash `{name}`"
-    if hashed.stdout.strip() != entry.object_id:
-        return f"`{name}` holds bytes (line endings or filtered content) the index does not"
+    return None
+
+
+def _raw_bytes_problem(directory: Path, present: list[tuple[str, _IndexEntry]]) -> str | None:
+    """Why any present file holds raw bytes its index object lacks, or None.
+
+    ``git diff`` compares after clean filters and line-ending conversion, so the raw
+    bytes are hashed with no filters, one ``hash-object`` call per chunk of files, and
+    each hash is compared with the index object.
+    """
+    for start, end in _chunk_bounds([name for name, _ in present]):
+        chunk = present[start:end]
+        hashed = run_git(
+            directory,
+            "hash-object",
+            "--no-filters",
+            _OPTIONS_END,
+            *(name for name, _ in chunk),
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        hashes = hashed.stdout.split()
+        if hashed.returncode != 0 or len(hashes) != len(chunk):
+            return f"git could not hash `{chunk[0][0]}`"
+        for (name, entry), found in zip(chunk, hashes, strict=True):
+            if found != entry.object_id:
+                return f"`{name}` holds bytes (line endings or filtered content) the index does not"
     return None
 
 
@@ -1190,9 +2243,13 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
         return f"`{directory}` is not in a git working tree git could read"
     top_level = Path(top.stdout.strip()).resolve()
     base = directory.resolve()
+    index = _index_records_by_name(
+        directory, [*paths, *(parent for name in paths for parent in _parents(name))]
+    )
+    present: list[tuple[str, _IndexEntry]] = []
     for name in paths:
         target = directory / name
-        parent_problem = _parent_problem(directory, name)
+        parent_problem = _parent_problem(directory, name, index)
         if parent_problem is not None:
             return parent_problem
         if target.is_symlink():
@@ -1201,28 +2258,39 @@ def _checkout_paths_proof(directory: Path, paths: tuple[str, ...]) -> str | None
             return f"`{name}` passes through a symlink"
         if not path_is_relative_to(base / name, top_level):
             return f"`{name}` is outside the repository"
-        entries = _index_entries(directory, name)
+        entries = _plain_index_entries(index[name])
         if path_exists(target, unreadable_means=True):
             problem = _present_file_problem(directory, name, entries)
             if problem is not None:
                 return problem
+            present.append((name, entries[0]))
         elif entries:
             return f"`{name}` is deleted in the working tree but still in the index"
-    for staged, where in ((False, "unstaged"), (True, "staged")):
-        args = ("diff", "--cached") if staged else ("diff",)
-        diff = run_git(
-            directory,
-            _LITERAL_PATHSPECS,
-            *args,
-            "--quiet",
-            _OPTIONS_END,
-            *paths,
-            timeout=Timeout.GIT_CONTEXT,
-        )
-        if diff.returncode == _DIFF_DIFFERS:
-            return f"`{' '.join(paths)}` holds {where} changes the checkout would discard"
-        if diff.returncode != _DIFF_CLEAN:
-            return f"git could not compare `{' '.join(paths)}` for {where} changes"
+    problem = _raw_bytes_problem(directory, present)
+    if problem is not None:
+        return problem
+    return _paths_local_changes(directory, paths)
+
+
+def _paths_local_changes(directory: Path, paths: tuple[str, ...]) -> str | None:
+    """Why any of ``paths`` holds a staged or unstaged change, asked in chunks, or None."""
+    for start, end in _chunk_bounds(paths):
+        chunk = paths[start:end]
+        for staged, where in ((False, "unstaged"), (True, "staged")):
+            args = ("diff", "--cached") if staged else ("diff",)
+            diff = run_git(
+                directory,
+                _LITERAL_PATHSPECS,
+                *args,
+                "--quiet",
+                _OPTIONS_END,
+                *chunk,
+                timeout=Timeout.GIT_CONTEXT,
+            )
+            if diff.returncode == _DIFF_DIFFERS:
+                return f"`{' '.join(chunk)}` holds {where} changes the checkout would discard"
+            if diff.returncode != _DIFF_CLEAN:
+                return f"git could not compare `{' '.join(chunk)}` for {where} changes"
     return None
 
 
@@ -1401,7 +2469,7 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
 _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     (
         RuleID.GIT_RESET_HARD,
-        "`git reset --hard`",
+        "`git reset --hard` / `git reset --merge`",
         "Permanently destroys all uncommitted changes",
         "Ask the user to run it manually",
     ),
@@ -1527,6 +2595,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             priority=Priority.DESTRUCTIVE_GIT,
             tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
+        # The last unpatterned reading, per thread: (hook input, command, rule ids). The
+        # hook input is held, not its id, so a later event can never alias it.
+        self._reading = threading.local()
         # Compile the single source-of-truth mapping once, preserving order.
         self._pattern_reasons: tuple[tuple[re.Pattern[str], str], ...] = tuple(
             (re.compile(pattern, re.IGNORECASE), reason)
@@ -1612,12 +2683,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         pattern of `git log --grep='...'` is data for that command and is
         blanked before the quotes are removed.
         """
-        return [
-            remove_word_quoting(segment)
-            for segment in command_position_argument_segments(
-                blank_printed_substitutions(command), awk_dollar_is_data=True
-            )
-        ]
+        return list(_scan_segments(command))
 
     def _segment_matches(self, pattern: re.Pattern[str], command: str) -> bool:
         """Whether ``pattern`` matches inside any one command segment."""
@@ -1651,6 +2717,124 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         )
         return list(dict.fromkeys(matched))
 
+    def _rule_ids(self, command: str, hook_input: dict[str, Any]) -> list[str]:
+        """Every distinct RuleID the command meets: the patterns, then the readings."""
+        return list(
+            dict.fromkeys(
+                [*self._match_rule_ids(command), *self._unpatterned_rule_ids(command, hook_input)]
+            )
+        )
+
+    def _unpatterned_rule_ids(self, command: str, hook_input: dict[str, Any]) -> list[str]:
+        """The path-restoring checkouts and restores no pattern can see (N764, N765).
+
+        No `--` (`git checkout <commit> <path>`, `git checkout <path>`) and paths supplied
+        by another command (`xargs`, `find -exec`, a pipe) leave the text with nothing a
+        pattern can key on. Each git run is read in command position only, so a mention
+        inside `echo` or a message is never one.
+
+        The command is read twice: as parsed, and segment by segment with in-word quoting
+        removed, so a quoted subcommand (`git check""out`) is read too. A segment holding
+        a backtick is also read with each backtick as the command boundary it is, so a
+        run inside `` `...` `` is judged as one inside `$( )` is. A segment whose text
+        holds a checkout or restore at command position that its parse does not yield as
+        a git run (`env -S "git checkout X p"`, one quoted word) is unreadable, and is
+        judged; the judgment reads the original command and denies a shape it cannot
+        read as one plain checkout or restore.
+
+        The answer is kept for the hook call it was computed for, so ``handle()`` reuses
+        the reading ``matches()`` made instead of asking git again.
+        """
+        blanked = blank_printed_substitutions(command)
+        kept = getattr(self._reading, "entry", None)
+        if kept is not None and kept[0] is hook_input and kept[1] == blanked:
+            return list(kept[2])
+        found = self._read_unpatterned(
+            blanked, hook_input, hidden=bool(_HIDDEN_STATEMENT.search(command))
+        )
+        self._reading.entry = (hook_input, blanked, tuple(found))
+        return found
+
+    def _read_unpatterned(
+        self, blanked: str, hook_input: dict[str, Any], *, hidden: bool
+    ) -> list[str]:
+        """:meth:`_unpatterned_rule_ids` without its per-hook-call reuse.
+
+        ``hidden``: the original command text holds a substitution or here-string, which
+        may run a statement no step shows (see :func:`_stale_readings`).
+        """
+        # The linear text scan first: a command with no checkout or restore at command
+        # position is never parsed, so a hostile `echo` body costs no more than before.
+        in_text: dict[str, set[str]] = {}
+        for segment in self._scan_target(blanked):
+            variants = [segment]
+            if _BACKTICK in segment:
+                variants.append(segment.replace(_BACKTICK, _BACKTICK_AS_BOUNDARY))
+            for variant in variants:
+                named = {
+                    subcommand
+                    for subcommand, position in _COMMAND_POSITION_RUN.items()
+                    if position.search(variant)
+                }
+                if named:
+                    in_text.setdefault(variant, set()).update(named)
+        if not in_text:
+            return []
+        found: set[str] = set()
+        steps = simple_commands(blanked)
+        stale = _stale_readings(steps, hidden=hidden)
+        # A segment is parsed with no `cd` before it, so its copy of a run the full parse
+        # already holds (in the directory the chain reached) is not read a second time.
+        parsed_words = {step.words for step in steps}
+        for variant, named in in_text.items():
+            parsed = simple_commands(variant)
+            steps.extend(step for step in parsed if step.words not in parsed_words)
+            yielded = {step.git.subcommand for step in parsed if step.git is not None}
+            found.update(_UNPATTERNED_RULES[subcommand] for subcommand in named - yielded)
+        cwd: Path | None = None
+        try:
+            cwd = self._cwd(hook_input)
+        except RuntimeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="with no starting directory a one-operand checkout cannot be told from "
+                "a path restore, so it is read as a restore and judged (fail closed)",
+            )
+        # A run is read once per distinct spelling and place, never per repetition.
+        seen: set[tuple[tuple[str, ...], tuple[str | None, ...], bool]] = set()
+        readings = 0
+        # One deadline bounds every git call of the reading, however many runs the command
+        # holds; a call past it reports a timeout, which reads as a possible restore.
+        with git_deadline(time.monotonic() + _CHECKOUT_PROOF_BUDGET):
+            for step in steps:
+                run = step.git
+                if run is None or run.subcommand not in _UNPATTERNED_RULES:
+                    continue
+                rule = _UNPATTERNED_RULES[run.subcommand]
+                key = (step.words, run.directory, run.moves_certain)
+                # A repeat is skipped only when nothing before it may have changed what it
+                # reads: `git checkout x && git checkout x` reads x after the first moved HEAD.
+                is_stale = stale.get(id(step), stale[_ANY_STATEMENT])
+                if rule in found or (key in seen and not is_stale):
+                    continue
+                seen.add(key)
+                position = _COMMAND_POSITION_RUN[run.subcommand]
+                if not self._segment_matches(position, shlex.join(step.words)):
+                    continue
+                fed = _feeding_problem(step) is not None
+                if run.subcommand == _RESTORE:
+                    if fed and _restores_worktree(run.arguments):
+                        found.add(rule)
+                    continue
+                if fed or is_stale:
+                    found.add(rule)
+                    continue
+                readings += 1
+                if readings > _MAX_SWITCH_READINGS or _undashed_may_restore(run, cwd):
+                    found.add(rule)
+        return [rule for rule in (RuleID.GIT_CHECKOUT_DISCARD, RuleID.GIT_RESTORE) if rule in found]
+
     @staticmethod
     def _cwd(hook_input: dict[str, Any]) -> Path:
         """The directory the command starts in.
@@ -1670,6 +2854,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             return False
 
         if self._match_reason(command) is not None:
+            return True
+        if self._unpatterned_rule_ids(command, hook_input):
             return True
         # An `rm -r` of a worktree matches no git pattern; only its evacuation makes it ours.
         return self._evacuation(command, hook_input) is not None
@@ -1758,7 +2944,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         note = self._evacuation_note(found)
         if self._branches.evacuation.mode != _MODE_WARN:
             return self._deny(RuleID.GIT_EVACUATE_THEN_DESTROY, note, hook_input)
-        if not self._match_rule_ids(command):
+        if not self._rule_ids(command, hook_input):
             return GatingResult(decision=Decision.ALLOW, context=[note])
         result = self._judge(command, hook_input)
         if result.decision == Decision.ALLOW:
@@ -1771,7 +2957,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         command = blank_printed_substitutions(command)
         # Both matches() and handle() consume the same ordered mapping, so they
         # can never drift on which pattern matched first.
-        rule_ids = self._match_rule_ids(command)
+        rule_ids = self._rule_ids(command, hook_input)
         # A forced branch delete, a worktree removal, a restore of empty files and a
         # checkout of paths with no local state have a safe case: when nothing can be lost they are allowed. They are judged only when
         # no other rule matched too, so a compound command cannot ride the allowance,
@@ -1882,7 +3068,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git checkout -- <file>` | Discards all local changes to that file (ONE plain "
             "`git checkout <commit> -- <paths>` is allowed when every literal path is absent "
             "from the worktree and the index or is a tracked regular file, and `git diff` and "
-            "`git diff --cached` are clean for them: nothing local is lost) |\n"
+            "`git diff --cached` are clean for them: nothing local is lost. The undashed "
+            "`git checkout <commit> <paths>` is judged the same way when the commit names no "
+            "path; `git checkout <path>` and a checkout fed paths by `xargs`, `find -exec` or a "
+            "pipe are denied) |\n"
             "| `git restore <file>` | Discards local changes (`--staged` alone, with or without "
             "`--source`, is allowed; `--staged --worktree` is not. A restore whose every "
             "named file is a tracked, regular, zero-byte file is allowed too: it discards no content) |\n"
@@ -1938,8 +3127,16 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "already guarded: `git checkout -- <file>` was blocked while "
             "`git checkout -f` was not, and the reflog rules matter because the "
             "safety advice above ('can recover later') assumes a reflog still "
-            "exists. Branch-switching itself is never blocked — `git switch main`, "
-            "`git checkout -b feature` and `git gc --auto` all pass.\n\n"
+            "exists. A branch switch that loses nothing passes: `git switch main`, "
+            "`git checkout main`, `git checkout -b feature` and `git gc --auto` all do. "
+            "A one-operand `git checkout <name>` is denied when it would write over an "
+            "untracked or ignored file, when it may recurse into a submodule it moves, "
+            "and when `<name>` is not a plain ASCII ref spelling that names one branch, "
+            "tag or commit (or one standard remote-tracking branch). It is also denied "
+            "after any statement in the same command that may change refs, HEAD, config "
+            "or the environment first (`git fetch && git checkout x`, `git branch t f && "
+            "git checkout t`), and in a command holding a `$(...)`, backtick, `<(...)` "
+            "or `<<<`: run the switch as its own command.\n\n"
             "If the user needs to run one of these, ask them to do it manually. "
             "Do not attempt to work around the block.\n\n"
             "**Each command is judged on its own, and on its own TOKENS.** A chained "

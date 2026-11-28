@@ -1,5 +1,7 @@
 """Comprehensive tests for DestructiveGitHandler."""
 
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +38,17 @@ _DECLARED_RULE_IDS = {
     RuleID.GIT_EVACUATE_THEN_DESTROY,
     RuleID.GIT_DESTRUCTIVE_UNREADABLE,
 }
+
+
+def _repository_with_main(parent: Path) -> Path:
+    """A throwaway repository whose `main` branch has one commit."""
+    repo = parent / "repo"
+    identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(
+        ["git", *identity, "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True
+    )
+    return repo
 
 
 @pytest.fixture(autouse=True)
@@ -362,10 +375,23 @@ class TestDestructiveGitHandler:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -n"}}
         assert handler.matches(hook_input) is False
 
-    def test_matches_git_checkout_branch_returns_false(self, handler):
-        """Should NOT match 'git checkout' to switch branches."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout main"}}
+    def test_matches_git_checkout_branch_returns_false(self, handler, tmp_path):
+        """Should NOT match 'git checkout' to switch branches.
+
+        One operand is a switch only when git can say it is a commit (N764: `git checkout
+        <path>` restores from the index), so the check needs a repository to ask.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git checkout main"},
+            "cwd": str(_repository_with_main(tmp_path)),
+        }
         assert handler.matches(hook_input) is False
+
+    def test_matches_a_one_operand_checkout_with_no_known_directory(self, handler):
+        """With no directory, `git checkout main` cannot be told from `git checkout a.txt`."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout main"}}
+        assert handler.matches(hook_input) is True
 
     def test_matches_git_restore_staged_returns_false(self, handler):
         """Should NOT match 'git restore --staged' (safe)."""
@@ -572,7 +598,7 @@ class TestDestructiveGitHandler:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is True, f"Should block: {cmd}"
 
-    def test_allows_all_safe_commands(self, handler):
+    def test_allows_all_safe_commands(self, handler, tmp_path):
         """Should allow all safe git commands."""
         safe_commands = [
             "git status",
@@ -591,8 +617,9 @@ class TestDestructiveGitHandler:
             "git push",
             "git branch -d feature",
         ]
+        repo = _repository_with_main(tmp_path)
         for cmd in safe_commands:
-            hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(repo)}
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
 
 
