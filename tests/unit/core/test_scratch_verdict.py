@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core import scratch_verdict as verdict_mod
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
 from claude_code_hooks_daemon.core.scratch_references import References
 from claude_code_hooks_daemon.core.scratch_repos import RepoFindings, RepoKind
 from claude_code_hooks_daemon.core.scratch_verdict import (
+    KEEP_MARKER,
     NOT_CLASSIFIED,
     NOT_EVALUATED,
     TRACKED_UNKNOWN,
@@ -17,10 +21,14 @@ from claude_code_hooks_daemon.core.scratch_verdict import (
     Proof,
     RepositoryMarker,
     Verdict,
+    has_keep_marker,
+    keep_marker_present,
+    marker_keeps,
     uncovered_nodes,
 )
 from claude_code_hooks_daemon.core.scratch_verdict import judge as real_judge
-from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
+from claude_code_hooks_daemon.core.scratch_verdict import marker_keeps as real_marker_keeps
+from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind, kind_of
 from claude_code_hooks_daemon.utils.bounded_walk import Bounded, finished, stopped
 
 _DUE = EntryAge(age_seconds=48 * 3600.0, due=True, lifetime_exceeded=None)
@@ -93,17 +101,83 @@ class TestKept:
         walk = stopped(_stats(Node("e", D, 0), Node("e/.scratch-keep", F, 1)), "deadline")
         assert _judge(walk) is Verdict.STUCK
 
+    @pytest.mark.parametrize("kind", [F, L, D, S])
+    def test_a_marker_of_any_kind_at_the_top_keeps(self, kind: NodeKind) -> None:
+        """N767: a link, a directory or a special file named the marker keeps too."""
+        walk = finished(_stats(Node("e", D, 0), Node("e/.scratch-keep", kind, 0)))
+        assert _judge(walk) is Verdict.KEPT
+
+    def test_a_marker_below_the_top_does_not_keep(self) -> None:
+        walk = finished(
+            _stats(Node("e", D, 0), Node("e/sub", D, 0), Node("e/sub/.scratch-keep", F, 1))
+        )
+        assert _judge(walk) is not Verdict.KEPT
+
+
+class TestOneKeepMarkerRule:
+    """N767: one rule decides the marker, from a walk node or from a fresh ``lstat``."""
+
+    @pytest.mark.parametrize("kind", list(NodeKind))
+    def test_any_node_named_the_marker_keeps(self, kind: NodeKind) -> None:
+        assert marker_keeps(kind) is True
+
+    def test_no_node_does_not_keep(self) -> None:
+        assert marker_keeps(None) is False
+
+    def test_absent_is_not_kept(self, tmp_path: Path) -> None:
+        assert keep_marker_present(tmp_path) is False
+
     @pytest.mark.parametrize(
-        "node",
+        ("shape", "kind"),
         [
-            Node("e/.scratch-keep", L, 0),
-            Node("e/.scratch-keep", D, 0, empty=True),
-            Node("e/sub/.scratch-keep", F, 1),
+            ("regular", NodeKind.FILE),
+            ("symlink", NodeKind.SYMLINK),
+            ("dangling", NodeKind.SYMLINK),
+            ("loop", NodeKind.SYMLINK),
+            ("directory", NodeKind.DIRECTORY),
         ],
     )
-    def test_only_a_regular_file_at_the_top_counts(self, node: Node) -> None:
-        walk = finished(_stats(Node("e", D, 0), Node("e/sub", D, 0), node))
-        assert _judge(walk) is not Verdict.KEPT
+    def test_each_shape_is_read_without_following_and_keeps(
+        self, tmp_path: Path, shape: str, kind: NodeKind
+    ) -> None:
+        marker = tmp_path / KEEP_MARKER
+        if shape == "regular":
+            marker.write_text("hold\n")
+        elif shape == "symlink":
+            (tmp_path / "target").write_text("hold\n")
+            marker.symlink_to(tmp_path / "target")
+        elif shape == "dangling":
+            marker.symlink_to(tmp_path / "nowhere")
+        elif shape == "loop":
+            marker.symlink_to(marker)
+        else:
+            marker.mkdir()
+        assert kind_of(os.lstat(marker).st_mode) is kind
+        assert keep_marker_present(tmp_path) is True
+
+    @pytest.mark.parametrize("error", [PermissionError, NotADirectoryError, OSError])
+    def test_an_lstat_failing_other_than_absent_keeps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: type[OSError]
+    ) -> None:
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            raise error("cannot read")
+
+        seen: list[NodeKind | None] = []
+
+        def spy(kind: NodeKind | None) -> bool:
+            seen.append(kind)
+            return real_marker_keeps(kind)
+
+        monkeypatch.setattr(os, "lstat", lstat)
+        monkeypatch.setattr(verdict_mod, "marker_keeps", spy)
+        assert keep_marker_present(tmp_path) is True
+        assert seen == [NodeKind.UNREAD]
+
+    @pytest.mark.parametrize("kind", [F, L, D, S])
+    def test_the_walk_and_the_lstat_agree(self, kind: NodeKind) -> None:
+        """``has_keep_marker`` reads a walked node through the same rule."""
+        stats = _stats(Node("e", D, 0), Node("e/.scratch-keep", kind, 0))
+        assert has_keep_marker(stats) is marker_keeps(kind)
 
 
 class TestLivenessUnknown:

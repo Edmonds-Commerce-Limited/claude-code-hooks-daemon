@@ -86,7 +86,7 @@ from claude_code_hooks_daemon.core.scratch_session import (
     remove_empty_session_dir,
 )
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport, pending_verdict
-from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER, Verdict
+from claude_code_hooks_daemon.core.scratch_verdict import Verdict, keep_marker_present
 from claude_code_hooks_daemon.utils.birth_time import BirthStamp, birth_stamp
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
@@ -454,20 +454,10 @@ def _session_kept(session_dir: Path) -> bool:
     """True when the session holds a ``.scratch-keep`` now, or that cannot be read (fail closed).
 
     Read again at apply time: a marker added after the classification still
-    holds every child. Any ``lstat`` failure but "absent" counts as kept, and a
-    link counts like the file.
+    holds every child. Decided by :func:`keep_marker_present`, the rule the
+    classification and an entry root's marker are read by.
     """
-    try:
-        os.lstat(session_dir / KEEP_MARKER)
-    except FileNotFoundError:
-        return False
-    except OSError as exc:
-        log_and_continue(
-            _LOG,
-            exc,
-            reason=f"{session_dir}: keep marker unreadable, read as kept (fail closed)",
-        )
-    return True
+    return keep_marker_present(session_dir)
 
 
 def apply_sessions(

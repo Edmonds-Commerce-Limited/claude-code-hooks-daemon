@@ -12,7 +12,7 @@ from a walk that did not finish:
    readable, or some pids were not), the walk did not finish, or a file has
    another name outside the entry. Nothing is concluded about an entry that
    was not read whole.
-3. KEPT: a regular ``.scratch-keep`` file directly in the entry (a human's
+3. KEPT: a ``.scratch-keep`` of any kind directly in the entry (a human's
    pin, R15; an agent may not create one, ``R-SCRATCH-KEEP-MARKER``). An
    agent's bounded pause is a keep on the ARCHIVE, not an entry verdict.
    Also STUCK, after KEPT: a repository in the entry could not be classified
@@ -47,16 +47,22 @@ from __future__ import annotations
 import dataclasses
 import enum
 import fnmatch
+import logging
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
 from claude_code_hooks_daemon.core.scratch_references import References
 from claude_code_hooks_daemon.core.scratch_repos import RepoFindings
-from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
+from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind, kind_of
 from claude_code_hooks_daemon.utils.bounded_walk import Bounded
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
+
+_LOG = logging.getLogger(__name__)
 
 #: Plan 00560's consumed message, body and journal shapes, plus log shapes (P1).
 CONSUMED_SHAPES: tuple[str, ...] = (
@@ -95,7 +101,8 @@ VENV_MARKER = "pyvenv.cfg"
 #: The rungs of the order not evaluated yet, in order.
 NOT_EVALUATED: tuple[str, ...] = ()
 
-#: A regular file of this name at the top of an entry pins it for ever (R15).
+#: A node of this name, of any kind, at the top of an entry or session directory
+#: pins it for ever (R15; :func:`marker_keeps`).
 KEEP_MARKER = ".scratch-keep"
 
 #: How many uncovered paths a judgement keeps, so a huge entry stays small in memory.
@@ -364,12 +371,50 @@ WITHIN_TTL = "within its TTL"
 TRACKED_UNKNOWN = "the project's tracked files could not be listed"
 
 
+def marker_keeps(kind: NodeKind | None) -> bool:
+    """The one keep-marker rule: a node named :data:`KEEP_MARKER` keeps, whatever its kind.
+
+    ``kind`` is what an ``lstat`` of ``<directory>/.scratch-keep`` found, or
+    None when nothing has that name. A regular file, a symlink (to a file,
+    dangling, or a loop), a directory, a special file, and a name that could
+    not be read (:attr:`NodeKind.UNREAD`) all keep: the marker is a human's pin
+    (R15), and a marker that cannot be read safely must never lead to an
+    archive. Used for an entry root (:func:`has_keep_marker`, from the walk)
+    and for a session directory (:func:`keep_marker_present`, a fresh read).
+    """
+    return kind is not None
+
+
+def keep_marker_present(directory: Path) -> bool:
+    """True when ``directory`` holds a keep marker now, by :func:`marker_keeps`.
+
+    Read by ``lstat``, so a link is never followed. Only ``FileNotFoundError``
+    means absent; any other failure is :attr:`NodeKind.UNREAD`, read as kept.
+    Not ``utils.path_predicates``: those follow links, so they would read a
+    dangling or looping marker as absent.
+    """
+    try:
+        kind = kind_of(os.lstat(directory / KEEP_MARKER).st_mode)
+    except FileNotFoundError:
+        return marker_keeps(None)
+    except OSError as exc:
+        log_and_continue(
+            _LOG,
+            exc,
+            reason=f"{directory}: keep marker unreadable, read as kept (fail closed)",
+        )
+        kind = NodeKind.UNREAD
+    return marker_keeps(kind)
+
+
 def has_keep_marker(stats: EntryStats) -> bool:
-    """True when the walk found a regular :data:`KEEP_MARKER` directly in the entry."""
+    """True when the walk found a node named :data:`KEEP_MARKER` directly in the entry.
+
+    Decided by :func:`marker_keeps`, the rule a session directory's marker is read by.
+    """
     wanted = f"{stats.name}/{KEEP_MARKER}"
-    return stats.kind is NodeKind.DIRECTORY and any(
-        node.path == wanted and node.kind is NodeKind.FILE for node in stats.nodes
-    )
+    found = next((node.kind for node in stats.nodes if node.path == wanted), None)
+    return marker_keeps(found)
 
 
 def judge(
@@ -495,5 +540,7 @@ __all__ = [
     "Verdict",
     "has_keep_marker",
     "judge",
+    "keep_marker_present",
+    "marker_keeps",
     "uncovered_nodes",
 ]

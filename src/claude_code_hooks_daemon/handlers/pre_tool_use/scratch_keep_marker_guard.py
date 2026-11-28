@@ -5,7 +5,10 @@ R15), so the marker is a human's decision. An agent that could write it could
 pin its own clutter past every TTL; one that could remove it could unpin a
 human's keep. So every write route is judged on the file NAME: `Write`/`Edit`,
 and a Bash command's redirects, `tee`, `cp`/`mv`/`install`/`dd`, `ln`, `touch`
-and `rm`, read by the shared write scan. Past that scan: a copy whose SOURCE
+and `rm`, read by the shared write scan. The sweep keeps on a marker of ANY
+kind, so a path naming the marker in any component is judged (a write below
+a marker directory creates it), and `mkdir`/`mkfifo`/`mknod` naming it are
+denied. Past that scan: a copy whose SOURCE
 is the marker into a directory (`cp .scratch-keep DIR/`), a shell `-c` body
 (scanned as a command of its own), and an interpreter (`python3 -c`, `perl -e`
 ...) whose code names the marker, which fails closed.
@@ -49,6 +52,8 @@ logger = logging.getLogger(__name__)
 #: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-scratch-keep"
 _COPY_VERBS: Final[frozenset[str]] = frozenset({"cp", "mv", "install", "ln"})
+#: Verbs that create a filesystem node the write scan does not report.
+_NODE_CREATORS: Final[frozenset[str]] = frozenset({"mkdir", "mkfifo", "mknod"})
 _INTERPRETER: Final[re.Pattern[str]] = re.compile(
     r"(?:python|pypy)[0-9.]*|perl|ruby|node|nodejs|deno|bun|php|lua|Rscript|osascript"
 )
@@ -72,14 +77,29 @@ _RULE = Rule(
         "Pinning an entry for ever is a human's decision (Plan 00627 R15): an\n"
         "agent's keep would outlive every TTL, and an agent's removal would undo\n"
         "a human's keep. Every write route naming the file is denied, including\n"
-        "Bash redirects, tee, cp/mv/install, ln, touch and rm."
+        "Bash redirects, tee, cp/mv/install, ln, touch and rm, and mkdir, mkfifo\n"
+        "or mknod of it: a directory or other node named the marker keeps too."
     ),
 )
 
 
 def _names_marker(path: str) -> bool:
-    """Whether ``path``'s final component is the keep marker."""
-    return PurePosixPath(path.rstrip("/") or "/").name == KEEP_MARKER
+    """Whether any component of ``path`` is the keep marker.
+
+    The sweep keeps on a marker of any kind (``scratch_verdict.marker_keeps``),
+    so a write below a marker directory creates or changes the marker too:
+    ``Write`` makes missing parents.
+    """
+    return KEEP_MARKER in PurePosixPath(path).parts
+
+
+def _creates_marker_node(words: list[str]) -> bool:
+    """``mkdir``/``mkfifo``/``mknod`` with an operand naming the marker, any component.
+
+    A directory, FIFO or device node named the marker keeps an entry like the
+    file does, and ``mkdir -p a/.scratch-keep/b`` makes it on the way.
+    """
+    return words[0] in _NODE_CREATORS and any(_names_marker(word) for word in words[1:])
 
 
 def _copies_marker_into_directory(words: list[str], cwd: str | None) -> bool:
@@ -137,7 +157,11 @@ def _statement_routes_write_marker(
     Raises :class:`UnparseableCommand` where the command cannot be lexed.
     """
     for words in peeled_statements(command):
-        if _copies_marker_into_directory(words, cwd) or _interpreter_names_marker(words):
+        if (
+            _copies_marker_into_directory(words, cwd)
+            or _interpreter_names_marker(words)
+            or _creates_marker_node(words)
+        ):
             return True
         bodies = nested_command_strings(
             SimpleCommand(
@@ -200,7 +224,10 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
             "A scratch entry holding a `.scratch-keep` file is never swept, so an agent "
             "may not create, change or remove that file: `Write`/`Edit`, and a Bash "
             "redirect, `tee`, `cp`/`mv`/`install`, `ln`, `touch` or `rm` naming it, are "
-            "denied (R-SCRATCH-KEEP-MARKER). A destination built from a variable that "
+            "denied (R-SCRATCH-KEEP-MARKER). A directory, FIFO or device node of that "
+            "name keeps the entry too, so `mkdir` (also `mkdir -p` of a path below it), "
+            "`mkfifo` and `mknod` naming it are denied, as is any write to a path below "
+            "it. A destination built from a variable that "
             "names the marker is denied too, as are `cp .scratch-keep DIR/`, a `sh -c` "
             "body that writes it, and any `python3 -c`/`perl -e`/`node -e` code naming it. "
             "A script on disk that writes the marker, or a name assembled at run time, "
