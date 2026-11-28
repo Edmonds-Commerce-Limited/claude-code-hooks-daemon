@@ -110,6 +110,12 @@ def _agent(
     return path
 
 
+def _raw_agent(transcript: str, agent_id: str, content: bytes, *, silent_for: float = 10.0) -> None:
+    path = _subagents(transcript) / f"agent-{agent_id}.jsonl"
+    path.write_bytes(content)
+    os.utime(path, (NOW - silent_for, NOW - silent_for))
+
+
 def _touch(repo: Path, branch: str, agent: str) -> None:
     _git(repo, "config", "--add", f"branch.{branch}.{TOUCHED_KEY}", f"{SESSION}:{agent}")
 
@@ -201,17 +207,46 @@ class TestALiveAuthorKeepsTheBranchInFlight:
         assert "abandoned" not in state
         assert "blocks" not in state
 
-    def test_an_unpushed_branch_with_a_live_author_is_not_left_unpushed(
+    def test_only_the_dirty_finding_goes_in_flight_the_leads_unpushed_commit_is_held(
+        self, repo: Path, untracked: Path, transcript: str
+    ) -> None:
+        """Review blocker 1: a push never touches the agent's files, so it is still owed."""
+        _dirty_shared_branch(repo, WORKER)
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "lead work")
+        _agent(transcript, WORKER)
+        decision = _decide(repo, untracked, transcript=transcript)
+        assert decision.reason is not None
+        assert f"  - {BRANCH}: commits no remote holds" in decision.reason
+        assert f"git push -u origin {BRANCH}" in decision.reason
+        assert "dirty worktree" not in decision.reason
+        assert "add -A" not in decision.reason
+        assert any(BRANCH in line for line in _in_flight_lines(decision))
+
+    def test_an_unpushed_branch_with_a_live_author_is_held_exactly_as_without_one(
         self, repo: Path, untracked: Path, transcript: str
     ) -> None:
         _unpushed_branch(repo, "feat-a", WORKER)
+        without = _decide(repo, untracked)
         _agent(transcript, WORKER)
-        decisions = [
-            _decide(repo, untracked, transcript=transcript) for _ in range(MAX_STOP_BLOCKS + 1)
-        ]
-        assert all(decision.reason is None for decision in decisions)
-        assert not any("left unpushed" in line for line in decisions[-1].context)
-        assert _state(untracked)["in_flight"] == ["feat-a"]
+        with_agent = _decide(repo, untracked, transcript=transcript)
+        assert with_agent.reason is not None
+        assert with_agent.reason == (without.reason or "").replace("Block 1 of", "Block 2 of")
+        assert not _in_flight_lines(with_agent)
+
+    def test_the_in_flight_record_is_cleared_by_a_stop_with_nothing_left_behind(
+        self, repo: Path, untracked: Path, transcript: str
+    ) -> None:
+        """Review minor 5: the record must not outlive the work it describes."""
+        _dirty_shared_branch(repo, WORKER)
+        _agent(transcript, WORKER)
+        assert _decide(repo, untracked, transcript=transcript).reason is None
+        assert _state(untracked)["in_flight"] == [BRANCH]
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "agent work")
+        _git(repo, "push", "-q")
+        decision = _decide(repo, untracked, transcript=transcript)
+        assert decision.reason is None
+        assert "in_flight" not in _state(untracked)
 
     def test_the_in_flight_record_is_cleared_once_the_agent_is_gone(
         self, repo: Path, untracked: Path, transcript: str
@@ -299,6 +334,78 @@ class TestEveryOtherCaseIsTodaysBehaviour:
         monkeypatch.setattr("claude_code_hooks_daemon.utils.session_load.read_tail", refuse)
         self._held_as_before(_decide(repo, untracked, transcript=transcript))
 
+    def test_a_transcript_dated_past_the_clock_skew_in_the_future(
+        self, repo: Path, untracked: Path, transcript: str
+    ) -> None:
+        """Review blocker 2: a negative idle time must not stretch the bound for ever."""
+        _dirty_shared_branch(repo, WORKER)
+        _agent(transcript, WORKER, silent_for=-(Timeout.TRANSCRIPT_CLOCK_SKEW + 1))
+        self._held_as_before(_decide(repo, untracked, transcript=transcript))
+
+    def test_a_transcript_a_little_ahead_within_the_clock_skew_is_still_in_flight(
+        self, repo: Path, untracked: Path, transcript: str
+    ) -> None:
+        _dirty_shared_branch(repo, WORKER)
+        _agent(transcript, WORKER, silent_for=-(Timeout.TRANSCRIPT_CLOCK_SKEW - 1))
+        assert _decide(repo, untracked, transcript=transcript).reason is None
+
+    @pytest.mark.parametrize(
+        "content",
+        [b"", b"\x00\xff\xfe garbage \x80" * 1000, b"{not json\n" * 1000],
+        ids=["empty", "binary", "invalid-json"],
+    )
+    def test_a_transcript_with_no_real_record(
+        self, repo: Path, untracked: Path, transcript: str, content: bytes
+    ) -> None:
+        """Review blocker 3: only a parsed prompt makes a record-less transcript a fresh agent."""
+        _dirty_shared_branch(repo, WORKER)
+        _raw_agent(transcript, WORKER, content)
+        self._held_as_before(_decide(repo, untracked, transcript=transcript))
+
+    def test_a_fresh_agent_with_only_its_prompt_is_in_flight(
+        self, repo: Path, untracked: Path, transcript: str
+    ) -> None:
+        _dirty_shared_branch(repo, WORKER)
+        _raw_agent(transcript, WORKER, b'{"type":"user","message":{"content":"go"}}\n')
+        assert _decide(repo, untracked, transcript=transcript).reason is None
+
+    def test_a_symlinked_transcript(
+        self, repo: Path, untracked: Path, transcript: str, tmp_path: Path
+    ) -> None:
+        """Review minor 4: a link to another session's live transcript is not this agent."""
+        _dirty_shared_branch(repo, WORKER)
+        foreign = tmp_path / "other-session" / "subagents" / f"agent-{WORKER}.jsonl"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text(_agent(transcript, WORKER).read_text())
+        os.utime(foreign, (NOW - 10, NOW - 10))
+        link = _subagents(transcript) / f"agent-{WORKER}.jsonl"
+        link.unlink()
+        link.symlink_to(foreign)
+        self._held_as_before(_decide(repo, untracked, transcript=transcript))
+
+    def test_a_spent_read_budget_reads_nothing_and_judges_as_before(
+        self,
+        repo: Path,
+        untracked: Path,
+        transcript: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Review minor 7: the reads are bounded, and an unread agent is not live."""
+        _dirty_shared_branch(repo, WORKER)
+        _agent(transcript, WORKER)
+        monkeypatch.setattr(Timeout, "STOP_GUARD_LIVE_AGENT_READ_BUDGET", 0)
+        self._held_as_before(_decide(repo, untracked, transcript=transcript))
+
+    def test_the_leads_own_touch_never_matches_a_transcript_named_with_no_id(
+        self, repo: Path, untracked: Path, transcript: str
+    ) -> None:
+        """Review minor 6: the main thread's empty touch id is not a sub-agent's."""
+        _dirty_shared_branch(repo)
+        _agent(transcript, "")
+        decision = _decide(repo, untracked, transcript=transcript)
+        assert decision.reason is not None
+        assert not _in_flight_lines(decision)
+
     def test_a_live_agent_of_another_session_is_not_this_sessions(
         self, repo: Path, untracked: Path, transcript: str
     ) -> None:
@@ -359,6 +466,66 @@ class TestNoStagingEverythingWhileAnotherAgentIsLive:
         assert "feat-b" in decision.reason
         assert f"  - {BRANCH}:" not in decision.reason
         assert any(BRANCH in line for line in _in_flight_lines(decision))
+
+
+class TestOnlyTheTranscriptsThatCanMatterAreRead:
+    """Review minor 7: reads are filtered to the branch's authors before any is made."""
+
+    @staticmethod
+    def _spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        from claude_code_hooks_daemon.utils import session_load
+
+        read: list[str] = []
+        real = session_load.read_tail
+
+        def spy(path: Path, **kwargs: Any) -> Any:
+            read.append(path.name)
+            return real(path, **kwargs)
+
+        monkeypatch.setattr(session_load, "read_tail", spy)
+        return read
+
+    def test_an_in_flight_author_is_the_only_transcript_read(
+        self,
+        repo: Path,
+        untracked: Path,
+        transcript: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _dirty_shared_branch(repo, WORKER)
+        _agent(transcript, WORKER)
+        for index in range(5):
+            _agent(transcript, f"abystander{index:011d}")
+        read = self._spy(monkeypatch)
+        assert _decide(repo, untracked, transcript=transcript).reason is None
+        assert read == [f"agent-{WORKER}.jsonl"]
+
+    def test_the_remedy_check_stops_at_the_first_live_bystander(
+        self,
+        repo: Path,
+        untracked: Path,
+        transcript: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _dirty_shared_branch(repo)
+        for index in range(5):
+            _agent(transcript, f"abystander{index:011d}", silent_for=10.0 + index)
+        read = self._spy(monkeypatch)
+        reason = _decide(repo, untracked, transcript=transcript).reason
+        assert reason is not None and "add -A" not in reason
+        assert read == ["agent-abystander00000000000.jsonl"]
+
+    def test_a_clean_stop_reads_nothing(
+        self,
+        repo: Path,
+        untracked: Path,
+        transcript: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _agent(transcript, WORKER)
+        read = self._spy(monkeypatch)
+        assert _decide(repo, untracked, transcript=transcript).reason is None
+        assert read == []
 
 
 class TestASubAgentStop:

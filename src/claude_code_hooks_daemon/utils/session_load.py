@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_tiers import resolve_model_family
 from claude_code_hooks_daemon.utils.spend_ledger import (
@@ -79,44 +80,43 @@ def live_agents(
     now: float | None = None,
     finished: frozenset[str] = frozenset(),
     strict: bool = False,
+    only: frozenset[str] | None = None,
+    limit: int | None = None,
+    deadline: float | None = None,
 ) -> list[LiveAgent]:
     """Agents in ``directory`` that wrote recently and have not ended their turn.
 
     ``finished`` holds agent ids or names Claude Code reported as no longer
     running; they are excluded. A recent transcript that cannot be read is
     counted live with an unknown (zero) context, unless ``strict``: a caller
-    that lets a stop through on the answer counts only what it could read (a
-    fresh agent with no assistant record yet still counts). Ordered by idle
-    time, most recent first.
+    that lets a stop through on the answer counts only what it could read. A
+    strict reading also refuses a symlinked transcript, one dated more than
+    ``Timeout.TRANSCRIPT_CLOCK_SKEW`` ahead of ``now``, and a record-less file
+    (a fresh agent counts only once its prompt is on disk).
+
+    Reads are bounded: ``only`` (agent ids) filters before any transcript is
+    read, candidates are read most recent first, and reading stops once
+    ``limit`` agents are live or the monotonic ``deadline`` has passed; an
+    agent left unread is not counted. Ordered by idle time, most recent first.
     """
     moment = time.time() if now is None else now
+    candidates = _candidates(
+        directory,
+        moment=moment,
+        liveness_seconds=liveness_seconds,
+        finished=finished,
+        strict=strict,
+        only=only,
+    )
     found: list[LiveAgent] = []
-    try:
-        entries = list(os.scandir(directory))
-    except OSError:
-        return []
-    for entry in entries:
-        if not (entry.name.startswith("agent-") and entry.name.endswith(".jsonl")):
-            continue
+    for idle, agent_id, name, path in candidates:
+        if limit is not None and len(found) >= limit:
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.debug("live_agents: read budget spent; %s and later are not counted", path)
+            break
         try:
-            idle = moment - entry.stat().st_mtime
-        except OSError as exc:
-            log_and_continue(
-                logger,
-                exc,
-                reason="a transcript that vanished or cannot be stat'ed after the directory scan has no write time, so it is not counted live",
-                level=logging.DEBUG,
-            )
-            continue
-        if idle > liveness_seconds:
-            continue
-        path = Path(entry.path)
-        agent_id = entry.name.removeprefix("agent-").removesuffix(".jsonl")
-        name = agent_name_of(path)
-        if agent_id in finished or (name and name in finished):
-            continue
-        try:
-            reading = read_tail(path)
+            reading = read_tail(path, fresh_needs_prompt=strict)
         except (OSError, NoUsageInTail) as exc:
             if strict:
                 log_and_continue(
@@ -145,6 +145,59 @@ def live_agents(
             )
         )
     return sorted(found, key=lambda agent: (agent.idle_seconds, agent.label))
+
+
+def _candidates(
+    directory: Path,
+    *,
+    moment: float,
+    liveness_seconds: float,
+    finished: frozenset[str],
+    strict: bool,
+    only: frozenset[str] | None,
+) -> list[tuple[float, str, str, Path]]:
+    """``(idle, agent id, name, path)`` of every transcript worth reading, most recent first.
+
+    Only directory and stat data and the agent's name are used here, so nothing
+    is read from a transcript that cannot count.
+    """
+    try:
+        entries = list(os.scandir(directory))
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a sub-agent directory that cannot be listed holds no agent this reading can see, so none is live",
+            level=logging.DEBUG,
+        )
+        return []
+    found: list[tuple[float, str, str, Path]] = []
+    for entry in entries:
+        if not (entry.name.startswith("agent-") and entry.name.endswith(".jsonl")):
+            continue
+        agent_id = entry.name.removeprefix("agent-").removesuffix(".jsonl")
+        if only is not None and agent_id not in only:
+            continue
+        try:
+            if strict and entry.is_symlink():
+                continue
+            idle = moment - entry.stat().st_mtime
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a transcript that vanished or cannot be stat'ed after the directory scan has no write time, so it is not counted live",
+                level=logging.DEBUG,
+            )
+            continue
+        if idle > liveness_seconds or (strict and idle < -Timeout.TRANSCRIPT_CLOCK_SKEW):
+            continue
+        path = Path(entry.path)
+        name = agent_name_of(path)
+        if agent_id in finished or (name and name in finished):
+            continue
+        found.append((idle, agent_id, name, path))
+    return sorted(found, key=lambda candidate: (candidate[0], candidate[1]))
 
 
 def finished_task_ids(tasks: object) -> frozenset[str] | None:

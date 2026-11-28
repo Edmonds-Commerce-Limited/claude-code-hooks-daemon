@@ -259,6 +259,12 @@ class Timeout:
     # the bound is the longest foreground Bash call plus a turn around it; an
     # agent silent for longer has died or been killed, and its branch is judged.
     STOP_GUARD_AGENT_SILENCE = BASH_MAX // MILLISECONDS_PER_SECOND + REQUEST_LONG
+    # N758: the wall-clock seconds the stop guard spends reading sub-agent
+    # transcripts; an agent left unread is not live, so the stop is judged.
+    STOP_GUARD_LIVE_AGENT_READ_BUDGET = 2.0
+    # N758: a transcript written up to this many seconds "in the future" is
+    # clock skew; further ahead, a strict liveness reading does not trust it.
+    TRANSCRIPT_CLOCK_SKEW = 5
 
     # Plan 00474 N753: one wall-clock bound on every git call of the proof that a
     # `git checkout <commit> -- <paths>` has nothing local to lose. Past it the

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.utils import session_load
 from claude_code_hooks_daemon.utils.session_load import (
     LiveAgent,
     finished_agents,
@@ -19,6 +22,7 @@ from claude_code_hooks_daemon.utils.session_load import (
     refresh_live_snapshot,
     write_live_snapshot,
 )
+from claude_code_hooks_daemon.utils.transcript_tail import TailReading
 
 NOW = 1_800_000_000.0
 
@@ -134,6 +138,70 @@ class TestStrictLiveness:
         os.utime(path, (NOW - 1, NOW - 1))
         live = live_agents(directory, liveness_seconds=120, now=NOW, strict=True)
         assert [entry.agent_id for entry in live] == ["afresh"]
+
+    @pytest.mark.parametrize(
+        "content", [b"", b"\x00\xff garbage", b"{not json\n"], ids=["empty", "binary", "invalid"]
+    )
+    def test_a_transcript_with_no_real_record_is_not_live_when_strict(
+        self, tmp_path: Path, content: bytes
+    ) -> None:
+        directory = tmp_path / "subagents"
+        directory.mkdir()
+        path = directory / "agent-anone.jsonl"
+        path.write_bytes(content)
+        os.utime(path, (NOW - 1, NOW - 1))
+        assert live_agents(directory, liveness_seconds=120, now=NOW, strict=True) == []
+        assert [a.agent_id for a in live_agents(directory, liveness_seconds=120, now=NOW)] == [
+            "anone"
+        ]
+
+    def test_a_transcript_dated_past_the_clock_skew_is_not_live_when_strict(
+        self, tmp_path: Path
+    ) -> None:
+        directory = tmp_path / "subagents"
+        ahead = Timeout.TRANSCRIPT_CLOCK_SKEW
+        agent(directory, "afar", "", context=1, stopped=False, age=-(ahead + 1))
+        agent(directory, "anear", "", context=1, stopped=False, age=-(ahead - 1))
+        live = live_agents(directory, liveness_seconds=120, now=NOW, strict=True)
+        assert [entry.agent_id for entry in live] == ["anear"]
+
+    def test_a_symlinked_transcript_is_not_live_when_strict(self, subagents: Path) -> None:
+        link = subagents / "agent-alink.jsonl"
+        link.symlink_to(subagents / "agent-aworker-1-0000000000000001.jsonl")
+        strict = live_agents(subagents, liveness_seconds=120, now=NOW, strict=True)
+        assert "alink" not in [entry.agent_id for entry in strict]
+        assert "alink" in [
+            entry.agent_id for entry in live_agents(subagents, liveness_seconds=120, now=NOW)
+        ]
+
+
+class TestBoundedReads:
+    def test_only_names_the_agents_read(
+        self, subagents: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        read: list[str] = []
+        real = session_load.read_tail
+
+        def spy(path: Path, *, fresh_needs_prompt: bool = False) -> TailReading | None:
+            read.append(path.name)
+            return real(path, fresh_needs_prompt=fresh_needs_prompt)
+
+        monkeypatch.setattr(session_load, "read_tail", spy)
+        live = live_agents(
+            subagents, liveness_seconds=120, now=NOW, only=frozenset({"aworker-2-0000000000000002"})
+        )
+        assert [entry.label for entry in live] == ["worker-2"]
+        assert read == ["agent-aworker-2-0000000000000002.jsonl"]
+
+    def test_limit_stops_at_that_many_live_agents_most_recent_first(self, subagents: Path) -> None:
+        live = live_agents(subagents, liveness_seconds=120, now=NOW, limit=1)
+        assert [entry.label for entry in live] == ["worker-1"]
+
+    def test_a_passed_deadline_reads_nothing(self, subagents: Path) -> None:
+        live = live_agents(
+            subagents, liveness_seconds=120, now=NOW, strict=True, deadline=time.monotonic() - 1
+        )
+        assert live == []
 
 
 class TestFinishedTaskIds:
